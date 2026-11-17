@@ -62,6 +62,13 @@ means exactly what it says.
 | File | What is in it |
 | --- | --- |
 | `bin/keepawake` | the holder detector, `status`, manual extension |
+| `keepawake/hold_loop.py` | the holding side's loop on Linux and macOS: the state read every 30 seconds, the lock taken and dropped, the log lines `status` greps |
+| `bin/keepawake-linux` | the holding side on plain Linux: a `systemd-inhibit` lock |
+| `bin/keepawake-macos` | the holding side on macOS: an IOKit power assertion, and the lid through `pmset` where the sudoers rule allows it |
+| `launchd/keepawake.plist`, `launchd/keepawake.hold.plist` | macOS's agents: the minute's count and the holding side |
+| `launchd/keepawake.telegram.plist` | macOS's agent for the bot, written once the token and the chat id are there |
+| `launchd/keepawake.code-server.plist` | macOS's agent for code-server, loaded and started only by the bot |
+| `keepawake/units.py` | what a button runs for a service: `systemctl --user` on Linux, `launchctl` for the same service's agent on macOS |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
 | `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks; when its own code or sclaude's library changes and the new code imports, it runs itself again in place (the sclaude runs it started live on) |
 | `keepawake/botapi.py` | Telegram's Bot API client with its retries, and the bot's profile |
@@ -84,7 +91,7 @@ means exactly what it says.
 | `keepawake/i18n.py` | the bot's strings in Russian and English |
 | `keepawake/docs.py` | the docs the bot prints on a button |
 | `bin/code-server-start` | opens the repository chosen in the bot |
-| `bin/code-server-proxy` | the localhost forward, address from code-server's config |
+| `bin/code-server-proxy` | the localhost forward on Linux and WSL, address from code-server's config |
 | `windows/KeepAwake.ps1` | `SetThreadExecutionState` and the polling loop on the Windows side |
 | `windows/KeepAwake.vbs` | a hidden manual start, should it be needed |
 | `bin/keepawake-windows` | starts and stops the Windows side from WSL |
@@ -118,6 +125,77 @@ button.
 that, a press on yesterday's notification would extend the hold at an arbitrary
 moment the next day; the window is now checked, and a stale button answers with
 an alert.
+
+## On a Mac
+
+**The counting is bin/keepawake's, as everywhere; the holding is a power
+assertion.** `keepawake-macos` runs the loop Linux's holder runs
+(`keepawake/hold_loop.py`) and, while the state says to hold, keeps an IOKit
+assertion, `PreventUserIdleSystemSleep`, made through ctypes rather than by a
+`caffeinate` child. Made directly it carries a name of its own, so
+`pmset -g assertions` says "keepawake: work in progress" rather than one more
+"caffeinate command-line tool"; and macOS drops it when the process ends,
+however it ends, which is the fail-safe a `systemd-inhibit` child gives Linux
+and the stale-state check gives Windows. The display is not held: the screen
+goes dark by its own settings while the machine works on.
+
+**The lid takes root, so it is a choice.** No assertion a user's process can
+take holds a MacBook with its lid shut; `pmset -a disablesleep 1` does, and
+only root can run it. The optional sudoers rule `install.sh` offers lets the
+person's user run exactly that and its `0`; the holder turns it on with the
+hold and off with the release. Unlike the assertion, the setting outlives the
+process, so the holder leaves a mark that it turned it on
+(`~/.local/state/keepawake/.macos-lid`) and, finding the mark at start — a
+holder killed mid-hold, launchd bringing it back — turns it off before
+anything else, once it holds the single-instance lock: a second holder that
+loses the lock, started while the first still runs, leaves the lid alone. A
+`disablesleep` the person set themselves carries no mark and
+is left alone. The undo the installer prints turns it off too: with the rule
+gone the holder could not, and a Mac left with it on would never sleep.
+
+**A tty's atime means nothing there.** macOS moves no stamp of a terminal on a
+read: typing changes its mtime by the echo alone, exactly as a program's
+output does. So the bot's "is the person at the terminal that asked"
+(`at_terminal`) cannot be read from the tty. What the Mac does keep is how
+long its own keyboard and mouse have been idle — the HID system's idle time
+(`input_idle` in `procinfo.sh`, `asks.input_idle`) — and `at_terminal` reads
+that instead. It cannot tell one window from another, and a terminal reached
+over SSH from the phone is not seen at all; a question asked there is told
+with sound, which is the side to be wrong on. The "an hour without input"
+count takes the HID idle time and the terminals' mtime alone, so work over
+SSH from the phone with the lid closed is still someone there; the price is
+that a forgotten tab still printing counts as someone too.
+
+**The rest is the platform's own.** The other processes and their ports come
+from `ps` and `lsof` through `procinfo.sh` (a dev server started by hand,
+outside sclaude, does not hold a Mac: it has no log of sclaude's to watch,
+and macOS keeps no count of the bytes a process wrote); the services are launchd agents in the user's session, and
+code-server counts as keepawake's own agent, the one the bot starts and
+stops (one started with `brew services` does not hold the Mac); an SSH session needs
+Remote Login, whose job launchd keeps in the system domain while it is on;
+since OpenSSH 9.8 a session is an `sshd-session` process, on Linux too.
+
+**The bot names services as systemd does, and units.py translates.** Every
+button that starts, stops or restarts something — code-server, the bot itself,
+the phone's gate — and `sclaude-notify`'s check that the bot is up ask
+`keepawake/units.py`, which on a Mac runs `launchctl` for the agent of the same
+service: `kickstart` to start (loading an agent written but not loaded first, as
+systemctl finds a unit file on its own), `kickstart -k` to restart,
+`kill TERM` to stop, and `launchctl print` for whether it runs. The proxy asks
+it the same about code-server.
+
+**No EnvironmentFile.** launchd has no way to read the token's file into the
+environment, and a plist in `LaunchAgents` is readable by everyone, so the bot
+reads `~/.config/keepawake/env` itself when its environment has no token; the
+mode check on that file is the same.
+
+**code-server is started by the bot alone.** Its agent has neither `RunAtLoad`
+nor `KeepAlive`: launchd's way of restarting a failed job, `SuccessfulExit`,
+runs the job at every login to learn how it exits, which would bring up a
+server meant to start on a button and to stay down after its idle timeout. Nor
+is there a `localhost:8080` forward: it serves a Windows browser outside the
+tailnet, and a Mac's browser opens code-server at its own address, which the
+bot's links and the proxy's Code Server redirect read from its config.
 
 ## Driving sclaude from the bot
 

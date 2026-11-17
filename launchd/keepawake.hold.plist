@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's keepawake-linux.service: keepawake's holding side, the power
+  assertion bin/keepawake-macos keeps while the state says to hold. One of the
+  extras (install.sh's extras); written into ~/Library/LaunchAgents by
+  install.sh (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put
+  in.
+
+  An agent of the user's session, not a daemon: the assertion needs no root,
+  and the lid's pmset runs through the sudoers rule, where there is one.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>keepawake.hold</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/keepawake-macos</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- As Restart=on-failure: brought back after a crash, not after a stop.
+       Unloading the agent sends SIGTERM, on which the loop lets go of the
+       assertion and the lid and exits cleanly; a second copy finds the lock
+       taken and exits cleanly too. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/keepawake-hold.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/keepawake-hold.log</string>
+</dict>
+</plist>

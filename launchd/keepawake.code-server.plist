@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's code-server.service: VS Code in the browser, for working from a
+  phone, opened on the repository chosen in the bot (bin/code-server-start).
+  One of the extras (install.sh's extras), written into ~/Library/LaunchAgents
+  by install.sh (sclaude/lib/core/launchd.sh) with the home, PATH and the log directory
+  put in. bind-addr, the password and the idle timeout are in
+  ~/.config/code-server/config.yaml, as on Linux.
+
+  Loaded, never started by loading: no RunAtLoad and no KeepAlive. It goes out
+  by itself after its idle timeout, and bringing it back would defeat that; a
+  button in the bot starts it (`launchctl kickstart`, keepawake/units.py), and
+  `launchctl kill TERM` stops it. KeepAlive's SuccessfulExit, launchd's
+  Restart=on-failure, would start it at every login, launchd running a job
+  once to learn how it exits. Linux restarts a failed server for a boot that
+  came before the network; here it is only ever started by hand, and a start
+  that fails is seen by whoever pressed.
+
+  No local forward, as code-server-local.socket is on Linux: that one is for a
+  Windows browser outside the tailnet, and a Mac's browser is on a machine in
+  it, so code-server opens at its own address.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>keepawake.code-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/code-server-start</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>Nice</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/code-server.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/code-server.log</string>
+</dict>
+</plist>

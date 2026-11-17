@@ -159,13 +159,17 @@ try:
         os.makedirs(os.path.dirname(fake))
         os.symlink(shutil.which("bash"), fake)
 
+        # The bench's session by its id; macOS's pgrep has no -s, and its
+        # process group, the same pid under start_new_session, stands in.
+        SESSION = "-g" if sys.platform == "darwin" else "-s"
+
         def tree_under(launcher):
             proc = subprocess.Popen([launcher, "-c", 'exec "$0" "$1"', node, spawner],
                                     cwd=repo, start_new_session=True) if launcher == "sh" else \
                 subprocess.Popen([launcher, "-c", '"$0" "$1"; :', node, spawner],
                                  cwd=repo, start_new_session=True)
             for _ in range(100):
-                kids = subprocess.run(["pgrep", "-s", str(proc.pid), "-f", "some server"],
+                kids = subprocess.run(["pgrep", SESSION, str(proc.pid), "-f", "some server"],
                                       capture_output=True, text=True).stdout.split()
                 if len(kids) >= 2:
                     break
@@ -173,7 +177,7 @@ try:
             return proc
 
         def stop(proc):
-            subprocess.run(["pkill", "-s", str(proc.pid)])
+            subprocess.run(["pkill", SESSION, str(proc.pid)])
             proc.wait()
 
         under_claude = tree_under(fake)
@@ -200,7 +204,7 @@ try:
              node, spawner], cwd=repo, start_new_session=True)
         try:
             for _ in range(100):
-                if len(subprocess.run(["pgrep", "-s", str(bash_tool.pid), "-f", "some server"],
+                if len(subprocess.run(["pgrep", SESSION, str(bash_tool.pid), "-f", "some server"],
                                       capture_output=True, text=True).stdout.split()) >= 2:
                     break
                 time.sleep(0.05)

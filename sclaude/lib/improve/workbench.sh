@@ -20,6 +20,9 @@
 # (sclaude_guard_args). Plan mode, as the retrospective: the person approves
 # what the session will do before it writes.
 
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 # Where a workshop is made: beside the checkout, under a name that does not
 # begin with the checkout's path — write-guard tells a command's targets by
 # the paths it names, and one naming the workshop would name the read-only
@@ -61,10 +64,9 @@ workbench_published() {
 # in it. A press never removes one under a live session.
 workbench_busy() {
   local wt="$1" cwd p
-  for p in /proc/[0-9]*/cwd; do
-    cwd="$(readlink "$p" 2>/dev/null)" || continue
+  while read -r p cwd; do
     [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && return 0
-  done
+  done < <(proc_cwds)
   return 1
 }
 

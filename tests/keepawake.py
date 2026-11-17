@@ -26,6 +26,11 @@ import threading
 import time
 import urllib.error
 
+# keepawake runs on Linux, WSL and macOS alike; what it asks about other
+# processes goes through procinfo, which the counters' cases stand in for.
+PROCINFO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "sclaude", "lib", "core", "procinfo.sh")
+
 # A tab opened by a press on the phone exports SCLAUDE_FROM_PHONE to every
 # session in it, and a test run there inherits it: questions then skip the
 # terminal, and the cases about the terminal fail. The bench is not that tab.
@@ -369,6 +374,40 @@ check("duplicates on one pty collapse",
 check("an unrelated process does not count",
       ssh_sessions([("bash", 900), ("sshd: ilia@pts/2", 900)]), 1)
 
+# And the detector itself, on the lines OpenSSH writes: since 9.8 a session is
+# a process of its own, sshd-session, which `pgrep -x sshd` did not find and
+# whose line does not start with "sshd:" — Debian 13 and macOS among others.
+# pgrep is faked with the processes, and their lines with them.
+def bash_ssh(procs):
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "keepawake")
+    fn = subprocess.run(["sed", "-n", "/^count_ssh() {/,/^}$/p", script],
+                        capture_output=True, text=True).stdout
+    root = tempfile.mkdtemp(prefix="keepawake-test-ssh-")
+    names = {}
+    for pid, (comm, line) in enumerate(procs, 100):
+        names.setdefault(comm, []).append(pid)
+        os.makedirs(os.path.join(root, str(pid)))
+        with open(os.path.join(root, str(pid), "cmdline"), "w") as fh:
+            fh.write(line.replace(" ", "\0"))
+    pgrep = ("pgrep() { local p; for n in ${2//|/ }; do case $n in %s esac; done; }"
+             % " ".join("%s) echo %s ;;" % (n, " ".join(map(str, pids)))
+                        for n, pids in names.items()))
+    cmdline = "proc_cmdline() { tr '\\0' ' ' < %s/$1/cmdline; }" % shlex.quote(root)
+    body = "\n".join([fn, pgrep, cmdline, "count_ssh"])
+    try:
+        return subprocess.run(["bash", "-c", body], capture_output=True, text=True).stdout.strip()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+check("an OpenSSH 10 session is counted",
+      bash_ssh([("sshd", "sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups"),
+                ("sshd-session", "sshd-session: ilia [priv]"),
+                ("sshd-session", "sshd-session: ilia@pts/0")]), "1")
+check("a session before OpenSSH 9.8 is counted still",
+      bash_ssh([("sshd", "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"),
+                ("sshd", "sshd: ilia [priv]"), ("sshd", "sshd: ilia@pts/2")]), "1")
+
 
 # --------------------------------------------------------- the bash counters
 
@@ -389,17 +428,17 @@ def bash_count(func, fake_procs="", snapshot=None, overrides=None):
                  "/^CLAUDE_PROJECTS=/p", "/^CLAUDE_FRESH_MINUTES=/p",
                  "/^CLAUDE_REMEMBER_MINUTES=/p",
                  "/^VSCODE_HISTORY=/p", "/^DEV_LOG_REL=/p",
-                 "/^have()/,/^}/p", "/^ppid_of/,/^}/p",
+                 "/^have()/,/^}/p",
                  # The soft holders' sign of activity: the previous run's
                  # snapshot and a comparison against it. Without them the count_
                  # functions do not run at all.
                  "/^read_snapshot/,/^}/p", "/^remember/,/^}/p",
-                 "/^grew/,/^}/p", "/^io_wchar_of/,/^}/p",
+                 "/^grew/,/^}/p",
                  "/^transcript_size/,/^}/p", "/^sclaude_states/,/^}/p",
                  "/^%s/,/^}/p" % func):
         parts.append(subprocess.run(["sed", "-n", expr, script],
                                     capture_output=True, text=True).stdout)
-    snippet = "\n".join(p for p in parts if p.strip())
+    snippet = "source %s\n" % shlex.quote(PROCINFO) + "\n".join(p for p in parts if p.strip())
     # A snapshot of our own rather than one shared with the real detector:
     # otherwise the count depends on what the timer saw a minute ago, and the
     # test flickers along with it.
@@ -563,44 +602,41 @@ check("two live sessions are counted separately", int(out), 2)
 #
 # We set a name with spaces through prctl(PR_SET_NAME): exec -a changes argv[0]
 # while it is comm that reaches stat, so faking it through argv will not do
-# here.
-spaced = subprocess.Popen([sys.executable, "-c", """
-import ctypes, time
-ctypes.CDLL("libc.so.6").prctl(15, b"npm exec chrome", 0, 0, 0)
-time.sleep(15)
-"""])
-# Waited for rather than slept on: with the suite running in parallel the
-# child took longer than a fixed pause to rename itself, and every check
-# below read the interpreter's own name.
-deadline = time.time() + 10
-comm = ""
-while time.time() < deadline:
+# here. The parent is procinfo's proc_parent now. Linux only: macOS has no
+# stat file to misread, and its ps gives the ppid as a field of its own.
+if os.path.isdir("/proc"):
+    spaced = subprocess.Popen([sys.executable, "-c",
+                               "import ctypes, time\n"
+                               "ctypes.CDLL('libc.so.6').prctl(15, b'npm exec chrome', 0, 0, 0)\n"
+                               "time.sleep(15)\n"])
+    # Waited for rather than slept on: with the suite running in parallel the
+    # child took longer than a fixed pause to rename itself, and every check
+    # below read the interpreter's own name.
+    deadline = time.time() + 10
+    comm = ""
+    while time.time() < deadline:
+        try:
+            comm = open("/proc/%d/comm" % spaced.pid).read().strip()
+        except OSError:
+            comm = ""
+        if comm == "npm exec chrome":
+            break
+        time.sleep(0.1)
     try:
-        comm = open("/proc/%d/comm" % spaced.pid).read().strip()
-    except OSError:
-        comm = ""
-    if comm == "npm exec chrome":
-        break
-    time.sleep(0.1)
-try:
-    check("comm really does contain spaces", comm, "npm exec chrome")
+        check("comm really does contain spaces", comm, "npm exec chrome")
 
-    snippet = subprocess.run(
-        ["sed", "-n", "/^ppid_of/,/^}/p",
-         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                      "bin", "keepawake")],
-        capture_output=True, text=True).stdout
-    got = subprocess.run(["bash", "-c", "%s\nppid_of %d" % (snippet, spaced.pid)],
-                         capture_output=True, text=True).stdout.strip()
-    check_true("ppid_of returns a number for a name with spaces", got.isdigit())
+        got = subprocess.run(["bash", "-c", "source %s\nproc_parent %d"
+                              % (shlex.quote(PROCINFO), spaced.pid)],
+                             capture_output=True, text=True).stdout.strip()
+        check("proc_parent returns the parent for a name with spaces", got, str(os.getpid()))
 
-    bad = subprocess.run(
-        ["bash", "-c", "awk '{print $4}' /proc/%d/stat" % spaced.pid],
-        capture_output=True, text=True).stdout.strip()
-    check_true("field 4 of stat is unreliable for such a name", not bad.isdigit())
-finally:
-    spaced.terminate()
-    spaced.wait(timeout=5)
+        bad = subprocess.run(
+            ["bash", "-c", "awk '{print $4}' /proc/%d/stat" % spaced.pid],
+            capture_output=True, text=True).stdout.strip()
+        check_true("field 4 of stat is unreliable for such a name", not bad.isdigit())
+    finally:
+        spaced.terminate()
+        spaced.wait(timeout=5)
 
 
 # ------------------------------------------- status in systemd's environment
@@ -2097,7 +2133,11 @@ if os.path.exists(cfg):
     # <a href>, which is additionally rejected with a 400 error.
     body = services.code_text()
     check("localhost is not used as a link", "localhost:8080" in body, False)
-    check_true("the local address is given as an IP", "127.0.0.1:8080" in body)
+    # The laptop's own link: the forward on Linux, code-server's own address
+    # on a Mac (whatever this machine's config says), an IP either way.
+    check_true("the local address is given as an IP",
+               services.code_local() in body
+               and re.fullmatch(r"http://\d+\.\d+\.\d+\.\d+:\d+", services.code_local()))
 
 os.environ.pop("KEEPAWAKE_BOT_TOKEN", None)
 os.environ.pop("KEEPAWAKE_CHAT_ID", None)
@@ -2150,9 +2190,12 @@ os.environ.pop("KEEPAWAKE_CHAT_ID", None)
 from keepawake import docs as docs_mod
 
 check_true("the sections are there", len(docs_mod.SECTIONS) >= 5)
-for key in docs_mod.SECTIONS:
-    for lang in ("ru", "en"):
+_saved_os = os.environ.get("SCLAUDE_OS")
+for system in ("linux", "macos"):
+    os.environ["SCLAUDE_OS"] = system
+    for key, lang in [(k, lg) for k in docs_mod.SECTIONS for lg in ("ru", "en")]:
         body_d = docs_mod.section(key, lang)
+        key = "%s/%s" % (system, key)
         check_true("%s/%s is non-empty" % (key, lang), len(body_d) > 200)
         # Telegram's ceiling is 4096 bytes, so we count in those rather than
         # characters: Cyrillic takes two apiece.
@@ -2167,6 +2210,17 @@ for key in docs_mod.SECTIONS:
         stripped = re.sub(r"</?(b|i|code)>", "", body_d)
         check("%s/%s has no unescaped brackets" % (key, lang),
               "<" in stripped.replace("&lt;", "").replace("&gt;", ""), False)
+        # A Mac's sections tell nothing of WSL's machinery; the WSL remarks
+        # 'why' carries are replaced word for word, and a reworded remark
+        # would slip through without this.
+        if system == "macos":
+            check("%s/%s says nothing of WSL's machinery" % (key, lang),
+                  [w for w in ("WSL", "systemctl", "journalctl", "systemd", "Windows") if w in body_d], [])
+if _saved_os is None:
+    os.environ.pop("SCLAUDE_OS", None)
+else:
+    os.environ["SCLAUDE_OS"] = _saved_os
+check_true("every Mac section is one of the sections", set(docs_mod.MAC_SECTIONS) <= set(docs_mod.SECTIONS))
 
 check("an unknown section does not bring it down", docs_mod.section("nope", "ru"), "")
 
@@ -2392,9 +2446,9 @@ check_true("VS Code's activity is measured by its edit journal",
 # by hand where there is no such log.
 check_true("the dev server's activity is measured by its log", "DEV_LOG_REL" in ka_body)
 check_true("the log is found by the process's working directory",
-           "/proc/$pid/cwd" in ka_body)
-check_true("without a log the counter of written bytes is left",
-           "io_wchar_of" in ka_body)
+           'proc_cwd "$pid"' in ka_body)
+check_true("without a log the counter of bytes put out is left",
+           'proc_output_bytes "$pid"' in ka_body)
 check_true("hard holders require no sign of activity",
            "grew" not in ka_body[ka_body.index("count_ssh()"):
                                  ka_body.index("CODE_HEARTBEAT=")])
@@ -2466,8 +2520,8 @@ def bash_dev(active, around):
     stubs = "\n".join([
         'DEV_PORT=3000',
         'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
-        'ss() { echo \'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=20))\'; }',
-        'readlink() { printf %%s %s; }' % shlex.quote(wt),
+        'ports_pids() { echo 3000 42; }',
+        'proc_cwd() { printf %%s %s; }' % shlex.quote(wt),
         'read_snapshot() { :; }',
         'grew() { return %d; }' % (0 if active else 1),
         'someone_around() { return %d; }' % (0 if around else 1),
@@ -2488,17 +2542,16 @@ def bash_devs(listeners):
     wt = tempfile.mkdtemp(prefix="keepawake-test-devs-")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     open(os.path.join(wt, ".sclaude/local/feature", "dev.log"), "w").write("GET / 200\n")
-    lines = "\n".join(
-        "LISTEN 0 511 0.0.0.0:%d 0.0.0.0:* users:((\"node\",pid=%d,fd=20))" % (port, pid)
-        for port, pid in listeners)
+    lines = "\n".join("%d %d" % (port, pid) for port, pid in listeners)
     stubs = "\n".join([
         'DEV_PORT=3000', 'DEV_PORT_FIRST=3100', 'DEV_PORT_LAST=3199',
         'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
-        "ss() { printf '%%s\\n' %s; }" % shlex.quote(lines),
+        "ports_pids() { printf '%%s\\n' %s; }" % shlex.quote(lines),
         # Only pid 42 is a feature's server with a log; any other has none.
-        'readlink() { case "$2" in /proc/42/*) printf %%s %s ;; *) printf %%s /nonexistent ;; esac; }'
+        'proc_cwd() { case "$1" in 42) printf %%s %s ;; *) printf %%s /nonexistent ;; esac; }'
         % shlex.quote(wt),
-        'io_wchar_of() { :; }',
+        'proc_cmdline() { echo node; }',
+        'proc_output_bytes() { :; }',
         'read_snapshot() { :; }',
         'grew() { return 0; }',
         'someone_around() { return 0; }',
@@ -2515,7 +2568,7 @@ check("a port that only looks like the range as text holds nothing",
 
 def bash_codesrv(around):
     stubs = "\n".join([
-        'systemctl() { return 0; }',
+        'service_up() { return 0; }',
         'someone_around() { return %d; }' % (0 if around else 1),
     ])
     return bash_fn(["count_code_server"], stubs, "count_code_server")
@@ -2523,6 +2576,35 @@ def bash_codesrv(around):
 
 check("the code-server service with a person present is a holder", bash_codesrv(True), "1")
 check("a running service does not hold by itself", bash_codesrv(False), "0")
+
+
+# Terminals inside code-server, by kinship in one snapshot of the processes.
+# The server is 500; its own children have no terminal — "?" from procps, "??"
+# from a Mac's ps — and must not count, or code-server alone holds the machine
+# hard for as long as it lives.
+def bash_code(none, terminals):
+    rows = ["1 0 0 %s" % none, "500 1 501 %s" % none,
+            "600 500 501 %s" % none, "601 500 501 %s" % none,
+            # A terminal outside code-server, and another user's under it.
+            "800 1 501 ttys001", "900 601 0 ttys009"]
+    for n, tty in enumerate(terminals):
+        # A shell in a code-server terminal, and a command it runs on the same tty.
+        rows += ["%d 601 501 %s" % (700 + 2 * n, tty), "%d %d 501 %s" % (701 + 2 * n, 700 + 2 * n, tty)]
+    calls = tempfile.mktemp(prefix="keepawake-test-ps-")
+    stubs = "\n".join([
+        'pgrep() { echo 500; }',
+        'id() { echo 501; }',
+        "ps() { echo >> %s; printf '%%s\\n' %s; }" % (calls, shlex.quote("\n".join(rows))),
+    ])
+    got = bash_fn(["count_code"], stubs, "count_code")
+    with open(calls) as fh:
+        return got, len(fh.read().splitlines())
+
+
+for none in ("?", "??"):
+    check("code-server's own children are no terminal (%r)" % none, bash_code(none, []), ("0", 1))
+    check("each code-server terminal counts once, by one ps (%r)" % none,
+          bash_code(none, ["ttys003", "ttys004"]), ("2", 1))
 
 
 # "Is there anyone here" means recent input or noticeable load. The first
@@ -2565,6 +2647,13 @@ check_true("busyness is taken from the claude count rather than from is_busy",
 
 import pty
 
+# macOS moves no stamp of a tty on a read, and the bot asks the HID system how
+# long the Mac's keyboard has been silent instead (asks.input_idle). The bench
+# stands in for the keyboard there: ageing the terminal is silence at it, typing
+# is a key pressed, and a prompt printed touches neither.
+HID_IDLE = [0]
+if sys.platform == "darwin":
+    asks.input_idle = lambda: HID_IDLE[0]
 
 
 class Pty(object):
@@ -2588,6 +2677,7 @@ class Pty(object):
         # way.
         old = time.time() - seconds
         os.utime(self.name, (old, old))
+        HID_IDLE[0] = seconds
 
     def prints(self, text):
         # We print from the process's side, as ask() itself does: we write to
@@ -2601,6 +2691,7 @@ class Pty(object):
 
     def types(self, text):
         os.write(self.master, text.encode())
+        HID_IDLE[0] = 0
         time.sleep(0.4)
 
     def __exit__(self, *exc):
@@ -4301,6 +4392,42 @@ check_true("without buttons there is a hint about a number",
            i18n.t("ask.pick") in asks.ask_text(
                "myapp", {"form": "pick:12", "prompt": "Which one?"}))
 
+# --- which processes are a running sclaude (SCLAUDE_PROC) ------------------
+#
+# sclaude starts through its `#!/usr/bin/env bash` line, so its command line
+# reads "bash /…/sclaude …". The pattern was `^sclaude`, which matched no
+# sclaude ever started that way, and a running step held nothing. Real
+# processes rather than strings: what pgrep sees is the point.
+_ka = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "keepawake")
+_pat = subprocess.run(["bash", "-c", "eval \"$(sed -n '/^SCLAUDE_PROC=/p' %s)\"; "
+                       "printf %%s \"$SCLAUDE_PROC\"" % shlex.quote(_ka)],
+                      capture_output=True, text=True).stdout
+_bin = tempfile.mkdtemp(prefix="keepawake-test-proc-")
+_procs = {}
+try:
+    for _name in ("sclaude", "sclaude-watch"):
+        with open(os.path.join(_bin, _name), "w") as _fh:
+            _fh.write("#!/usr/bin/env bash\nsleep 30\n")
+        os.chmod(os.path.join(_bin, _name), 0o755)
+        _procs[_name] = subprocess.Popen([os.path.join(_bin, _name), "new", "--issue", "7"])
+    # A command that only names sclaude in its arguments is not one.
+    _procs["grep"] = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
+                                       "sclaude"])
+    time.sleep(0.5)
+    _found = set(int(p) for p in subprocess.run(["pgrep", "-f", _pat], capture_output=True,
+                                                 text=True).stdout.split())
+    check("a running sclaude, started by its shebang, is found",
+          _procs["sclaude"].pid in _found, True)
+    check("sclaude-watch is not sclaude", _procs["sclaude-watch"].pid in _found, False)
+    check("a command naming sclaude in its arguments is not sclaude",
+          _procs["grep"].pid in _found, False)
+finally:
+    for _p in _procs.values():
+        _p.kill()
+        _p.wait()
+    shutil.rmtree(_bin, ignore_errors=True)
+
+
 # --- which sclaude features the detector sees (sclaude_states) -------------
 #
 # A step holds the machine awake only if its feature's state.json is found.
@@ -4426,9 +4553,11 @@ try:
     os.makedirs(_bin)
     with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
         fh.write(_notify_src)
-    # Beside a copy of the checkout, as the link resolves to one.
-    os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "keepawake"),
-               os.path.join(_tg_dir, "keepawake"))
+    # Beside a copy of the checkout, as the link resolves to one: keepawake/
+    # for the record, sclaude/ for macos.sh, which a Mac sources first.
+    for _part in ("keepawake", "sclaude"):
+        os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _part),
+                   os.path.join(_tg_dir, _part))
     _env = dict(os.environ, HOME=_home, KEEPAWAKE_TOPICS=os.path.join(_tg_dir, "topics"))
     subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt, "--as", "demo", "hello"],
                    env=_env, timeout=30)
@@ -4712,6 +4841,133 @@ try:
     check("a module broken mid-edit is not", telegramd.new_code_runs(_copy), False)
 finally:
     shutil.rmtree(_copy, ignore_errors=True)
+
+# --- the services the bot drives: systemd's units, launchd's agents ----------
+#
+# keepawake/units.py says what a button runs on each system; the bench plays
+# both wherever it runs (SCLAUDE_OS), with a launchctl and a systemctl that
+# answer as the bench says.
+
+from keepawake import units  # noqa: E402
+
+_stubs = tempfile.mkdtemp()
+_saved_env = {k: os.environ.get(k) for k in ("SCLAUDE_OS", "PATH", "HOME",
+                                              "KEEPAWAKE_BOT_TOKEN", "KEEPAWAKE_CHAT_ID")}
+try:
+    for _name in ("launchctl", "systemctl"):
+        with open(os.path.join(_stubs, _name), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ -f "%s/rc" ]] && exit "$(cat "%s/rc")"\n'
+                     '[[ -f "%s/out" ]] && cat "%s/out"\nexit 0\n' % ((_stubs,) * 4))
+        os.chmod(os.path.join(_stubs, _name), 0o755)
+    os.environ["PATH"] = _stubs + ":" + os.environ["PATH"]
+
+    def _answer(out="", rc=None):
+        with open(os.path.join(_stubs, "out"), "w") as fh:
+            fh.write(out)
+        if rc is None:
+            if os.path.exists(os.path.join(_stubs, "rc")):
+                os.remove(os.path.join(_stubs, "rc"))
+        else:
+            with open(os.path.join(_stubs, "rc"), "w") as fh:
+                fh.write(str(rc))
+
+    os.environ["SCLAUDE_OS"] = "linux"
+    check("linux: a button runs systemctl",
+          units.command("restart", "code-server.service"), "systemctl --user restart code-server.service")
+    _answer("loaded\nactive\n")
+    check_true("linux: an active unit is active", units.active("code-server.service"))
+    _answer("loaded\ninactive\n")
+    check("linux: an inactive one is not", units.status("code-server.service"), False)
+    _answer("not-found\ninactive\n")
+    check("linux: a unit not installed is no unit", units.status("code-server.service"), None)
+    check("linux: the log is the journal's",
+          units.log_command(state.BOT_UNIT), "journalctl --user -u keepawake-telegram.service")
+
+    os.environ["SCLAUDE_OS"] = "macos"
+    _tgt = "gui/%d/keepawake.code-server" % os.getuid()
+    check("macos: start loads the agent if need be, then kickstarts it",
+          (units.command("start", "code-server.service").endswith("&& launchctl kickstart " + _tgt),
+           "launchctl bootstrap gui/%d " % os.getuid() in units.command("start", "code-server.service")),
+          (True, True))
+    check("macos: restart kicks it with -k",
+          units.command("restart", "code-server.service").endswith("launchctl kickstart -k " + _tgt), True)
+    check("macos: stop sends TERM", units.command("stop", "code-server.service"),
+          "launchctl kill TERM " + _tgt)
+    check("macos: the bot's unit is the bot's agent", units.label(state.BOT_UNIT), "keepawake.telegram")
+    _answer("gui/501/keepawake.telegram = {\n\tactive count = 1\n\tstate = running\n}\n")
+    check_true("macos: a running agent is active", units.active(state.BOT_UNIT))
+    _answer("gui/501/keepawake.code-server = {\n\tstate = not running\n}\n")
+    check("macos: a loaded one that does not run is not", units.active("code-server.service"), False)
+    check_true("macos: a loaded socket is active", units.active("sclaude-gate.socket"))
+    _answer(rc=113)
+    check("macos: one launchd does not have is no agent", units.status(state.BOT_UNIT), None)
+    check("macos: the log is the agent's file",
+          units.log_command(state.BOT_UNIT), "tail -n 50 ~/Library/Logs/sclaude/telegram.log")
+    # Phone access not turned on: tailscale's own lines, and what is needed
+    # once there — a Tailscale operator on Linux, none with the Mac's app.
+    _out = "Funnel is not enabled on your tailnet.\nTo enable, visit:\n  https://login.tailscale.com/f/funnel"
+    check("macos: the failure keeps tailscale's link, and asks for no operator",
+          (_out.splitlines()[-1].strip() in phone_access.fail_text(_out),
+           "--operator" in phone_access.fail_text(_out)), (True, False))
+    os.environ["SCLAUDE_OS"] = "linux"
+    check_true("linux: the failure names the operator", "--operator" in phone_access.fail_text(_out))
+    os.environ["SCLAUDE_OS"] = "macos"
+
+    # The token from the file when the environment has none: launchd has no
+    # EnvironmentFile=, and a plist is no place for a secret.
+    os.environ["HOME"] = _stubs
+    os.environ.pop("KEEPAWAKE_BOT_TOKEN", None)
+    os.environ.pop("KEEPAWAKE_CHAT_ID", None)
+    os.makedirs(os.path.join(_stubs, ".config", "keepawake"))
+    _env = os.path.join(_stubs, ".config", "keepawake", "env")
+    with open(_env, "w") as fh:
+        fh.write("# a comment\nKEEPAWAKE_BOT_TOKEN='77:abc'\nKEEPAWAKE_CHAT_ID=42\n")
+    os.chmod(_env, 0o600)
+    check("the token is read from the file", telegramd.load_env(), ("77:abc", "42"))
+    os.environ["KEEPAWAKE_BOT_TOKEN"] = "88:env"
+    check("the environment's comes first", telegramd.load_env(), ("88:env", "42"))
+    os.chmod(_env, 0o644)
+    try:
+        telegramd.load_env()
+        check("a file others can read is refused", "ran", "refused")
+    except SystemExit:
+        pass
+
+    # code-server for the laptop's browser: Linux's forward on 127.0.0.1:8080,
+    # a Mac's code-server at its own address (no forward there).
+    os.makedirs(os.path.join(_stubs, ".config", "code-server"))
+    _code_cfg = os.path.join(_stubs, ".config", "code-server", "config.yaml")
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: 100.64.0.5:8080\npassword: x\n")
+    os.environ["SCLAUDE_OS"] = "linux"
+    check("linux: the laptop opens code-server through the forward",
+          services.code_local(), "http://127.0.0.1:8080")
+    os.environ["SCLAUDE_OS"] = "macos"
+    check("macos: the laptop opens code-server at its own address",
+          services.code_local(), "http://100.64.0.5:8080")
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: 0.0.0.0:8081\n")
+    check("macos: every address is opened on loopback", services.code_local(), "http://127.0.0.1:8081")
+    # localhost stays: code-server bound to it listens on ::1 alone on a Mac,
+    # as the proxy's code_local keeps it too.
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: localhost:8082\n")
+    check("macos: localhost is kept", services.code_local(), "http://localhost:8082")
+finally:
+    for _k, _v in _saved_env.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+    shutil.rmtree(_stubs, ignore_errors=True)
+
+_sleeper = subprocess.Popen(["sleep", "30"])
+try:
+    time.sleep(1.2)
+    check_true("uptime_of counts a process's seconds", 1 <= shell.uptime_of(_sleeper.pid) <= 5)
+finally:
+    _sleeper.kill()
+    _sleeper.wait()
 
 if failures:
     print("FAILED: %d" % len(failures))

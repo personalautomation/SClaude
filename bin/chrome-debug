@@ -39,6 +39,8 @@
 # than it looks: Chrome reopens the tabs from the profile's saved session, so
 # what is spent is the seconds and the MCP server's attachment.
 set -uo pipefail
+# macOS: Homebrew's bash 5 and the GNU tools first (sclaude/lib/core/macos.sh).
+[[ "${OSTYPE:-}" == darwin* ]] && source "$(dirname "$(readlink -f "$0")")/../sclaude/lib/core/macos.sh"
 
 # Everything below, bash is obliged to read to the end before it executes a
 # single command from here: it finds a compound command's closing brace by
@@ -71,13 +73,21 @@ fi
 # … — and leaves the previous one behind. A hardcoded path would therefore keep
 # launching the old build after an update, silently. Resolve the newest instead.
 CHROME=$(ls -1d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux64/chrome 2>/dev/null | sort -V | tail -1)
+# macOS keeps Playwright's builds in ~/Library/Caches, as an app bundle — named
+# Chromium in older builds, Google Chrome for Testing in newer ones.
+if [[ -z "$CHROME" && "${OSTYPE:-}" == darwin* ]]; then
+  CHROME=$(ls -1d "$HOME"/Library/Caches/ms-playwright/chromium-*/chrome-mac*/*.app/Contents/MacOS/* \
+             2>/dev/null | sort -V | tail -1)
+fi
 # A machine without Playwright's build may still have a browser of its own; the
 # DevTools port works the same in any Chromium. CHROME_DEBUG_BIN names one
 # outright.
 if [[ -n "${CHROME_DEBUG_BIN:-}" ]]; then
   CHROME="$CHROME_DEBUG_BIN"
 elif [[ -z "$CHROME" ]]; then
-  for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser \
+                   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+                   "/Applications/Chromium.app/Contents/MacOS/Chromium"; do
     if command -v "$candidate" >/dev/null 2>&1; then
       CHROME="$(command -v "$candidate")"
       break
@@ -141,6 +151,8 @@ def display_alive():
     Chrome's own reports cannot rule out - the display this browser was
     drawing to is gone.
     """
+    if sys.platform == "darwin":
+        return True      # no X server: macOS draws a window itself
     display = os.environ.get("DISPLAY", ":0")
     num = display.split(":")[-1].split(".")[0]
     path = "/tmp/.X11-unix/X%s" % num

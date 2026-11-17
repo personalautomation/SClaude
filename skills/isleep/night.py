@@ -76,9 +76,19 @@ import datetime as dt
 import fcntl
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# macOS has no /proc: what this reads of other processes comes from `ps`,
+# and a process's exact words from sclaude's procinfo, through the link
+# ~/.claude/skills/isleep resolves to.
+DARWIN = sys.platform == "darwin"
+if DARWIN:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.realpath(__file__)))), "sclaude", "lib", "core"))
+    import procinfo
 
 HOURS = 12        # a night that nobody ends is over after this
 STOP_NUDGES = 40  # Stop nudges per session per night: a bound on the cost
@@ -165,7 +175,29 @@ def drop(path):
 
 
 def alive(pid):
-    return pid is None or Path(f"/proc/{pid}").exists()
+    if pid is None:
+        return True
+    if DARWIN:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            pass
+        return True
+    return Path(f"/proc/{pid}").exists()
+
+
+def ps_field(pid, field):
+    """One field of `ps` for a process: macOS has no /proc to read it from."""
+    try:
+        out = subprocess.run(["ps", "-ww", "-o", field + "=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        raise OSError("ps did not answer")
+    if not out.strip():
+        raise OSError("no such process")
+    return out.strip()
 
 
 def load_over():
@@ -298,6 +330,11 @@ def owed(sid, data=None):
 
 
 def argv_of(pid):
+    if DARWIN:
+        try:
+            return procinfo.darwin_procargs(pid)[0]
+        except (OSError, ValueError, TypeError):  # TypeError: no pid found
+            return []
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
@@ -314,11 +351,18 @@ def claude_pid():
     p = os.getppid()
     for _ in range(8):
         try:
-            comm = Path(f"/proc/{p}/comm").read_text().strip()
+            if DARWIN:
+                # comm, as Linux's: the name it was started by, a path or not.
+                comm = os.path.basename(ps_field(p, "comm"))
+            else:
+                comm = Path(f"/proc/{p}/comm").read_text().strip()
             if comm == "claude" or any(
                     os.path.basename(a) in ("claude", "cli.js") for a in argv_of(p)[:2]):
                 return p
-            p = int(Path(f"/proc/{p}/stat").read_text().rsplit(")", 1)[1].split()[1])
+            if DARWIN:
+                p = int(ps_field(p, "ppid"))
+            else:
+                p = int(Path(f"/proc/{p}/stat").read_text().rsplit(")", 1)[1].split()[1])
         except (OSError, ValueError, IndexError):
             return None
     return None

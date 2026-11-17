@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's keepawake.timer and keepawake.service in one: counting keepawake's
+  holders once a minute and moving the deadline the holding side reads. One of
+  the extras (install.sh's extras); written into ~/Library/LaunchAgents by
+  install.sh (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put
+  in.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>keepawake</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/keepawake</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <!-- Once a minute, as the timer's OnUnitActiveSec=1min: the state goes stale
+       after 900 seconds, and a rarer count would leave it a few runs from
+       looking dead. launchd does not catch up on the runs a sleep missed,
+       which is what Persistent=false is for on Linux. -->
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- A run takes a fraction of a second and nothing waits on it. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/keepawake.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/keepawake.log</string>
+</dict>
+</plist>

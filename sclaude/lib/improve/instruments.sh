@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
 # sclaude's own checkout: taking the public main, proposing a change to
-# it, and refreshing the systemd units it installs.
+# it, and refreshing the systemd units (launchd agents on macOS) it installs.
 #
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
+
+# macOS's launchd agents, which take the units' place there.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/launchd.sh"
 
 # A non-maintainer's dev/<name>, sent as a pull request into origin's main.
 #
@@ -131,7 +134,8 @@ cmd_propose() {
   return 1
 }
 
-# Brings this machine's installed systemd units up to the repository's.
+# Brings this machine's installed systemd units up to the repository's
+# (launchd's agents on macOS).
 #
 # install.sh writes them with the checkout's path put in for @REPO@, and
 # nothing wrote them again when an update changed one: a unit installed as a
@@ -142,6 +146,14 @@ cmd_propose() {
 #
 #   units_refresh
 units_refresh() {
+  # macOS has launchd's agents instead (sclaude/lib/core/launchd.sh).
+  # SCLAUDE_OS (linux or macos) overrides what the system says, for the tests.
+  local os="${SCLAUDE_OS:-}"
+  [[ -n "$os" ]] || { [[ "${OSTYPE:-}" == darwin* ]] && os=macos; }
+  if [[ "$os" == macos ]]; then
+    launchd_refresh
+    return 0
+  fi
   # Where install.sh writes them, which does not read XDG_CONFIG_HOME.
   local units="$HOME/.config/systemd/user" src name want link
   local -a changed=()

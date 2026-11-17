@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 
 from keepawake.i18n import t
-from keepawake import menus, phone_access, repos, sessions, shell, status_report
+from keepawake import menus, phone_access, repos, sessions, status_report, units
 
 
 log = logging.getLogger("keepawake")
@@ -53,8 +53,7 @@ def chrome_keyboard(config=None):
 
 
 def code_running():
-    out = shell.run("systemctl --user is-active code-server.service")
-    return out.strip() == "active"
+    return units.active("code-server.service")
 
 
 def code_url():
@@ -69,6 +68,22 @@ def code_url():
     except OSError:
         pass
     return "http://localhost:8080"
+
+
+def code_local():
+    """code-server for this laptop's browser. On Linux 127.0.0.1:8080: the
+    forward (code-server-local.socket) for a Windows browser outside the
+    tailnet, or code-server itself. A Mac has no forward: its browser is on a
+    machine in the tailnet, and opens code-server at its own address."""
+    if not units.on_macos():
+        return "http://127.0.0.1:8080"
+    # Every address includes loopback and a browser refuses 0.0.0.0.
+    # localhost stays, as bin/sclaude-proxy's code_local keeps it: code-server
+    # bound to it listens on ::1 alone there, and the address is shown as text.
+    url = code_url()
+    for loop in ("//0.0.0.0:", "//[::]:"):
+        url = url.replace(loop, "//127.0.0.1:")
+    return url
 
 
 # The port sclaude-proxy holds (bin/sclaude-proxy): every feature is
@@ -193,4 +208,4 @@ def code_text(folder_name=""):
                  password=t("code.password", pw=status_report.escape(pw)) if pw else t("code.nopassword"))
     return t("code.title", state=state_label,
              folder=t("code.folder", name=status_report.escape(code_folder())),
-             url=code_url(), local="http://127.0.0.1:8080")
+             url=code_url(), local=code_local())

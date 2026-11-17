@@ -12,6 +12,9 @@
 # .gitignore, and so is node_modules. Symlinks rather than copies — editing a key
 # in the main repo must reach every feature at once.
 
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 link_env() {
   local wt="$1" name target found=0
   shopt -s nullglob
@@ -197,16 +200,16 @@ deps_install() {
 # shell is a tool like any other and counts: `npx tsx script.ts` imports the
 # checkout's packages.
 main_node_pid() {
-  local proc repo
+  local proc cwd repo
   repo="$(readlink -f "$REPO")"
-  for proc in /proc/[0-9]*; do
-    [[ "$(readlink -f "$proc/cwd" 2>/dev/null)" == "$repo" ]] || continue
-    [[ "$(readlink -f "$proc/exe" 2>/dev/null)" == */node ]] || continue
-    main_node_claude "${proc#/proc/}" && continue
-    main_node_mcp "${proc#/proc/}" && continue
-    echo "${proc#/proc/}"
+  while read -r proc cwd; do
+    [[ "$(readlink -f "$cwd" 2>/dev/null)" == "$repo" ]] || continue
+    [[ "$(proc_exe "$proc")" == */node ]] || continue
+    main_node_claude "$proc" && continue
+    main_node_mcp "$proc" && continue
+    echo "$proc"
     return 0
-  done
+  done < <(proc_cwds)
   return 0
 }
 
@@ -216,21 +219,10 @@ main_node_pid() {
 # a session's Bash tool sources a snapshot under ~/.claude, and a path in a
 # workshop holds "sclaude".
 main_node_claude() {
-  [[ "$(cat "/proc/$1/comm" 2>/dev/null)" == claude ]] && return 0
+  [[ "$(proc_name "$1")" == claude ]] && return 0
   local cmd
-  cmd="$(tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline")"
+  cmd="$(proc_cmdline "$1")"
   [[ "$cmd" == */claude-code/* || "$cmd" == */.claude/plugins/* ]]
-}
-
-# A process's parent pid. The field after the title, which may hold spaces
-# and parentheses itself ("npm run dev", "next-server (v16…)"): read from the
-# last ")" on.
-proc_parent() {
-  local stat rest
-  stat="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
-  rest="${stat##*) }"
-  set -- $rest
-  echo "${2:-}"
 }
 
 # Whether a process is one of a Claude session's MCP servers: it, or one of
@@ -240,7 +232,7 @@ main_node_mcp() {
   local pid="$1" hop name parent
   for hop in 1 2 3 4 5; do
     [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
-    name="$(cat "/proc/$pid/comm" 2>/dev/null)"
+    name="$(proc_name "$pid")"
     parent="$(proc_parent "$pid")"
     if [[ "$name" == "npm exec"* || "$name" == npx* ]]; then
       main_node_claude "$parent"
@@ -518,7 +510,7 @@ dev_claim() {
     flock -w 10 9 || exit 1
     # An argument rather than a pipe: the script itself arrives on stdin.
     local listening
-    listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | tr '\n' ' ')"
+    listening="$(ports_listening | tr '\n' ' ')"
     PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt" "$state" "$DEV_REGISTRY" "$main" "$avoid" \
       "$DEV_PORT_FIRST" "$DEV_PORT_LAST" "$listening" <<'PY'
 import json, os, re, sys
@@ -744,8 +736,7 @@ dev_net_env() {
 # again by every later ensure_dev that finds the server up.
 dev_exposed() {
   local port="$1"
-  ss -ltnH "sport = :$port" 2>/dev/null | awk '{print $4}' \
-    | sed 's/%[^:]*:/:/' | grep -vE '^(127\.|\[::1\]:|\[::ffff:127\.)' || true
+  port_addresses "$port" | grep -vE '^(127\.|\[::1\]:|\[::ffff:127\.)' || true
 }
 
 # Said when a server is open past loopback: where, and what fixes it. Once
@@ -781,8 +772,8 @@ dev_exposed_warn() {
 dev_marked() {
   local pid="$1" n=0
   while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && "$n" -lt 32 ]]; do
-    tr '\0' '\n' 2>/dev/null <"/proc/$pid/environ" | grep -qx 'SCLAUDE_DEV_LOOPBACK=1' && return 0
-    pid="$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status" 2>/dev/null)"
+    proc_env_has "$pid" SCLAUDE_DEV_LOOPBACK=1 && return 0
+    pid="$(proc_parent "$pid")"
     n=$((n + 1))
   done
   return 1
@@ -790,9 +781,7 @@ dev_marked() {
 
 # The PID of the process listening on a port, or empty.
 dev_pid() {
-  local port="$1"
-  [[ "$port" =~ ^[0-9]+$ ]] || return 0
-  ss -ltnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1
+  port_pid "$1"
 }
 
 # A process's working directory — that is how we learn which worktree the server
@@ -800,7 +789,7 @@ dev_pid() {
 dev_cwd() {
   local pid="$1"
   [[ -n "$pid" ]] || return 1
-  readlink -f "/proc/$pid/cwd" 2>/dev/null
+  proc_cwd "$pid"
 }
 
 # A log of its own for every run, and the usual name a link to the latest.
@@ -964,7 +953,11 @@ ensure_dev() {
 
   if [[ -z "$DEV_PORT_PINNED" ]] && ! proxy_up; then
     warn "  sclaude-proxy is not answering on :$PROXY_PORT — use the port directly,"
-    warn "  or: systemctl --user enable --now sclaude-proxy.socket"
+    if procinfo_darwin; then
+      warn "  or: ./install.sh in sclaude's checkout, which loads the sclaude.proxy agent"
+    else
+      warn "  or: systemctl --user enable --now sclaude-proxy.socket"
+    fi
   fi
 
   # We do not wait for readiness: the first build of a cold worktree takes tens
@@ -1000,11 +993,7 @@ dev_command() {
 # not: every process it started carries SCLAUDE_DEV_TREE=<tree> in its
 # environment, whatever it runs and whatever it calls itself.
 dev_alive() {
-  local proc want="SCLAUDE_DEV_TREE=$1"
-  for proc in /proc/[0-9]*; do
-    grep -qzxF -- "$want" "$proc/environ" 2>/dev/null && return 0
-  done
-  return 1
+  proc_env_anywhere "SCLAUDE_DEV_TREE=$1"
 }
 
 # --- the browser -------------------------------------------------------------

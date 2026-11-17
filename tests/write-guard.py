@@ -600,7 +600,9 @@ try:
     # A Claude session working in the checkout itself is listed by its pid,
     # after the session watched, which runs from a product's tree.
     fake = os.path.join(tmp, "claude")
-    shutil.copy("/bin/sleep", fake)
+    # The sleep on PATH, links resolved: macOS kills a copy of its own
+    # /bin/sleep at launch, signed for where it was.
+    shutil.copy(os.path.realpath(shutil.which("sleep")), fake)
     worker = subprocess.Popen([fake, "30"], cwd=inst)
     try:
         led = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; echo 2 > "%s/a"; '

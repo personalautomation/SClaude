@@ -28,7 +28,7 @@ import time
 
 from keepawake import (asks, botapi, docs, card_view, handling, holding, menus, phone_access,
                        project_config, repos, services, sessions, shell, sleep_warning, state,
-                       status_report, topics)
+                       status_report, topics, units)
 from keepawake.i18n import current, set_lang, t
 
 log = logging.getLogger("keepawake")
@@ -628,7 +628,7 @@ def press(bot, user, action, context, now, home=""):
         # The chat answers with a line; the page stays on the screen, which
         # once the server is up has its 📲 button.
         verb = action[5:]
-        shell.run("systemctl --user %s code-server.service" % verb)
+        shell.run(units.command(verb, "code-server.service"))
         for _ in range(10 if verb != "stop" else 0):
             if services.code_running():
                 break
@@ -686,9 +686,7 @@ def press(bot, user, action, context, now, home=""):
             st["restart_notify"] = said
             st["restart_from_pid"] = 0
             st["restart_page"] = True
-        subprocess.Popen(["bash", "-c", "sleep 1; systemctl --user restart " + BOT_UNIT],
-                         start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        units.restart_later(BOT_UNIT, 1)
         bot.screen = (t("svc.restarting"), [])
         # The chat's line changes when the bot is back; the page asks until
         # then, since nothing tells it.
@@ -699,7 +697,7 @@ def press(bot, user, action, context, now, home=""):
         if not state.read().get("restart_page"):
             bot.screen = (t("svc.restarted"), menus.services_keyboard())
         elif now - int(action.split(":", 1)[1] or 0) > RESTART_WAIT:
-            bot.screen = (t("svc.notback", unit=BOT_UNIT), menus.services_keyboard())
+            bot.screen = (t("svc.notback", log=units.log_command(BOT_UNIT)), menus.services_keyboard())
         else:
             bot.screen = (t("svc.restarting"), [])
             bot.follow = action

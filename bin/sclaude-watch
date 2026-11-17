@@ -23,6 +23,8 @@
 # The files it reads are written by watch_start (sclaude/lib/cycle/watch.sh):
 # ~/.claude/sclaude/watch/<slug>.json, one per feature being waited on.
 set -uo pipefail
+# macOS: Homebrew's bash 5 and the GNU tools first (sclaude/lib/core/macos.sh).
+[[ "${OSTYPE:-}" == darwin* ]] && source "$(dirname "$(readlink -f "$0")")/../sclaude/lib/core/macos.sh"
 
 SELF="$(basename "$0")"
 WATCH_DIR="$HOME/.claude/sclaude/watch"

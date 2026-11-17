@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's keepawake-telegram.service: keepawake's Telegram bot. One of the
+  extras (install.sh's extras), written into ~/Library/LaunchAgents by
+  install.sh (sclaude/lib/core/launchd.sh) with the home, PATH, the log directory and
+  the checkout put in, and only once ~/.config/keepawake/env has the token and the
+  chat id (bot_env_set): the bot exits without either, and an agent restarting
+  every ten seconds for want of one helps nobody.
+
+  The token is not here. launchd has no EnvironmentFile=, and a plist in
+  LaunchAgents is readable by everyone; the bot reads the file itself
+  (load_env in keepawake/telegramd.py).
+
+  The bot's buttons start, stop and restart agents through keepawake/units.py,
+  which names this one keepawake.telegram.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>keepawake.telegram</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>@REPO@/keepawake/telegramd.py</string>
+  </array>
+  <!-- ~/.local/bin, where keepawake, chrome-debug and sclaude live, and the
+       GNU tools ahead of the system's: launchd gives a bare system PATH, and
+       every button would answer "not found". -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- As Restart=always: the network drops, the Mac sleeps and wakes, and the
+       bot keeps its own backoff on network errors; a restart is for what it
+       cannot survive. -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>Nice</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/telegram.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/telegram.log</string>
+</dict>
+</plist>

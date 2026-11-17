@@ -108,6 +108,8 @@
 # survive to a conversation — `reset` erases the launch's trace without touching
 # the work.
 set -uo pipefail
+# macOS: Homebrew's bash 5 and the GNU tools first (sclaude/lib/core/macos.sh).
+[[ "${OSTYPE:-}" == darwin* ]] && source "$(dirname "$(readlink -f "$0")")/../sclaude/lib/core/macos.sh"
 
 # --- the environment ---------------------------------------------------------
 
@@ -137,7 +139,8 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # The order of the sources does not matter: the files only declare functions
 # without executing anything. A read error on any of them is death on the spot:
 # half an orchestrator is worse than none.
-for _module in core/io core/ui core/steps core/state core/project core/environment core/developer \
+for _module in core/io core/ui core/procinfo core/launchd core/steps core/state core/project \
+               core/environment core/developer \
                tree/branches tree/worktree tree/parts tree/featuredb core/lock core/pane cycle/run \
                cycle/prompt cycle/session_watch cycle/acceptance review/review_round \
                review/review_gate improve/friction improve/instruments github/github \

@@ -10,11 +10,13 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 
 from keepawake.i18n import STRINGS, t
 from keepawake.state import locked, read
-from keepawake import menus, repos, sessions, status_report, topics, widgets
+from keepawake import menus, project_config, repos, sessions, status_report, topics, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -756,6 +758,19 @@ def tty_of_pid(pid):
     #
     # The process's name in stat sits in brackets and may itself contain
     # brackets and spaces, so we cut at the last ')' rather than the first.
+    #
+    # macOS has no /proc: there it is `ps -o tty=` after all ("ttys003", or
+    # "??" without one).
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["ps", "-o", "tty=", "-p", str(int(pid))], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            return None
+        if not name or name.startswith("?"):
+            return None
+        path = "/dev/" + name
+        return path if os.path.exists(path) else None
     try:
         with open("/proc/%d/stat" % int(pid)) as fh:
             raw = fh.read()
@@ -781,9 +796,9 @@ def tty_of_pid(pid):
 def from_phone(pid):
     """Whether the process was started by a press on the phone."""
     try:
-        with open("/proc/%d/environ" % int(pid), "rb") as fh:
-            return b"\0SCLAUDE_FROM_PHONE=1\0" in b"\0" + fh.read()
-    except (OSError, ValueError, TypeError):
+        procinfo = project_config.sclaude_module("procinfo")
+        return "SCLAUDE_FROM_PHONE=1" in procinfo.environ_of(int(pid))
+    except (ValueError, TypeError):
         return False
 
 
@@ -817,16 +832,39 @@ def at_terminal(question):
     # environment, start_sclaude in sessions.py) is never the person's
     # terminal: they are on the phone. Its age would not tell — a new pty's
     # atime is the moment it was made, five minutes of silence from the start.
+    #
+    # macOS moves no stamp of a tty on a read: typing there changes mtime by
+    # the echo alone, and the prompt's own output does the same. What it
+    # does keep is the time since the last key or mouse move at the Mac itself
+    # (input_idle): a person typing into the terminal is at its keyboard. It
+    # cannot tell this terminal from another window, and a terminal reached
+    # over SSH from the phone is not seen at all — so a person away from the
+    # Mac is told with sound, which is the side to be wrong on.
     pid = question.get("pid") or 0
     if from_phone(pid):
         return False
     tty = tty_of_pid(pid)
     if not tty:
         return False
+    if sys.platform == "darwin":
+        idle = input_idle()
+        return idle is not None and idle < ASK_QUIET_AFTER
     try:
         return time.time() - os.stat(tty).st_atime < ASK_QUIET_AFTER
     except OSError:
         return False
+
+
+def input_idle():
+    """Seconds since the last key or mouse move at this Mac (the HID system's
+    idle time, as procinfo.sh's input_idle reads it), or None."""
+    try:
+        out = subprocess.run(["ioreg", "-c", "IOHIDSystem", "-d", "4"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = re.search(r'"HIDIdleTime" = (\d+)', out)
+    return int(found.group(1)) // 1000000000 if found else None
 
 
 def channel_context(channel):

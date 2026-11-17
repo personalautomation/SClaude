@@ -53,15 +53,24 @@ UPDATES = ["message", "callback_query", "widget_query"]
 # --- start-up ----------------------------------------------------------------
 
 def load_env():
+    # systemd hands the secrets over from the file (EnvironmentFile= in
+    # keepawake-telegram.service); launchd has no such key, and a secret
+    # written into the agent's plist would sit in ~/Library/LaunchAgents
+    # readable by everyone. So under launchd the bot reads the file itself.
+    env_file = os.path.expanduser("~/.config/keepawake/env")
     token = os.environ.get("KEEPAWAKE_BOT_TOKEN", "").strip()
     chat = os.environ.get("KEEPAWAKE_CHAT_ID", "").strip()
+    if not token or not chat:
+        from keepawake import project_config
+        saved = project_config.sclaude_module("tg_webapp").read_env(env_file)
+        token = token or saved.get("KEEPAWAKE_BOT_TOKEN", "")
+        chat = chat or saved.get("KEEPAWAKE_CHAT_ID", "")
     if not token or not chat:
         sys.exit("keepawake: no KEEPAWAKE_BOT_TOKEN or KEEPAWAKE_CHAT_ID "
                  "(see ~/.config/keepawake/env)")
 
     # A bot's token is full access to the bot. Working silently with loose
     # permissions on the secrets file is unwise.
-    env_file = os.path.expanduser("~/.config/keepawake/env")
     if os.path.exists(env_file):
         mode = os.stat(env_file).st_mode
         if mode & (stat.S_IRGRP | stat.S_IROTH):

@@ -8,6 +8,8 @@ import html
 import logging
 import re
 import shutil
+import subprocess
+import sys
 import time
 
 from keepawake.i18n import t
@@ -140,6 +142,15 @@ def phone_changed(bot, on):
 
 def boot_time():
     """When this machine (for WSL, its VM) started, by the kernel."""
+    if sys.platform == "darwin":
+        # "{ sec = 1791460063, usec = 42425 } Thu Oct  8 12:47:43 2026"
+        try:
+            out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True,
+                                 text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return 0
+        found = re.search(r"\bsec = (\d+)", out)
+        return int(found.group(1)) if found else 0
     with open("/proc/stat") as fh:
         for line in fh:
             if line.startswith("btime "):

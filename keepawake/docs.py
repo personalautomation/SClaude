@@ -38,8 +38,240 @@ SECTIONS = {
 }
 
 
+# --- on a Mac -------------------------------------------------------------------
+#
+# The sections above are written for WSL, where the bot was born: Windows holds
+# the machine, systemd runs the services, Tailscale lives inside the
+# distribution. On a Mac every one of those is different — launchd's agents, a
+# power assertion, Tailscale's own app — so the sections that say how the
+# machinery works, how to set it up and how to mend it have a Mac's version,
+# which section() gives when the bot runs there. 'usage' and the rest of 'why'
+# are the same on both.
+
+def _mac_why(text, ru):
+    """'why' with its two WSL remarks put the Mac's way."""
+    if ru:
+        return (text.replace("ни при перезапуске WSL, ", "ни при перезагрузке, ")
+                .replace("Важно: стоит <b>внутри WSL</b>, поэтому адрес принадлежит Ubuntu, а не Windows.",
+                         "На Mac это приложение Tailscale: адрес принадлежит самому Mac, и его браузер "
+                         "тоже открывает адреса tailnet."))
+    return (text.replace("that survives a WSL restart, ", "that survives a reboot, ")
+            .replace("Note: it runs <b>inside WSL</b>, so the address belongs to Ubuntu, not Windows.",
+                     "On a Mac it is the Tailscale app: the address belongs to the Mac itself, and its own "
+                     "browser opens tailnet addresses too."))
+
+
+MAC_SECTIONS = {
+    'why': (_mac_why(SECTIONS['why'][0], True), _mac_why(SECTIONS['why'][1], False)),
+    'arch': (
+        '<b>🏗 Как это устроено на Mac</b>\n\n'
+        'Всё работает агентами launchd в вашей сессии (<code>~/Library/LaunchAgents</code>).\n\n'
+        '<b>1. Детектор</b> (<code>bin/keepawake</code>, агент <code>keepawake</code>, раз в минуту)\n'
+        'Ищет держателей — тех, из-за кого нельзя усыплять. Записывает результат в файл состояния.\n\n'
+        '<b>2. Файл состояния</b>\n<code>~/.local/state/keepawake/state.json</code>\n'
+        'Время в нём — только целые секунды epoch UTC: переход на летнее время ничего не сдвигает.\n\n'
+        '<b>3. Удержание</b> (<code>keepawake-macos</code>, агент <code>keepawake.hold</code>)\n'
+        'Раз в 30 секунд читает файл и, пока он велит держать, держит power assertion: '
+        '<code>pmset -g assertions</code> показывает её как «keepawake: work in progress». '
+        'Умер процесс — macOS снимает её сама, то есть сбой означает «отпустить». '
+        'Закрытую крышку держит только необязательное правило sudoers для '
+        '<code>pmset -a disablesleep</code>.\n\n'
+        '<b>4. Бот</b> (<code>keepawake/telegramd.py</code>, агент <code>keepawake.telegram</code>)\n'
+        'Шлёт предупреждение за 30 минут и принимает нажатия. Он же спрашивает раз в час, '
+        'если жёсткие держат, а работы не видно.\n\n'
+        'Наружу ничего не слушает: бот сам ходит к Telegram. Единственная дверь — вход с телефона '
+        '(агент <code>sclaude.gate</code> за <code>tailscale funnel</code>), и открыта она, '
+        'только пока доступ с телефона включён.',
+        '<b>🏗 How it works on a Mac</b>\n\n'
+        'Everything runs as launchd agents in your login session (<code>~/Library/LaunchAgents</code>).\n\n'
+        '<b>1. Detector</b> (<code>bin/keepawake</code>, agent <code>keepawake</code>, every minute)\n'
+        'Looks for holders — whatever makes sleeping wrong right now. Writes the verdict to the state file.\n\n'
+        '<b>2. State file</b>\n<code>~/.local/state/keepawake/state.json</code>\n'
+        'Time in it is plain UTC epoch seconds, so daylight saving shifts nothing.\n\n'
+        '<b>3. Holding side</b> (<code>keepawake-macos</code>, agent <code>keepawake.hold</code>)\n'
+        'Reads the file every 30 s and, while it says to hold, keeps a power assertion: '
+        '<code>pmset -g assertions</code> shows it as "keepawake: work in progress". '
+        'macOS drops it when the process dies, so a crash means "release". A closed lid is held only '
+        'with the optional sudoers rule for <code>pmset -a disablesleep</code>.\n\n'
+        '<b>4. Bot</b> (<code>keepawake/telegramd.py</code>, agent <code>keepawake.telegram</code>)\n'
+        'Sends the 30-minute warning and takes the button presses. It also asks hourly when hard '
+        'holders are up but no work is visible.\n\n'
+        'Nothing listens from outside: the bot dials Telegram itself. The one door is the phone\'s '
+        'entry (agent <code>sclaude.gate</code> behind <code>tailscale funnel</code>), open only '
+        'while phone access is on.'),
+    'holders': (
+        '<b>🔒 Держатели</b>\n\n'
+        '<b>Жёсткие</b> — удалённая работа: кто-то дотянулся до Mac с телефона. Сон не наступает вовсе, '
+        'таймер не идёт, вопросов не задаётся.\n'
+        '• SSH-сессия (Termius; нужен Remote Login)\n• открытая вкладка code-server\n• трафик в tailnet\n\n'
+        '<b>Мягкие</b> — работа идёт, но человека рядом может не быть. Дают час с последней активности, '
+        'потом бот спрашивает.\n'
+        '• занятый <code>claude</code>\n• работающий шаг <code>sclaude</code>\n'
+        '• VS Code, подключённый по Remote-SSH\n• запущенный dev-сервер\n• служба code-server\n\n'
+        '<b>Никого</b> — Mac засыпает по своим настройкам (Системные настройки → Аккумулятор).\n\n'
+        'Тонкости:\n\n'
+        '<b>Час не накапливается.</b> Пока жив хоть один держатель, срок — всегда «час от текущего '
+        'момента».\n\n'
+        '<b>Занятость claude меряется по CPU.</b> Открытая сессия, ждущая ввода, не работа.\n\n'
+        '<b>Клавиатура и мышь самого Mac — признак присутствия.</b> Пока вы их трогаете, мягкие держат '
+        'без вопроса: работа в редакторе или браузере не выглядит как «час без ввода». Жёстким '
+        'держателем это не становится: отошли от Mac — час истекает как обычно.\n\n'
+        '<b>Tailscale считается по Active, а не Online.</b> Телефон присутствует в сети круглые сутки; '
+        'удержание по присутствию не дало бы уснуть никогда.\n\n'
+        '<b>Сессия code-server ≠ служба.</b> Вкладку определяем по файлу heartbeat, который сервер '
+        'трогает раз в минуту.',
+        '<b>🔒 Holders</b>\n\n'
+        '<b>Hard</b> — remote work: someone has reached the Mac from a phone. No sleep at all, no timer, '
+        'no questions.\n'
+        '• an SSH session (Termius; needs Remote Login)\n• an open code-server tab\n• tailnet traffic\n\n'
+        '<b>Soft</b> — work is running, but nobody may be around. They buy an hour from the last '
+        'activity, then the bot asks.\n'
+        '• a busy <code>claude</code>\n• a running <code>sclaude</code> step\n'
+        '• VS Code connected over Remote-SSH\n• a running dev server\n• the code-server service\n\n'
+        '<b>Nobody</b> — the Mac sleeps by its own settings (System Settings → Battery).\n\n'
+        'Details:\n\n'
+        '<b>The hour does not accumulate.</b> While any holder lives, the deadline is always "an hour '
+        'from now".\n\n'
+        '<b>A busy claude is measured by CPU.</b> A session waiting for input is not work.\n\n'
+        '<b>The Mac\'s own keyboard and mouse count as presence.</b> While you use them, soft holders '
+        'keep holding without the question: work in an editor or a browser does not look like "an hour '
+        'without input". It is not a hard holder: walk away and the hour runs out as usual.\n\n'
+        '<b>Tailscale counts Active, not Online.</b> A phone is present on the network around the '
+        'clock; holding on presence would mean never sleeping.\n\n'
+        '<b>A code-server session is not the service.</b> The tab is detected through the heartbeat '
+        'file the server touches every minute.'),
+    'install': (
+        '<b>💾 Установка на Mac</b>\n\n'
+        '<b>0. Tailscale</b>\nПриложение Tailscale на Mac и на телефон, вход в один аккаунт. '
+        'Боту нужна команда <code>tailscale</code>: приложение ставит её из своих настроек '
+        '(или <code>brew install tailscale</code>).\n\n'
+        '<b>1. Репозиторий</b>\n'
+        '<code>git clone git@github.com:personalautomation/SClaude.git ~/sclaude\n'
+        'cd ~/sclaude &amp;&amp; ./install.sh --extras</code>\n'
+        'Предложит поставить из Homebrew bash и GNU-утилиты, запишет и загрузит агенты launchd. '
+        'Запускать можно сколько угодно раз.\n\n'
+        '<b>2. SSH для Termius</b>\nСистемные настройки → Основные → Общий доступ → Удалённый вход. '
+        'Ключ генерируйте на телефоне (Termius → Keychain → Generate, ED25519), публичную часть — '
+        'в <code>~/.ssh/authorized_keys</code>. Хост — MagicDNS-имя <code>&lt;нода&gt;.tsXXXX.ts.net</code>.\n\n'
+        '<b>3. Telegram</b>\nБот у @BotFather, свой chat_id через <code>getUpdates</code>, оба значения '
+        'в <code>~/.config/keepawake/env</code> (chmod 600), затем снова <code>./install.sh</code>: '
+        'агент бота пишется, только когда на месте и токен, и chat_id. Токен остаётся в файле — бот читает его сам.\n\n'
+        '<b>4. code-server</b>\n<code>brew install code-server</code>\n'
+        'Конфиг <code>~/.config/code-server/config.yaml</code>: bind-addr на tailscale-адрес, пароль, '
+        '<code>idle-timeout-seconds: 3540</code>. Автозапуска нет — поднимается кнопкой.\n\n'
+        '<b>5. Крышка</b>\nЗакрытую крышку держит только правило sudoers для <code>pmset</code>: '
+        '<code>./install.sh --lid</code>.\n\n'
+        '<b>Бот у каждого свой</b>\nОдин токен читает одна машина, общий бот на команду невозможен.',
+        '<b>💾 Install on a Mac</b>\n\n'
+        '<b>0. Tailscale</b>\nThe Tailscale app on the Mac and on the phone, same account. The bot needs '
+        'the <code>tailscale</code> command: the app installs it from its settings (or '
+        '<code>brew install tailscale</code>).\n\n'
+        '<b>1. Repository</b>\n'
+        '<code>git clone git@github.com:personalautomation/SClaude.git ~/sclaude\n'
+        'cd ~/sclaude &amp;&amp; ./install.sh --extras</code>\n'
+        'It offers Homebrew\'s bash and GNU tools, then writes and loads the launchd agents. Run it as '
+        'often as you like.\n\n'
+        '<b>2. SSH for Termius</b>\nSystem Settings → General → Sharing → Remote Login. Generate the key '
+        'on the phone (Termius → Keychain → Generate, ED25519); the public half goes to '
+        '<code>~/.ssh/authorized_keys</code>. The host is the MagicDNS name '
+        '<code>&lt;node&gt;.tsXXXX.ts.net</code>.\n\n'
+        '<b>3. Telegram</b>\nA bot from @BotFather, your chat_id via <code>getUpdates</code>, both into '
+        '<code>~/.config/keepawake/env</code> (chmod 600), then <code>./install.sh</code> again: the '
+        'bot\'s agent is written only once both the token and the chat_id are there. The token stays in the file — the bot '
+        'reads it itself.\n\n'
+        '<b>4. code-server</b>\n<code>brew install code-server</code>\n'
+        'Config <code>~/.config/code-server/config.yaml</code>: bind-addr on the tailscale address, a '
+        'password, <code>idle-timeout-seconds: 3540</code>. No autostart — a button brings it up.\n\n'
+        '<b>5. The lid</b>\nA closed lid is held only with a sudoers rule for <code>pmset</code>: '
+        '<code>./install.sh --lid</code>.\n\n'
+        '<b>Everyone has their own bot</b>\nOne token is read by one machine, so a shared team bot is '
+        'not possible.'),
+    'files': (
+        '<b>📂 Файлы и службы на Mac</b>\n\n'
+        '<b>Код</b>\n'
+        '<code>bin/keepawake</code> — детектор, <code>status</code>, ручное продление\n'
+        '<code>bin/keepawake-macos</code> — power assertion и крышка\n'
+        '<code>bin/code-server-start</code> — открывает выбранный репозиторий\n'
+        '<code>keepawake/telegramd.py</code> — бот\n'
+        '<code>keepawake/units.py</code> — чем кнопки запускают и останавливают службы\n\n'
+        '<b>Агенты launchd</b> (<code>~/Library/LaunchAgents</code>)\n'
+        '<code>keepawake</code> — минутный опрос\n'
+        '<code>keepawake.hold</code> — удержание\n'
+        '<code>keepawake.telegram</code> — бот, перезапускается всегда\n'
+        '<code>keepawake.code-server</code> — по кнопке, без автозапуска\n'
+        '<code>sclaude.gate</code> — вход с телефона, launchd поднимает его по первому подключению\n\n'
+        '<b>Журналы</b>\n<code>~/Library/Logs/sclaude/</code> — вывод агентов (бот — <code>telegram.log</code>)\n'
+        '<code>~/.local/state/keepawake/hold.log</code> — журнал удержаний\n\n'
+        '<b>Секреты</b>\n'
+        '<code>~/.config/keepawake/env</code> — токен и chat_id, chmod 600\n'
+        '<code>~/.config/code-server/config.yaml</code> — пароль, chmod 600\n'
+        'В репозитории и в plist их нет и быть не должно.',
+        '<b>📂 Files and services on a Mac</b>\n\n'
+        '<b>Code</b>\n'
+        '<code>bin/keepawake</code> — detector, <code>status</code>, manual extend\n'
+        '<code>bin/keepawake-macos</code> — the power assertion and the lid\n'
+        '<code>bin/code-server-start</code> — opens the chosen repository\n'
+        '<code>keepawake/telegramd.py</code> — the bot\n'
+        '<code>keepawake/units.py</code> — how buttons start and stop services\n\n'
+        '<b>launchd agents</b> (<code>~/Library/LaunchAgents</code>)\n'
+        '<code>keepawake</code> — the one-minute poll\n'
+        '<code>keepawake.hold</code> — the hold\n'
+        '<code>keepawake.telegram</code> — the bot, always restarted\n'
+        '<code>keepawake.code-server</code> — on a button, no autostart\n'
+        '<code>sclaude.gate</code> — the phone\'s entry, started by launchd on the first connection\n\n'
+        '<b>Logs</b>\n<code>~/Library/Logs/sclaude/</code> — the agents\' output (the bot: '
+        '<code>telegram.log</code>)\n'
+        '<code>~/.local/state/keepawake/hold.log</code> — the hold journal\n\n'
+        '<b>Secrets</b>\n'
+        '<code>~/.config/keepawake/env</code> — token and chat_id, chmod 600\n'
+        '<code>~/.config/code-server/config.yaml</code> — password, chmod 600\n'
+        'Neither belongs in the repository or a plist.'),
+    'trouble': (
+        '<b>🔧 Если что-то не так</b>\n\n'
+        '<b>Первым делом</b>\n<code>keepawake status</code> — вся картина: разделы «HOLD» и «HEALTH».\n'
+        '<code>sclaude doctor</code> — какие агенты не загружены и чем это исправить.\n\n'
+        '<b>Mac не засыпает</b>\nВ разделе «HOLD» перечислены держатели: чаще всего это забытая сессия. '
+        'Кнопка «Пусть спит» снимает удержание досрочно. Кто ещё держит Mac, кроме нас: '
+        '<code>pmset -g assertions</code>.\n\n'
+        '<b>Засыпает во время работы</b>\n«HEALTH» краснеет 🔴, если удержание не работает. '
+        'Закрытая крышка без правила sudoers усыпит Mac всё равно: <code>./install.sh --lid</code>.\n\n'
+        '<b>Бот молчит</b>\n<code>tail -n 50 ~/Library/Logs/sclaude/telegram.log</code>\n'
+        '<code>launchctl print gui/$(id -u)/keepawake.telegram</code>\n'
+        'HTTP 409 означает второй экземпляр на том же токене, 401 — неверный токен. Агента нет вовсе — '
+        'нет токена в <code>~/.config/keepawake/env</code>; впишите его и запустите '
+        '<code>./install.sh</code>.\n\n'
+        '<b>Кнопки отвечают «not found»</b>\nУ агента PATH той оболочки, из которой запускали '
+        '<code>install.sh</code>. Нужная команда появилась позже — запустите его снова из оболочки, где '
+        'она находится.\n\n'
+        '<b>Нет ссылок на телефон, не включается доступ с телефона</b>\nНет команды '
+        '<code>tailscale</code> в PATH: поставьте её из настроек приложения Tailscale.\n\n'
+        '<b>Проверить всё разом</b>\n<code>~/sclaude/tests/run keepawake</code>',
+        '<b>🔧 Troubleshooting</b>\n\n'
+        '<b>Start here</b>\n<code>keepawake status</code> — the whole picture: "HOLD" and "HEALTH".\n'
+        '<code>sclaude doctor</code> — which agents are not loaded, and the fix for each.\n\n'
+        '<b>The Mac will not sleep</b>\nThe "HOLD" section lists the holders: usually a forgotten '
+        'session. The "Let it sleep" button drops the hold early. Who else holds the Mac: '
+        '<code>pmset -g assertions</code>.\n\n'
+        '<b>It sleeps mid-work</b>\n"HEALTH" turns red 🔴 when the hold is not working. A closed lid '
+        'still puts the Mac to sleep without the sudoers rule: <code>./install.sh --lid</code>.\n\n'
+        '<b>The bot is silent</b>\n<code>tail -n 50 ~/Library/Logs/sclaude/telegram.log</code>\n'
+        '<code>launchctl print gui/$(id -u)/keepawake.telegram</code>\n'
+        'HTTP 409 means a second instance on the same token, 401 a wrong token. No agent at all means no '
+        'token in <code>~/.config/keepawake/env</code>; put it there and run <code>./install.sh</code>.\n\n'
+        '<b>Buttons answer "not found"</b>\nThe agents have the PATH of the shell '
+        '<code>install.sh</code> ran from. A command that arrived later is not on it: run '
+        '<code>install.sh</code> again from a shell that finds it.\n\n'
+        '<b>No phone links, phone access will not turn on</b>\nNo <code>tailscale</code> command on '
+        'PATH: install it from the Tailscale app\'s settings.\n\n'
+        '<b>Check everything at once</b>\n<code>~/sclaude/tests/run keepawake</code>'),
+}
+
+
 def section(key, lang):
     pair = SECTIONS.get(key)
     if not pair:
         return ""
+    from keepawake import units
+    if units.on_macos():
+        pair = MAC_SECTIONS.get(key, pair)
     return pair[0] if lang == "ru" else pair[1]

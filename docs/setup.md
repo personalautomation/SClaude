@@ -13,7 +13,7 @@ further a product is from it, the more of sclaude it simply goes without.
 
 | what | why |
 |---|---|
-| Linux or WSL2, with systemd | the commands are bash; the QA watch and the per-feature proxy are systemd user units. On WSL, systemd has to be switched on (`systemd=true` in `/etc/wsl.conf`); `install.sh` says how if it is not. macOS is not supported |
+| Linux or WSL2 with systemd, or macOS with Homebrew | the commands are bash; the QA watch and the per-feature proxy are systemd user units, or launchd agents on macOS. On WSL, systemd has to be switched on (`systemd=true` in `/etc/wsl.conf`); `install.sh` says how if it is not. On macOS, see [below](#on-macos) |
 | git, python3 | everything sclaude does goes through them |
 | the `claude` CLI, with auto mode and Bash allowed | every step is a Claude Code session; without those settings steps 2–4 stop on permission prompts |
 | a GitHub repository and `gh`, logged in with the `project` scope | issues, pull requests, the board and QA's verdicts all live on GitHub |
@@ -81,15 +81,73 @@ cd ~/sclaude && ./install.sh
 The checkout may live under any name. `install.sh` can be run as often as you
 like: it links sclaude's commands into `~/.local/bin`, the skills into
 `~/.claude/skills` and the status line into `~/.claude`, installs and enables
-sclaude's systemd units, and wires up this repository's git hooks. Re-run it
-after pulling a change to a systemd unit. `~/.local/bin` has to be in `PATH`
-(it usually is). Without a working systemd it lays out the links, enables
-nothing, says what to do, and exits with an error.
+sclaude's systemd units (launchd agents on macOS), and wires up this
+repository's git hooks. Re-run it after pulling a change to a systemd unit.
+`~/.local/bin` has to be in `PATH` (it usually is). Without a working systemd
+on Linux it lays out the links, enables nothing, says what to do, and exits
+with an error.
 
 By default that is sclaude alone. The machine tools that grew up next to it —
 [keepawake](tools.md#binkeepawake) and its Telegram bot, code-server,
 [wsl-update](tools.md#binwsl-update) — come with `./install.sh --extras`. A machine
-that already has them keeps them on a plain re-run.
+that already has them keeps them on a plain re-run. A Mac takes all of them but
+wsl-update and the Windows side, which are WSL's.
+
+### On macOS
+
+sclaude is written for bash 4 and the GNU tools, and a Mac has bash 3.2 and
+BSD's. So on macOS it runs with Homebrew's builds ahead of the system's:
+`install.sh` checks for them first and, at your yes, installs what is missing:
+
+```bash
+brew install bash coreutils gnu-sed grep gawk findutils util-linux
+```
+
+Homebrew itself has to be there already ([brew.sh](https://brew.sh)). The
+`sclaude` commands put those builds first on `PATH` by themselves, for
+everything they start, so your shell's `PATH` and its own `bash` stay as you
+have them; only the GNU directories go first, never Homebrew's `bin` as a
+whole, so a Node from nvm still wins over Homebrew's.
+
+In place of the systemd units, launchd agents in your login session, written
+into `~/Library/LaunchAgents` and loaded by `install.sh`:
+
+| agent | what it does | Linux's |
+|---|---|---|
+| `sclaude.watch` | asks GitHub what QA has done, every five minutes | `sclaude-watch.timer` |
+| `sclaude.proxy` | every feature's dev server at `<feature>.localhost:3000` | `sclaude-proxy.socket` |
+| `sclaude.gate` | the phone's entry behind `tailscale funnel`: launchd listens on `127.0.0.1:3001` and starts the gate on the first connection | `sclaude-gate.socket` |
+
+Their logs are in `~/Library/Logs/sclaude/`. `sclaude doctor` says whether
+each is loaded and whether a formula is missing; `./install.sh` again loads
+an agent that is not and reloads one whose file changed since it was loaded
+(by itself, or by an update of sclaude), and leaves the rest running. An agent it keeps off — the proxy or the gate while another process
+holds its port — is not left in `~/Library/LaunchAgents`, where launchd would
+load it at the next login: the note says what holds the port, and
+`./install.sh` once it is free installs the agent.
+
+With `--extras`, more of them:
+
+| agent | what it does | Linux's |
+|---|---|---|
+| `keepawake` | counts what holds the Mac awake, once a minute | `keepawake.timer` |
+| `keepawake.hold` | holds it with a power assertion while there is work ([keepawake on macOS](tools.md#keepawake-on-macos)) | `keepawake-linux.service` |
+| `keepawake.telegram` | the Telegram bot; written only once `~/.config/keepawake/env` has its token and your chat id ([Configuration](tools.md#configuration)) | `keepawake-telegram.service` |
+| `keepawake.code-server` | code-server on the repository chosen in the bot; loaded, and started only by the bot's button | `code-server.service` |
+
+A closed lid is held only with a sudoers rule for `pmset`, which `install.sh`
+offers, shows the undo for, and adds at your yes (`--lid` without asking).
+
+code-server comes from Homebrew (`brew install code-server`) or its standalone
+install in `~/.local`, run by keepawake's own agent, which the bot starts and
+stops — not with `brew services`, which neither the bot nor keepawake sees —
+and configured in `~/.config/code-server/config.yaml` as on
+Linux. A Mac has no `localhost:8080` forward: that one is for a Windows
+browser outside the tailnet, and a Mac's browser opens code-server at its own
+address. The bot's links and the funnel need the `tailscale` command on
+`PATH`, which the Tailscale app installs from its settings (or
+`brew install tailscale`). Docker Desktop is started when a feature's database
+needs it, as on WSL.
 
 It asks three questions about this machine, once (a re-run keeps the answers):
 

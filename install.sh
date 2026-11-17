@@ -8,16 +8,24 @@
 # keepawake and its Telegram bot, code-server, wsl-update, the Windows side —
 # come with --extras. Somebody who came for sclaude does not expect them.
 #
-# The extras have two platforms: WSL, where keepawake holds Windows awake from
-# the Windows side and wsl-update keeps the distribution current, and plain
-# Linux, where keepawake-linux holds this machine awake itself.
+# The extras have three platforms: WSL, where keepawake holds Windows awake
+# from the Windows side and wsl-update keeps the distribution current; plain
+# Linux, where keepawake-linux holds this machine awake itself; and macOS,
+# where keepawake-macos does, with a power assertion.
+#
+# On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
+# offers to install, and launchd's agents in place of the systemd units. Of
+# the extras a Mac takes all but wsl-update and the Windows side: keepawake,
+# its Telegram bot and code-server.
 #
 #   ./install.sh               sclaude only (and the extras, if an earlier
 #                              install put them in)
 #   ./install.sh --extras      sclaude and the machine tools
-#   ./install.sh --polkit      the extras, and keepawake's polkit rule
-#                              without asking
-#   ./install.sh --no-polkit   do not add it, and do not ask
+#   ./install.sh --lid         the extras, and what lets keepawake hold a
+#                              closed lid, without asking: a polkit rule on
+#                              Linux, a sudoers rule for pmset on macOS
+#   ./install.sh --no-lid      do not add it, and do not ask
+#   --polkit, --no-polkit      the same as --lid and --no-lid
 #
 # Three questions of this machine are asked once, and kept in this checkout's
 # git config (sclaude.update, sclaude.contribute, sclaude.leaks): whether
@@ -44,8 +52,8 @@ SET_LEAKS=""
 for arg in "$@"; do
   case "$arg" in
     --extras)    EXTRAS=1 ;;
-    --polkit)    POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
-    --no-polkit) POLKIT_CHOICE=no ;;
+    --lid|--polkit)       POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
+    --no-lid|--no-polkit) POLKIT_CHOICE=no ;;
     --update=*)
       SET_UPDATE="${arg#*=}"
       [[ " auto notify off " == *" $SET_UPDATE "* ]] \
@@ -66,12 +74,65 @@ for arg in "$@"; do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- macOS: Homebrew's bash and the GNU tools ---------------------------------
+#
+# sclaude is written for bash 4 and the GNU userland; a Mac has bash 3.2 and
+# BSD's tools, and sclaude/lib/core/macos.sh puts Homebrew's builds first for
+# every entry point. What is missing of them is offered here, with the
+# command shown first; then the installer goes on under bash 5 itself, so up
+# to here it is written for bash 3.2.
+#
+# SCLAUDE_OS (linux or macos) overrides what the system says, for the tests:
+# tests/install.py runs the Linux installer on a Mac too.
+MACOS=0
+case "${SCLAUDE_OS:-}" in
+  macos) MACOS=1 ;;
+  linux) ;;
+  *) [[ "${OSTYPE:-}" == darwin* ]] && MACOS=1 ;;
+esac
+if [[ $MACOS -eq 1 ]]; then
+  MACOS_FUNCTIONS_ONLY=1
+  # shellcheck source=sclaude/lib/core/macos.sh
+  source "$REPO/sclaude/lib/core/macos.sh"
+  unset MACOS_FUNCTIONS_ONLY
+  if ! macos_brew >/dev/null; then
+    echo "error: sclaude on macOS needs Homebrew — https://brew.sh — then re-run ./install.sh" >&2
+    exit 1
+  fi
+  MACOS_NEED="$(macos_missing)"
+  if [[ -n "$MACOS_NEED" ]]; then
+    echo "macOS: sclaude runs with Homebrew's bash 5 and GNU tools; missing: $MACOS_NEED"
+    echo "  $(macos_brew)/bin/brew install $MACOS_NEED"
+    if [[ ! -t 0 ]]; then
+      echo "  No terminal to ask in: run that, then ./install.sh again." >&2
+      exit 1
+    fi
+    # No default, as everywhere in sclaude: asked again until it is a yes or
+    # a no. End of input is a no.
+    while :; do
+      read -rp "  Install them now? [y/n] " answer || { answer=n; echo; }
+      case "$answer" in
+        y|Y|yes|YES|Yes) break ;;
+        n|N|no|NO|No) echo "  Not installed: sclaude cannot run without them." >&2; exit 1 ;;
+        *) echo "  Please answer y or n." ;;
+      esac
+    done
+    # shellcheck disable=SC2086  # the formulae, one word each
+    "$(macos_brew)/bin/brew" install $MACOS_NEED \
+      || { echo "error: brew install failed; nothing else was done" >&2; exit 1; }
+  fi
+  # Under bash 5 from here on, with the GNU tools first: this re-executes the
+  # installer with its own arguments when it runs under the system's bash.
+  source "$REPO/sclaude/lib/core/macos.sh"
+fi
 BIN="$HOME/.local/bin"
 UNITS="$HOME/.config/systemd/user"
 SKILLS="$HOME/.claude/skills"
 CLAUDE="$HOME/.claude"
 
-mkdir -p "$BIN" "$UNITS" "$SKILLS" "$CLAUDE"
+mkdir -p "$BIN" "$SKILLS" "$CLAUDE"
+[[ $MACOS -eq 1 ]] || mkdir -p "$UNITS"
 
 # A machine an earlier install gave the extras keeps them on a plain re-run:
 # leaving its keepawake and bot units unwritten would let them drift from the
@@ -80,6 +141,18 @@ if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
   EXTRAS=1
   echo "extras: kept — an earlier install put them in"
 fi
+
+# Whether ~/.config/keepawake/env has the bot's token and chat id: the bot's
+# unit or agent is turned on only then. The bot exits without either, and a
+# service falling into a restart loop straight after installation is a poor
+# first impression and rubbish in the log. The chat id is a number, negative
+# for a group, and may be quoted.
+bot_env_set() {
+  local env="$HOME/.config/keepawake/env"
+  [[ -s "$env" ]] \
+    && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$env" 2>/dev/null \
+    && grep -Eq "^KEEPAWAKE_CHAT_ID=[\"']?-?[0-9]+" "$env" 2>/dev/null
+}
 
 # A systemd unit, written into $UNITS with this checkout's path put in for
 # @REPO@: the checkout may live under any name, and a unit cannot find it any
@@ -96,8 +169,12 @@ unit() {
 # one day set up the units for one platform while the state went to the other.
 # KEEPAWAKE_PLATFORM (wsl|linux) overrides it there — for the tests.
 WSL=0
-[[ "$(python3 "$REPO/keepawake/state.py" platform 2>/dev/null)" == wsl ]] && WSL=1
-echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
+[[ $MACOS -eq 0 && "$(python3 "$REPO/keepawake/state.py" platform 2>/dev/null)" == wsl ]] && WSL=1
+if [[ $MACOS -eq 1 ]]; then
+  echo "platform: macOS"
+else
+  echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
+fi
 
 # systemd's user manager runs sclaude's watcher, proxy and gate, and every
 # extra. `command -v systemctl` is not enough: WSL ships the binary without
@@ -105,7 +182,9 @@ echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
 # `systemctl --user` fails and set -e stops the install half-way without a
 # word. Asked once here, and what to do said plainly.
 SYSTEMD=0
-if command -v systemctl >/dev/null 2>&1 \
+if [[ $MACOS -eq 1 ]]; then
+  : # launchd's agents, below
+elif command -v systemctl >/dev/null 2>&1 \
    && systemctl --user show-environment >/dev/null 2>&1; then
   SYSTEMD=1
 else
@@ -131,15 +210,25 @@ for tool in sclaude sclaude-notify sclaude-watch sclaude-proxy chrome-debug; do
 done
 echo "symlinked: sclaude, sclaude-notify, sclaude-watch, sclaude-proxy, chrome-debug in $BIN"
 
-unit sclaude-watch.service
-unit sclaude-watch.timer
-unit sclaude-proxy.socket
-unit sclaude-proxy.service
-unit sclaude-gate.socket
-unit sclaude-gate.service
-echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+if [[ $MACOS -eq 0 ]]; then
+  unit sclaude-watch.service
+  unit sclaude-watch.timer
+  unit sclaude-proxy.socket
+  unit sclaude-proxy.service
+  unit sclaude-gate.socket
+  unit sclaude-gate.service
+  echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+fi
 
-if [[ $EXTRAS -eq 1 ]]; then
+if [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]]; then
+  # The holding side, the minute's count, the bot and code-server are launchd
+  # agents, below. No code-server-proxy: the forward is for a Windows browser
+  # outside the tailnet, and a Mac's browser is in it.
+  for tool in keepawake keepawake-macos code-server-start; do
+    ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
+  done
+  echo "symlinked (extras): keepawake, keepawake-macos, code-server-start in $BIN"
+elif [[ $EXTRAS -eq 1 ]]; then
   for tool in keepawake code-server-start code-server-proxy; do
     ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
   done
@@ -236,6 +325,7 @@ setting_offer leaks "$SET_LEAKS" leaks_modes_explain "ask auto off"
 
 # --- keepawake: the Windows side and the secrets -----------------------------
 
+# The secrets are the Telegram bot's.
 if [[ $EXTRAS -eq 1 ]]; then
   # The secrets directory. We do not touch the env file itself: an installer must
   # never overwrite somebody's token.
@@ -357,19 +447,105 @@ if [[ $SYSTEMD -eq 1 ]]; then
       echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
     fi
 
-    # We enable the daemon only with the token filled in: a service falling into a
-    # restart loop straight after installation is a poor first impression and
-    # rubbish in the journal.
-    if [[ -s "$HOME/.config/keepawake/env" ]] \
-       && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null; then
+    # We enable the daemon only with the token and chat id filled in (bot_env_set).
+    if bot_env_set; then
       systemctl --user enable --now keepawake-telegram.service
       echo "enabled: keepawake-telegram.service"
     else
-      echo "note: keepawake-telegram is not enabled — there is no token in ~/.config/keepawake/env" >&2
+      echo "note: keepawake-telegram is not enabled — ~/.config/keepawake/env lacks the token or the chat id" >&2
     fi
   fi
 
   systemctl --user list-timers sclaude-watch.timer $([[ $EXTRAS -eq 1 ]] && echo keepawake.timer) --no-pager || true
+fi
+
+# macOS: the watcher and the proxy as launchd agents in the user's login
+# session (sclaude/lib/core/launchd.sh). They run with this PATH — the GNU
+# tools first, ~/.local/bin on it — as the units run with systemd's. An agent
+# is loaded again when its file changed, so that a changed template takes
+# effect here and now, and loaded when it is not; one unchanged and loaded is
+# left running, as a re-run on Linux leaves the units: a reload would stop
+# code-server, which nothing but the bot starts again.
+if [[ $MACOS -eq 1 ]]; then
+  INSTRUMENTS="$REPO"
+  # shellcheck source=sclaude/lib/core/launchd.sh
+  source "$REPO/sclaude/lib/core/launchd.sh"
+  agent_path="$PATH"
+  [[ ":$agent_path:" == *":$BIN:"* ]] || agent_path="$agent_path:$BIN"
+  # The proxy binds :3000 itself here, and launchd binds the gate's :3001 as
+  # it loads sclaude.gate: something else on either — a dev server started
+  # before features had ports of their own, a gate run by hand — would leave
+  # the agent restarting every ten seconds, or not loaded at all. Said, and the
+  # rest goes on. A port the agent itself holds is no obstacle.
+  port_holder() {
+    launchd_loaded "$1" && return 0
+    { lsof -nP -iTCP:"$2" -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1
+  }
+  declare -A held=([sclaude.proxy]="$(port_holder sclaude.proxy 3000)"
+                   [sclaude.gate]="$(port_holder sclaude.gate 3001)")
+  declare -A port_of=([sclaude.proxy]=3000 [sclaude.gate]=3001)
+  while read -r label; do
+    [[ -n "$label" ]] || continue
+    # An agent kept off — the bot without its token and chat id (bot_env_set),
+    # an agent whose port is held — is unloaded and its file removed: launchd
+    # loads every file in LaunchAgents at login, and units_refresh one that is
+    # installed and not loaded, and either would restart it every ten seconds.
+    off=""
+    if [[ "$label" == keepawake.telegram ]] && ! bot_env_set; then
+      off="keepawake.telegram is not loaded — ~/.config/keepawake/env lacks the token or the chat id"
+    elif [[ -n "${held[$label]:-}" ]]; then
+      off="${held[$label]} holds :${port_of[$label]} — $label is not installed; stop it, then run ./install.sh again"
+    fi
+    if [[ -n "$off" ]]; then
+      rm -f "$(launchd_dir)/$label.plist"
+      echo "note: $off" >&2
+      # A job that outlives its bootout restarts until logout, its file gone.
+      launchd_unload "$label" \
+        || echo "      launchd still runs it — unload it with: launchctl bootout $(launchd_domain)/$label" >&2
+      continue
+    fi
+    wrote=0
+    launchd_write "$label" "$agent_path" || wrote=$?
+    # Not written: a loaded agent goes on as it runs, one that is not is
+    # loaded from the file already there.
+    if (( wrote == 2 )); then
+      echo "note: could not write $(launchd_dir)/$label.plist" >&2
+      launchd_loaded "$label" && continue
+    fi
+    if launchd_current "$label"; then
+      echo "running: $label, unchanged ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
+      continue
+    fi
+    if launchd_load "$label"; then
+      echo "loaded: $label ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
+    else
+      echo "note: launchd did not load $label; see $(launchd_dir)/$label.plist" >&2
+    fi
+  done < <(launchd_labels; [[ $EXTRAS -eq 1 ]] && launchd_labels extras)
+  # The phone's gate goes out through `tailscale funnel`, and the bot reads
+  # the tailnet's addresses with the same command. The Mac app does not put
+  # it on PATH by itself.
+  if [[ $EXTRAS -eq 1 ]] && ! command -v tailscale >/dev/null 2>&1; then
+    echo "note: no tailscale command on PATH — the bot's phone links and the phone's gate need it;" >&2
+    echo "      the Tailscale app offers to install it in its settings (or: brew install tailscale)" >&2
+  fi
+  # code-server is loaded and not started, as on Linux: a button in the bot
+  # brings it up, and its idle timeout takes it down.
+  if [[ $EXTRAS -eq 1 ]]; then
+    if [[ -f "$HOME/.config/code-server/config.yaml" ]]; then
+      bind="$(sed -n 's/^bind-addr:[[:space:]]*//p' "$HOME/.config/code-server/config.yaml" | head -1)"
+      echo "on demand: code-server (${bind:-127.0.0.1:8080, its default}) — by a button in the bot"
+    else
+      echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
+    fi
+    if [[ ! -x "$HOME/.local/bin/code-server" ]] && ! command -v code-server >/dev/null 2>&1; then
+      echo "note: code-server is not installed — brew install code-server" >&2
+    fi
+  fi
+  if [[ $EXTRAS -eq 1 ]] && ! launchctl print system/com.openssh.sshd >/dev/null 2>&1; then
+    echo "note: Remote Login is off — no SSH session from a phone; turn it on in" >&2
+    echo "      System Settings → General → Sharing" >&2
+  fi
 fi
 
 # systemctl --user lives only while there is a user session. Closing the last
@@ -452,7 +628,7 @@ polkit_add() {
 
 polkit_offer() {
   [[ $EXTRAS -eq 1 ]] || return 0
-  [[ $WSL -eq 0 ]] || return 0
+  [[ $WSL -eq 0 && $MACOS -eq 0 ]] || return 0
   command -v loginctl >/dev/null 2>&1 || return 0
   [[ -d "$(dirname "$(dirname "$POLKIT_RULE")")" ]] || return 0
 
@@ -511,12 +687,99 @@ polkit_offer() {
 
 polkit_offer
 
+# --- keepawake's sudoers rule: optional, macOS only ---------------------------
+#
+# The power assertion keepawake-macos takes stops idle sleep, but nothing a
+# user's process can take keeps a MacBook up with its lid closed: only root
+# can, with `pmset -a disablesleep 1`. A sudoers rule lets this user run
+# exactly that and its `0` without a password, and nothing else; the holder
+# turns it on while it holds and off when it lets go. Offered as the polkit
+# rule is, with the undo command shown before the question: it is a rule in
+# the system's sudo, and the person decides.
+#
+# The undo turns disablesleep off too: with the rule gone a holder could no
+# longer turn it off itself, and a Mac left with it on never sleeps.
+SUDOERS_RULE="${KEEPAWAKE_SUDOERS_RULE:-/etc/sudoers.d/keepawake}"
+LID_OFF="sudo rm $SUDOERS_RULE && sudo pmset -a disablesleep 0"
+
+lid_rule_text() {
+  printf '%s\n' \
+    "# Written by sclaude's install.sh: lets keepawake-macos keep a closed lid from" \
+    '# sleeping the Mac while there is work going on, and nothing else.' \
+    "# To remove: $LID_OFF" \
+    "$USER ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"
+}
+
+lid_add() {
+  local tmp
+  tmp="$(mktemp)"
+  lid_rule_text > "$tmp"
+  # visudo checks it before sudo reads it: a broken file in sudoers.d stops
+  # sudo working at all.
+  if visudo -cf "$tmp" >/dev/null \
+     && sudo install -m 0440 -o root -g wheel "$tmp" "$SUDOERS_RULE"; then
+    echo "added: $SUDOERS_RULE — a closed lid no longer sleeps while there is work"
+    echo "       to turn it off: $LID_OFF"
+  else
+    echo "note: the sudoers rule was not written (sudo refused, or visudo did not pass it);" >&2
+    echo "      keepawake-macos keeps holding idle sleep only" >&2
+  fi
+  rm -f "$tmp"
+}
+
+lid_offer_macos() {
+  [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]] || return 0
+  if [[ -f "$SUDOERS_RULE" ]]; then
+    echo "keepawake: the sudoers rule is in place — a closed lid does not sleep while there is work"
+    echo "           to turn it off: $LID_OFF"
+    return 0
+  fi
+  [[ "$POLKIT_CHOICE" == no ]] && return 0
+  if [[ "$POLKIT_CHOICE" == yes ]]; then
+    lid_add
+    return 0
+  fi
+
+  echo ""
+  echo "keepawake: an optional sudoers rule for the lid (macOS)"
+  echo "  Without it keepawake-macos stops only idle sleep. Closing the lid still"
+  echo "  puts the Mac to sleep, and whatever runs from your phone — an SSH"
+  echo "  session, a Claude step — stops with it."
+  echo "  With it, keepawake turns pmset's disablesleep on while there is work"
+  echo "  going on (claude, SSH, a tailnet connection) and off once it ends."
+  echo "  The Mac then stays awake with the lid shut, in a bag too, until the"
+  echo "  work ends: worth it if you close it and keep working from a phone."
+  echo "  It lets user '$USER' run 'pmset -a disablesleep 1' and '… 0' without a"
+  echo "  password, and nothing else. Writing it needs sudo. To turn it off later:"
+  echo "    $LID_OFF"
+
+  if [[ ! -t 0 ]]; then
+    echo "  No terminal to ask in: run ./install.sh --lid to add it." >&2
+    return 0
+  fi
+  # No default, as everywhere in sclaude: asked again until it is a yes or a
+  # no. End of input is a no — there is nobody left to answer.
+  local answer=""
+  while :; do
+    read -rp "  Add it now? [y/n] " answer || { answer=n; echo; }
+    case "${answer,,}" in
+      y|yes) lid_add; break ;;
+      n|no)  echo "  Not added. Later: ./install.sh --lid"; break ;;
+      *)     echo "  Please answer y or n." ;;
+    esac
+  done
+}
+
+lid_offer_macos
+
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *) echo "note: $BIN is not on PATH — add it in your shell rc" >&2 ;;
 esac
 
-if [[ $EXTRAS -eq 0 ]]; then
+if [[ $EXTRAS -eq 0 && $MACOS -eq 1 ]]; then
+  echo "extras: not installed — keepawake and its Telegram bot come with ./install.sh --extras"
+elif [[ $EXTRAS -eq 0 ]]; then
   echo "extras: not installed — keepawake, its Telegram bot, code-server, wsl-update"
   echo "        come with ./install.sh --extras"
 fi
@@ -524,5 +787,5 @@ fi
 echo ""
 echo "next: run 'sclaude doctor' — it checks what is still missing and names the fix"
 # Without systemd the install is not whole, and a script running it should
-# know: the error above said what to do.
-[[ $SYSTEMD -eq 1 ]] || exit 1
+# know: the error above said what to do. macOS has launchd instead.
+[[ $SYSTEMD -eq 1 || $MACOS -eq 1 ]] || exit 1

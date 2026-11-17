@@ -8,10 +8,12 @@
 
 slugify() {
   # printf rather than echo: echo takes a name that is -n or -e for its own
-  # option and prints nothing.
+  # option and prints nothing. Bytes, not characters (LC_ALL=C): in a UTF-8
+  # locale macOS's tables call a lone byte of a letter like İ upper case, and
+  # tr leaves half a character behind.
   printf '%s\n' "$1" \
-    | tr '[:upper:]' '[:lower:]' \
-    | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-\+//' -e 's/-\+$//'
+    | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+    | LC_ALL=C sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-\+//' -e 's/-\+$//'
 }
 
 # A suggested branch name from an issue: the number and the title's first words,

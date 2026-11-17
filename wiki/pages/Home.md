@@ -121,7 +121,7 @@ inside Telegram, and the laptop stays awake only while there is work.
 
 | | |
 |---|---|
-| **Fits** | small teams with a product of their own: Next.js on Supabase and Vercel, on Linux or Windows with WSL2 |
+| **Fits** | small teams with a product of their own: Next.js on Supabase and Vercel, on Linux, Windows with WSL2 or macOS |
 | **Infrastructure** | ≈ 0: free tiers carry a PoC, and the laptops are already paid for |
 | **Main line item** | the Claude subscription per developer, kept in check by lean context per step |
 | **Onboarding** | one script, then `sclaude doctor` lists what a machine lacks and how to fix each gap |

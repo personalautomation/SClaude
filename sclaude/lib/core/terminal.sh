@@ -103,7 +103,11 @@ term_record() {
   export SCLAUDE_TERM="$file"
   # -e: sclaude's own exit status, not script's. -f: written as it comes, so
   # a run still going can be read — the retrospective reads the very run it
-  # is part of.
+  # is part of. macOS's script is BSD's: -F for -f, and the command after the
+  # file rather than in -c.
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    exec script -q -e -F "$file" bash "$launcher"
+  fi
   exec script -q -e -f -c "bash '${launcher//\'/\'\\\'\'}'" "$file"
 }
 

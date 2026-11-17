@@ -353,7 +353,7 @@ The full account is in [Privacy](docs/privacy.md).
 
 | | |
 |---|---|
-| **Fits** | small teams with a product of their own — Next.js on Supabase and Vercel, developers on Linux or Windows with WSL2 ([the environment](docs/setup.md#the-environment-it-is-built-for)) |
+| **Fits** | small teams with a product of their own — Next.js on Supabase and Vercel, developers on Linux, Windows with WSL2 or macOS ([the environment](docs/setup.md#the-environment-it-is-built-for)) |
 | **Infrastructure** | ≈ 0: free tiers carry a PoC, and the laptops are already paid for. No server in between |
 | **Main line item** | the Claude subscription per developer — which lean context per step keeps in check |
 | **Onboarding** | one script, then `sclaude doctor` lists what a machine still lacks and the command that fixes each gap |
@@ -362,7 +362,9 @@ The full account is in [Privacy](docs/privacy.md).
 
 Observed in the team that runs it: a 10–20% productivity improvement and
 about 5% fewer tokens in the first weeks — project observations, not
-universal benchmarks. macOS is not supported yet.
+universal benchmarks. macOS is supported in full: the cycle, keepawake
+keeping the Mac awake under work, and working from the phone through the
+Telegram bot, code-server and the Mini App, each run by launchd.
 
 ## Get started
 

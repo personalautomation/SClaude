@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's sclaude-proxy.socket and sclaude-proxy.service: every feature's dev
+  server at <feature>.localhost:3000. Not started on a first connection, as the
+  socket unit does: the proxy binds :3000 itself (listening_socket) and launchd
+  keeps it running. Written into ~/Library/LaunchAgents by install.sh
+  (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put in.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sclaude.proxy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/sclaude-proxy</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <!-- As KillMode=process: the proxy stopping does not take the dev servers it
+       started down with it. -->
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/proxy.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/proxy.log</string>
+</dict>
+</plist>

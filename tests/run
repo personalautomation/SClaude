@@ -113,6 +113,26 @@ def collect(proc):
     return b"".join(chunks).decode(errors="replace")
 
 
+def bench_path():
+    """The PATH the benches run with: this one, and on macOS the GNU tools and
+    Homebrew's bash ahead of the system's, as sclaude's own entry points put
+    them (sclaude/lib/core/macos.sh)."""
+    path = os.environ.get("PATH", "")
+    if sys.platform != "darwin":
+        return path
+    try:
+        out = subprocess.run(["bash", os.path.join(ROOT, "sclaude", "lib", "core", "macos.sh"), "path"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return path
+    if out.returncode != 0:
+        sys.exit(out.stderr.strip() or "tests/run: sclaude/lib/core/macos.sh failed")
+    return out.stdout.strip() or path
+
+
+BENCH_PATH = bench_path()
+
+
 def main():
     ap = argparse.ArgumentParser(prog="tests/run")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
@@ -158,13 +178,16 @@ def main():
                 #
                 # A TMPDIR of its own, removed when it ends: what a bench and its
                 # children leave in the temporary directory goes with it, rather
-                # than piling up in /tmp run after run.
-                tmp = tempfile.mkdtemp(prefix="sclaude-test-%s-" % bench)
+                # than piling up in /tmp run after run. Its real path: macOS
+                # hands out /var/folders/…, a link to /private/var/folders/…,
+                # and git, pwd and a process's directory answer with the
+                # latter, which a bench comparing paths would read as another.
+                tmp = os.path.realpath(tempfile.mkdtemp(prefix="sclaude-test-%s-" % bench))
                 proc = subprocess.Popen(
                     [sys.executable, os.path.join(HERE, bench + ".py")], cwd=ROOT,
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT, start_new_session=True,
-                    env=dict(os.environ, TMPDIR=tmp,
+                    env=dict(os.environ, TMPDIR=tmp, PATH=BENCH_PATH,
                              SCLAUDE_WAITS_LOG=os.path.join(tmp, "waits.jsonl")))
                 running[bench] = proc
             out = collect(proc)

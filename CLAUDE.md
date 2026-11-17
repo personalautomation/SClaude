@@ -112,8 +112,38 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-11-12 at the user's request, with review
   blocks. -->
 
-- `KeepAwake.ps1` writes hold-log lines that `bin/keepawake` greps for
-  (`hold set|hold released|holding`).
+- `KeepAwake.ps1` and `keepawake/hold_loop.py` (the holding side of
+  `keepawake-linux` and `keepawake-macos`) write hold-log lines that
+  `bin/keepawake` greps for (`hold set|hold released|holding`);
+  `tests/keepawake-linux.py` checks all three sides. `hold_loop.py` alone
+  writes `holding: <stuck_text>` for a release that left part of the hold
+  in place, which the grep's `holding` takes too.
+- The sudoers rule `install.sh` writes for the lid (`lid_rule_text`) names
+  `/usr/bin/pmset -a disablesleep 1` and `… 0`, word for word what
+  `bin/keepawake-macos` runs through `sudo -n` (`pmset_command`,
+  `lid_allowed`); sudo matches a rule's command exactly, so a spelling
+  changed on one side alone leaves the lid unheld without an error.
+  `tests/keepawake-macos.py` checks the two agree.
+- A macOS agent's label is its template's name, `launchd/<label>.plist`,
+  which `install.sh` writes and loads and `launchd_labels` in
+  `sclaude/lib/core/launchd.sh` lists (`sclaude.*` the core, `keepawake*` the
+  extras). The same label is written out in `LABELS` and `LOG_FILES` in
+  `keepawake/units.py` (each `LABELS` key a unit in `systemd/`), in
+  `service_up`/`unit_state` in `bin/keepawake`, in `install.sh`'s port table
+  and bot exception, in `doctor.sh` and in the `launchctl print` lines of
+  `keepawake/docs.py`; the gate's socket name, `LAUNCHD_SOCKET` in
+  `bin/sclaude-proxy`, is the key under `Sockets` in `sclaude.gate.plist`.
+  `tests/launchd-labels.py` checks each. Renamed on one side alone, the
+  bot's buttons and `keepawake status` ask after an agent that is not there
+  and say "not installed", without an error.
+- `sclaude/lib/core/procinfo.sh` and `procinfo.py` answer the same questions
+  about other processes and ports, the shell's callers and Python's; on
+  macOS the shell hands the environment to `procinfo.py env-has` and
+  `env-anywhere` by name. `tests/procinfo.py` runs both halves on a real
+  process and checks the subcommands the shell calls are ones `main` takes.
+
+  <!-- Added by Claude on 2026-11-17 at the user's request, finishing the
+  macOS port taken in from a contributor's branch. -->
 - `keepawake status` prints the section headings `HOLD` and `HEALTH`; both
   halves of `docs.py` quote them, and `tests/keepawake.py` asserts on them.
 - `OWN_MARKERS` in `sclaude/hooks/collect-denials.py` must match the text the
@@ -706,6 +736,35 @@ import _path  # every folder of sclaude/lib on the path
 
 Names stay unique across the folders and clear of the standard library's;
 `tests/paths.py` checks it.
+
+## Linux and macOS
+
+sclaude runs on Linux, WSL and macOS. On a Mac it runs with Homebrew's bash 5
+and GNU tools ahead of the system's: every bash entry point (`bin/sclaude`,
+`sclaude-watch`, `sclaude-notify`, `chrome-debug`, `keepawake`, `githooks/commit-msg`,
+`install.sh`) sources `sclaude/lib/core/macos.sh` first, which puts them on
+`PATH` and re-executes under bash 5. So GNU spellings (`sed -i`, `stat -c`,
+`date -d`, `timeout`, `setsid`, `flock`) stay as they are; a new bash entry
+point takes the same two lines.
+
+What GNU on `PATH` does not give a Mac goes through one place:
+
+- other processes and their ports — `/proc`, `ss` — through
+  `sclaude/lib/core/procinfo.sh` and `procinfo.py` (`ps` and `lsof`
+  on macOS, the kernel for a process's environment, the HID system
+  for the keyboard's idle time); `tests/procinfo.py` fails on a `/proc` read
+  or an `ss` run anywhere else in sclaude and in keepawake's scripts. The
+  bot's Python modules keep their own reads, macOS's beside each;
+- the units — systemd on Linux, launchd agents on macOS (`launchd/*.plist`,
+  `sclaude/lib/core/launchd.sh`), written by `install.sh` and refreshed by
+  `units_refresh`; `SCLAUDE_OS` (`linux`, `macos`) overrides the system for
+  `tests/install.py` and `tests/units.py`, which run each side anywhere;
+- `script`, whose flags differ (`term_record` in `terminal.sh`;
+  `benchlib.on_terminal` and `under_terminal` for the benches).
+
+Run the benches through `tests/run` on a Mac: it gives them the same `PATH`
+and a temporary directory by its real path (`/private/var/…`, which git and
+`pwd` answer with).
 
 ## Tests
 

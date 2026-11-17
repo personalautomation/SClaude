@@ -40,6 +40,9 @@ import sys
 import tempfile
 import time
 
+# launchd_load marks each load under the state directory: under HOME here.
+os.environ.pop("XDG_STATE_HOME", None)
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 INSTALL = os.path.join(ROOT, "install.sh")
 failures = []
@@ -79,7 +82,8 @@ def world(tmp, systemd=True, settings=True):
             fh.write("#!/usr/bin/env bash\n" + body)
         os.chmod(path, 0o755)
     env = {k: v for k, v in os.environ.items() if not k.startswith("KEEPAWAKE_")}
-    env.update(HOME=home, USER="someone", KEEPAWAKE_PLATFORM="linux",
+    # The Linux installer wherever the bench runs: macOS's is checked below.
+    env.update(HOME=home, USER="someone", KEEPAWAKE_PLATFORM="linux", SCLAUDE_OS="linux",
                KEEPAWAKE_POLKIT_RULE=os.path.join(etc, "49-keepawake.rules"),
                PATH=stubs + ":" + os.environ["PATH"])
     cfg = os.path.join(tmp, "checkout-config")
@@ -224,6 +228,18 @@ with tempfile.TemporaryDirectory() as tmp:
           ("extras: kept" in out,
            os.path.exists(os.path.join(units, "keepawake-telegram.service"))), (True, True))
 
+    # The bot's unit is enabled with its token and chat id, not before: the
+    # bot exits without either, and systemd would restart it every ten seconds.
+    secrets = os.path.join(env["HOME"], ".config", "keepawake", "env")
+    for body, want in (("KEEPAWAKE_BOT_TOKEN=1:x\nKEEPAWAKE_CHAT_ID=\n", False),
+                       ("KEEPAWAKE_BOT_TOKEN=1:x\nKEEPAWAKE_CHAT_ID='-100123'\n", True)):
+        with open(secrets, "w") as fh:
+            fh.write(body)
+        os.remove(calls)
+        run(env, "--no-polkit")
+        check("bot-unit-enabled-%s" % ("with-chat-id" if want else "not-without-chat-id"),
+              "enable --now keepawake-telegram.service" in open(calls).read(), want)
+
     print("no systemd")
     env, rule, calls = world(os.path.join(tmp, "nosystemd"), systemd=False)
     code = []
@@ -283,6 +299,217 @@ with tempfile.TemporaryDirectory() as tmp:
     code = []
     out = run(env, "--update=sometimes", extras=False, rc=code)
     check("settings-bad-flag-refused", (code, "--update takes" in out), ([2], True))
+
+# macOS's installer, on a Mac only: it needs Homebrew's formulae, which it
+# offers to install, and launchd, stood in for here by a launchctl that logs.
+if sys.platform == "darwin":
+    print("macOS")
+    with tempfile.TemporaryDirectory() as tmp:
+        env, _, calls = world(tmp)
+        env.pop("SCLAUDE_OS")
+        stubs = env["PATH"].split(":")[0]
+        launched = os.path.join(tmp, "launchctl.calls")
+        # An agent is loaded while loaded-<label> is there, which the bench
+        # writes and bootout takes away; bootout-fails has bootout refuse, as
+        # launchctl does for a job still exiting.
+        with open(os.path.join(stubs, "launchctl"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\necho "$*" >> %s\ncase "$1" in\n'
+                     '  print) [[ -e "%s/loaded-${2##*/}" ]] ;;\n'
+                     '  bootout) [[ ! -e "%s/bootout-fails" ]] && rm -f "%s/loaded-${2##*/}" ;;\n'
+                     'esac\n' % (launched, tmp, tmp, tmp))
+        os.chmod(os.path.join(stubs, "launchctl"), 0o755)
+        # Who holds :3000, as lsof -F says it; nobody unless the bench writes
+        # one, so the machine's own proxy does not decide the answer.
+        holder = os.path.join(tmp, "port.holder")
+        with open(os.path.join(stubs, "lsof"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ -f %s ]] && cat %s\nexit 0\n' % (holder, holder))
+        os.chmod(os.path.join(stubs, "lsof"), 0o755)
+        # The sudoers rule goes where the bench says; sudo installs it there
+        # without making it root's, which a bench cannot.
+        rule = os.path.join(tmp, "sudoers.d", "keepawake")
+        os.makedirs(os.path.dirname(rule))
+        env["KEEPAWAKE_SUDOERS_RULE"] = rule
+        with open(os.path.join(stubs, "sudo"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n'
+                     'if [[ "$1" == install ]]; then cp "${@: -2:1}" "${@: -1}"; exit; fi\n'
+                     '"$@"\n')
+        bin_dir = os.path.join(env["HOME"], ".local", "bin")
+        agents = os.path.join(env["HOME"], "Library", "LaunchAgents")
+        code = []
+        out = run(env, extras=False, rc=code)
+        check("macos-exit-0", code, [0])
+        check("macos-platform-said", "platform: macOS" in out, True)
+        check("macos-extras-offered", "keepawake and its Telegram bot come with ./install.sh --extras" in out,
+              True)
+        check("macos-no-keepawake", os.path.exists(os.path.join(bin_dir, "keepawake")), False)
+        check("macos-no-systemctl", os.path.exists(calls), False)
+        check("macos-agents-written", sorted(os.listdir(agents)) if os.path.isdir(agents) else [],
+              ["sclaude.gate.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
+        log = open(launched).read() if os.path.exists(launched) else ""
+        check("macos-agents-loaded", log.count("bootstrap gui/"), 3)
+        gate = open(os.path.join(agents, "sclaude.gate.plist")).read() if os.path.isdir(agents) else ""
+        check("macos-gate-on-demand-on-loopback",
+              ("<string>--gate</string>" in gate, "<string>127.0.0.1</string>" in gate,
+               "<string>3001</string>" in gate,
+               "RunAtLoad" in re.sub(r"<!--.*?-->", "", gate, flags=re.S)), (True, True, True, False))
+        check("macos-gate-agent-is-a-plist",
+              subprocess.run(["plutil", "-lint", os.path.join(agents, "sclaude.gate.plist")],
+                             capture_output=True).returncode, 0)
+        proxy = open(os.path.join(agents, "sclaude.proxy.plist")).read() if os.path.isdir(agents) else ""
+        check("macos-agent-placeholders-filled", "@" in re.sub(r"<!--.*?-->", "", proxy, flags=re.S), False)
+        check("macos-agent-gnu-first", "/libexec/gnubin:" in proxy and "/opt/bash/bin" in proxy, True)
+
+        print("macOS extras")
+        os.remove(launched)
+        out = run(env, rc=code)
+        check("macos-extras-exit-0", code[-1], 0)
+        check("macos-extras-linked",
+              [os.path.islink(os.path.join(bin_dir, n)) for n in ("keepawake", "keepawake-macos")],
+              [True, True])
+        check("macos-extras-code-server-wrapper",
+              (os.path.islink(os.path.join(bin_dir, "code-server-start")),
+               os.path.exists(os.path.join(bin_dir, "code-server-proxy"))), (True, False))
+        check("macos-extras-agents", sorted(os.listdir(agents)),
+              ["keepawake.code-server.plist", "keepawake.hold.plist", "keepawake.plist",
+               "sclaude.gate.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
+        log = open(launched).read()
+        check("macos-extras-loaded", log.count("bootstrap gui/"), 6)
+        code_agent = open(os.path.join(agents, "keepawake.code-server.plist")).read()
+        check("macos-code-server-runs-the-wrapper",
+              os.path.join(bin_dir, "code-server-start") in code_agent, True)
+        check("macos-code-server-not-started-by-loading",
+              ("RunAtLoad" in re.sub(r"<!--.*?-->", "", code_agent, flags=re.S),
+               "KeepAlive" in re.sub(r"<!--.*?-->", "", code_agent, flags=re.S)), (False, False))
+        check("macos-code-server-unconfigured-said",
+              "no ~/.config/code-server/config.yaml" in out, True)
+        hold = open(os.path.join(agents, "keepawake.hold.plist")).read()
+        check("macos-hold-runs-the-holder", os.path.join(bin_dir, "keepawake-macos") in hold, True)
+        check("macos-no-polkit-on-a-mac", "polkit" in out, False)
+        check("macos-lid-offered-without-a-terminal",
+              ("sudoers rule for the lid" in out, "./install.sh --lid" in out,
+               os.path.exists(rule)), (True, True, False))
+        check("macos-bot-waits-for-its-token",
+              ("keepawake.telegram is not loaded" in out,
+               any(line.startswith("bootstrap ") and "keepawake.telegram" in line for line in log.splitlines())),
+              (True, False))
+        secrets = os.path.join(env["HOME"], ".config", "keepawake")
+        check("macos-secrets-dir-made", oct(os.stat(secrets).st_mode & 0o777), "0o700")
+
+        # A token with no chat id is not enough: the bot would exit and be
+        # restarted every ten seconds.
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        check("macos-bot-waits-for-its-chat-id",
+              ("lacks the token or the chat id" in out,
+               os.path.exists(os.path.join(agents, "keepawake.telegram.plist"))), (True, False))
+
+        # The token in place: the bot's agent is written and loaded, and the
+        # token stays in the file, which the bot reads itself.
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=42\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        bot = os.path.join(agents, "keepawake.telegram.plist")
+        body = open(bot).read() if os.path.exists(bot) else ""
+        check("macos-bot-agent-written", os.path.exists(bot), True)
+        check("macos-bot-agent-loaded", "bootstrap gui/" in open(launched).read() and
+              any(line.endswith("keepawake.telegram.plist") for line in open(launched).read().splitlines()),
+              True)
+        check("macos-bot-runs-telegramd", "%s/keepawake/telegramd.py" % ROOT in body
+              or "%s/keepawake/telegramd.py" % os.path.realpath(ROOT) in body, True)
+        check("macos-bot-agent-has-no-token", "123:secret" in body, False)
+        check("macos-bot-agent-is-a-plist",
+              subprocess.run(["plutil", "-lint", bot], capture_output=True).returncode, 0)
+        check("macos-env-made-private", oct(os.stat(os.path.join(secrets, "env")).st_mode & 0o777), "0o600")
+
+        # A re-run reloads only what changed: an unchanged agent that is
+        # loaded is left running (a reload would stop code-server for good).
+        def mark_loaded():
+            for name in os.listdir(agents):
+                open(os.path.join(tmp, "loaded-" + name[:-len(".plist")]), "w").close()
+
+        def unmark_loaded():
+            for name in os.listdir(tmp):
+                if name.startswith("loaded-"):
+                    os.remove(os.path.join(tmp, name))
+
+        mark_loaded()
+        with open(os.path.join(agents, "keepawake.hold.plist"), "a") as fh:
+            fh.write("<!-- an older template -->\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        log = open(launched).read().splitlines()
+        check("macos-rerun-unchanged-left-running",
+              sorted(line.split("/")[-1] for line in log if line.startswith(("bootout ", "bootstrap "))),
+              ["keepawake.hold", "keepawake.hold.plist"])
+        check("macos-rerun-unchanged-said", "running: keepawake.code-server, unchanged" in out, True)
+
+        # units_refresh wrote a loaded agent's file after its last load: the
+        # file is what install.sh would write, and still not what launchd
+        # runs on, so it is reloaded.
+        mark_loaded()
+        later = time.time() + 60
+        os.utime(os.path.join(agents, "keepawake.plist"), (later, later))
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        log = open(launched).read().splitlines()
+        check("macos-rerun-refreshed-file-reloaded",
+              sorted(line.split("/")[-1] for line in log if line.startswith(("bootout ", "bootstrap "))),
+              ["keepawake", "keepawake.plist"])
+
+        # The bot's token taken away while it runs, and launchd refusing to
+        # unload it: the installer goes on, and its file is gone, so that
+        # neither the next login nor units_refresh loads it again.
+        unmark_loaded()
+        open(os.path.join(tmp, "loaded-keepawake.telegram"), "w").close()
+        open(os.path.join(tmp, "bootout-fails"), "w").close()
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=\nKEEPAWAKE_CHAT_ID=42\n")
+        code = []
+        out = run(dict(env, LAUNCHD_WAIT_TRIES="1"), "--no-lid", rc=code)
+        check("macos-bot-off-bootout-refused",
+              (code, "keepawake.telegram is not loaded" in out, "launchd still runs it" in out,
+               "Remote Login is off" in out,
+               os.path.exists(os.path.join(agents, "keepawake.telegram.plist"))),
+              ([0], True, True, True, False))
+        os.remove(os.path.join(tmp, "bootout-fails"))
+        unmark_loaded()
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=42\n")
+
+        out = run(env, "--lid")
+        text = open(rule).read() if os.path.exists(rule) else ""
+        check("macos-lid-rule-written", "someone ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, "
+              "/usr/bin/pmset -a disablesleep 0" in text, True)
+        check("macos-lid-rule-passes-visudo",
+              subprocess.run(["visudo", "-cf", rule], capture_output=True).returncode, 0)
+        check("macos-lid-undo-said", "sudo pmset -a disablesleep 0" in out, True)
+        out = run(env)
+        check("macos-lid-rule-kept", "the sudoers rule is in place" in out, True)
+        out = run(env, extras=False)
+        check("macos-extras-kept", ("extras: kept" in out, "keepawake.hold.plist" in os.listdir(agents)),
+              (True, True))
+
+        # :3000 held by something else: the proxy's agent is written, not loaded.
+        with open(holder, "w") as fh:
+            fh.write("p123\ncnode\n")
+        os.remove(launched)
+        out = run(env)
+        log = open(launched).read() if os.path.exists(launched) else ""
+        loaded = [line for line in log.splitlines() if line.startswith("bootstrap ")]
+        check("macos-port-held-proxy-not-loaded",
+              ("node holds :3000" in out, any("sclaude.proxy" in line for line in loaded)),
+              (True, False))
+        check("macos-port-held-gate-not-loaded",
+              ("node holds :3001" in out, any("sclaude.gate" in line for line in loaded)),
+              (True, False))
+        # Their files go too, or launchd would load them at the next login.
+        check("macos-port-held-files-removed",
+              ("run ./install.sh again" in out,
+               [os.path.exists(os.path.join(agents, n)) for n in ("sclaude.proxy.plist", "sclaude.gate.plist")]),
+              (True, [False, False]))
 
 print("the words agree with sclaude's")
 DEV = open(os.path.join(ROOT, "sclaude", "lib", "core", "developer.sh"), encoding="utf-8").read()

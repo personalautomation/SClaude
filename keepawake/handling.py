@@ -7,7 +7,6 @@ import collections
 import logging
 import os
 import shlex
-import subprocess
 import threading
 import time
 
@@ -15,7 +14,7 @@ from keepawake import docs, review_keys, state
 from keepawake.i18n import DEFAULT, current, set_lang, t
 from keepawake.state import HOLD_SECONDS, locked, read
 from keepawake import asks, card_view, holding, menus, phone_access, project_config, repos, services, sessions, shell, sleep_warning, status_report, topics, widgets
-from keepawake import menu_widget
+from keepawake import menu_widget, units
 
 
 log = logging.getLogger("keepawake")
@@ -392,7 +391,7 @@ class Handler(object):
             return
         on, out = phone_access.phone_on()
         if not on:
-            self.bot.send(t("chrome.gatefail", log=status_report.escape(out[-1500:])))
+            self.bot.send(phone_access.fail_text(out))
             return
         log.info("phone access turned on by /phone")
         sleep_warning.wait_for_phone(self.bot.send(t("svc.phonewait")))
@@ -493,7 +492,7 @@ class Handler(object):
         elif data_raw in ("code_start", "code_restart", "code_stop"):
             verb = {"code_start": "start", "code_restart": "restart",
                     "code_stop": "stop"}[data_raw]
-            shell.run("systemctl --user %s code-server.service" % verb)
+            shell.run(units.command(verb, "code-server.service"))
             self.result(message_id, services.code_text())
         elif data_raw == "menu_services":
             self.bot.edit(message_id, t("svc.title"), menus.services_keyboard())
@@ -549,7 +548,7 @@ class Handler(object):
             if not on:
                 # Most often: funnel not allowed for this node in the tailnet
                 # policy, or this user is not Tailscale's operator.
-                self.bot.edit(message_id, t("chrome.gatefail", log=status_report.escape(out[-1500:])),
+                self.bot.edit(message_id, phone_access.fail_text(out),
                               menus.services_keyboard())
                 return
             log.info("phone access turned on")
@@ -640,7 +639,7 @@ class Handler(object):
             # with a live server: nobody asked to bring it up for the sake of a
             # changed choice.
             if was != path and services.code_running():
-                shell.run("systemctl --user restart code-server.service")
+                shell.run(units.command("restart", "code-server.service"))
             self.bot.edit(message_id, repos.repo_text(name), sessions.features_keyboard(name))
         elif data_raw.startswith("cfgset:"):
             # sclaude, and for review gh on every workflow, take seconds: off
@@ -769,7 +768,7 @@ class Handler(object):
                 time.sleep(0.5)
             note = t("card.mapready") if card_view.feature_dev(repo, slug) else t("card.mapfailed")
         elif action == "code":
-            shell.run("systemctl --user start code-server.service")
+            shell.run(units.command("start", "code-server.service"))
             # The card redrawn at once would still call it stopped.
             for _ in range(10):
                 if services.code_running():
@@ -831,13 +830,13 @@ class Handler(object):
 
     def restart(self, message_id):
         # The daemon restarts itself, and this is the case where the order
-        # matters more than the return code: systemctl kills us right in the
+        # matters more than the return code: the restart kills us right in the
         # middle of handling, and there is nobody else to report the restart —
         # the process is already gone.
         #
         # So first the "restarting" message and only then the command itself:
         # detached from us (start-new-session) and with a pause, so that
-        # sendMessage has time to go out over the network. Otherwise systemd
+        # sendMessage has time to go out over the network. Otherwise systemd (or launchd)
         # kills the whole process group along with the answer not yet sent.
         pid = os.getpid()
         self.bot.edit(message_id,
@@ -848,11 +847,7 @@ class Handler(object):
             st["restart_notify"] = message_id
             st["restart_from_pid"] = pid
             st["restart_page"] = False
-        subprocess.Popen(
-            ["bash", "-c",
-             "sleep 2; systemctl --user restart " + state.BOT_UNIT],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        units.restart_later(state.BOT_UNIT, 2)
 
     def decision(self, raw, message_id, cid, now):
         action, _, ts = raw.partition(":")

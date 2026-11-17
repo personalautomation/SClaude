@@ -61,7 +61,7 @@ def drive(rows, keys, height=24):
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv("/bin/bash", ["bash", "-c", script])
+        os.execvp("bash", ["bash", "-c", script])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", height, 100, 0, 0))
 
     buf, step, deadline = b"", 0, time.time() + 20

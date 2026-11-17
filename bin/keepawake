@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 #
-# Keeps Windows from sleeping while there is someone in WSL to work.
+# Keeps the machine from sleeping while there is someone to work: Windows from
+# WSL, a plain Linux machine, a Mac.
 #
-# Once a minute (the keepawake.timer systemd timer) it counts the holders — live
-# claude processes, mobile SSH sessions, code-server sessions — and, if there is
-# anyone at all, pushes the deadline an hour forward. The Windows side
-# (KeepAwake.ps1) reads the resulting state file and keeps the system awake
-# until the deadline passes. It decides nothing itself: the counting happens
-# here, the executing there.
+# Once a minute (the keepawake.timer systemd timer, the keepawake launchd agent
+# on macOS) it counts the holders — live claude processes, mobile SSH sessions,
+# code-server sessions — and, if there is anyone at all, pushes the deadline an
+# hour forward. The holding side reads the resulting state file and keeps the
+# system awake until the deadline passes: KeepAwake.ps1 on Windows,
+# keepawake-linux or keepawake-macos on the machine itself. It decides nothing
+# itself: the counting happens here, the executing there.
 #
 #   keepawake              one run (what the timer calls)
 #   keepawake status       why the laptop is (not) sleeping — the whole picture
@@ -19,11 +21,14 @@
 # always "an hour from now". Accumulating would mean three short connections
 # leave the laptop awake for three hours after all of them have closed.
 #
-# The state lives on the Windows side (C:\Users\<user>\.keepawake\state.json),
-# because PowerShell reads it — and reads it at the very moment WSL may already
-# have stopped. The other direction, reading from Windows over \\wsl$, breaks
-# exactly when it is needed.
+# Under WSL the state lives on the Windows side
+# (C:\Users\<user>\.keepawake\state.json), because PowerShell reads it — and
+# reads it at the very moment WSL may already have stopped. The other direction,
+# reading from Windows over \\wsl$, breaks exactly when it is needed.
 set -uo pipefail
+
+# macOS: Homebrew's bash 5 and the GNU tools first (sclaude/lib/core/macos.sh).
+[[ "${OSTYPE:-}" == darwin* ]] && source "$(dirname "$(readlink -f "$0")")/../sclaude/lib/core/macos.sh"
 
 # Everything below, bash is obliged to read to the end before it executes a
 # single command from here: it finds a compound command's closing brace by
@@ -42,6 +47,10 @@ set -uo pipefail
 SELF="$(basename "$0")"
 KEEPAWAKE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 STATE_PY="$KEEPAWAKE/keepawake/state.py"
+# What is asked about other processes, their ports and the machine, on Linux
+# and macOS alike: sclaude's one place for it.
+# shellcheck source=../sclaude/lib/core/procinfo.sh
+source "$KEEPAWAKE/sclaude/lib/core/procinfo.sh"
 
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/keepawake"
 LOG_FILE="$LOG_DIR/keepawake.log"
@@ -58,6 +67,13 @@ DEV_PORT_LAST=3199
 mkdir -p "$LOG_DIR"
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# Tailscale's app on macOS keeps its CLI inside the bundle; the link into PATH
+# is a setting the person may never have turned on.
+TAILSCALE_APP_CLI=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+if procinfo_darwin && ! have tailscale && [[ -x "$TAILSCALE_APP_CLI" ]]; then
+  tailscale() { "$TAILSCALE_APP_CLI" "$@"; }
+fi
 
 # Windows commands by full path rather than through PATH. In systemd's
 # environment there are no Windows paths in PATH — WSL adds them for interactive
@@ -76,15 +92,12 @@ winexe() {
   fi
 }
 
-# A process's parent. Through /proc/PID/status rather than field 4 of
-# /proc/PID/stat: the command name there is written in brackets and may contain
+# A process's parent is procinfo's proc_parent. Not field 4 of /proc/PID/stat
+# read blindly: the command name there is written in brackets and may contain
 # spaces, and then awk '{print $4}' returns a piece of the name rather than the
 # ppid. A live example on this machine is "npm exec chrome", whose field 4 is
 # "chrome)". In an arithmetic context bash takes such a value for a variable
-# name and dies with unbound variable.
-ppid_of() {
-  awk '/^PPid:/ {print $2; exit}' "/proc/$1/status" 2>/dev/null
-}
+# name and dies with unbound variable. proc_parent reads from the last ")" on.
 state() { python3 "$STATE_PY" "$@"; }
 
 log() {
@@ -136,12 +149,10 @@ read_snapshot() {
   done < "$SOFT_SNAPSHOT"
 }
 
-# Bytes written by the process. wchar specifically, not rchar: reading grows
-# even when idling (the server polls files), whereas a process writes only when
-# answering a request or keeping a log.
-io_wchar_of() {
-  awk '/^wchar:/ {print $2; exit}' "/proc/$1/io" 2>/dev/null
-}
+# Bytes the process put out (procinfo's proc_output_bytes): what it wrote on
+# Linux — wchar specifically, not rchar: reading grows even when idling (the
+# server polls files), whereas a process writes only when answering a request
+# or keeping a log. macOS has no such counter, and gives nothing.
 
 # Whether a holder's counter has changed since the previous run. A key's first
 # appearance counts as "active": there is nothing to judge by, and the better
@@ -264,13 +275,15 @@ count_claude() {
 # filled in inconsistently under WSL, and tmux and screen give false negatives
 # there. A live session is always a descendant of sshd with a line like
 # `sshd: <user>@pts/3`, which also cuts off the master daemon and short-lived
-# `sshd: [accepted]` entries.
+# `sshd: [accepted]` entries. Since OpenSSH 9.8 the session is a process of its
+# own, sshd-session, and its line reads `sshd-session: <user>@pts/3` — on
+# current distributions and on macOS, where the tty is `ttys003`.
 count_ssh() {
   local -A seen=()
   local pid cmd tty
-  for pid in $(pgrep -x sshd 2>/dev/null); do
-    cmd=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline")
-    [[ "$cmd" != sshd:* ]] && continue
+  for pid in $(pgrep -x 'sshd|sshd-session' 2>/dev/null); do
+    cmd=$(proc_cmdline "$pid")
+    [[ "$cmd" != sshd:* && "$cmd" != sshd-session:* ]] && continue
     [[ "$cmd" == *"[accepted]"* || "$cmd" == *"[listener]"* || "$cmd" == *"[net]"* ]] && continue
     [[ "$cmd" != *@* ]] && continue
     tty="${cmd##*@}"
@@ -299,6 +312,19 @@ count_code_session() {
   if (( age < CODE_ALIVE_SECONDS )); then printf '1'; else printf '0'; fi
 }
 
+# Whether a service runs: a systemd user unit on Linux; on macOS a launchd
+# agent of this user's session, named by its label (none: not on macOS).
+service_up() {
+  local unit="$1" label="${2:-}"
+  if procinfo_darwin; then
+    [[ -n "$label" ]] || return 1
+    launchctl print "gui/$(id -u)/$label" 2>/dev/null \
+      | grep -q '^[[:space:]]*state = running'
+  else
+    systemctl --user is-active "$unit" >/dev/null 2>&1
+  fi
+}
+
 # A running code-server with no tabs open. A soft holder: it lives for days on
 # its own, and there is no reason to keep the laptop awake for ever because of
 # it.
@@ -309,9 +335,13 @@ count_code_session() {
 # very fact of it running counted as activity. So we ask someone_around as well:
 # an open tab is the hard holder code, a terminal in it likewise, while the
 # service by itself proves nothing beyond having been switched on once.
+#
+# On macOS the service is the agent install.sh writes (keepawake.code-server,
+# what keepawake/units.py names code-server.service) — the one the bot starts
+# and stops. code-server keeps its XDG paths there too, so the heartbeat above
+# is where it is on Linux.
 count_code_server() {
-  systemctl --user is-active code-server.service >/dev/null 2>&1 \
-    || { printf '0'; return; }
+  service_up code-server.service keepawake.code-server || { printf '0'; return; }
   someone_around || { printf '0'; return; }
   printf '1'
 }
@@ -323,19 +353,31 @@ count_code_server() {
 # shellIntegration catches any process that merely happens to have the word in
 # its arguments — while debugging it caught the bash of the Claude Code session
 # itself. Kinship cannot be faked; a substring match can happen by accident.
+#
+# The kinship is walked in one snapshot of every process: a ps for each of the
+# user's processes and another for each step up its chain came to thousands of
+# forks a minute on a Mac, where proc_parent is a ps of its own.
 count_code() {
   local srv
   srv=$(pgrep -f 'code-server.*out/node/entry' 2>/dev/null | head -1)
   [[ -z "$srv" ]] && { printf '0'; return; }
 
-  local -A seen=()
-  local pid tty anc hops
-  for pid in $(ps -u "$USER" -o pid= 2>/dev/null); do
-    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
-    [[ -z "$tty" || "$tty" == "?" ]] && continue
+  local -A parent=() seen=()
+  local -a mine=()
+  local me pid ppid uid tty anc hops entry
+  me=$(id -u)
+  while read -r pid ppid uid tty; do
+    parent[$pid]=$ppid
+    # "?" is no terminal, "??" on macOS: code-server's own children (the
+    # extension host, ptyHost, the watcher) are there, and are not terminals.
+    [[ "$uid" == "$me" && -n "$tty" && "$tty" != "?"* ]] && mine+=("$pid $tty")
+  done < <(ps -A -o pid=,ppid=,uid=,tty= 2>/dev/null)
+
+  for entry in "${mine[@]}"; do
+    read -r pid tty <<< "$entry"
     anc=$pid
     for hops in 1 2 3 4 5 6; do
-      anc=$(ppid_of "$anc")
+      anc=${parent[$anc]:-}
       [[ -z "$anc" ]] && break
       (( anc <= 1 )) && break
       if [[ "$anc" == "$srv" ]]; then seen[$tty]=1; break; fi
@@ -373,8 +415,14 @@ print(sum(1 for p in (d.get('Peer') or {}).values()
 #
 # The ^ anchor is essential: without it pgrep -f catches any command where the
 # word "sclaude" merely appears in the arguments — while debugging it caught the
-# checking command itself. With the anchor only a process whose argv[0] starts
-# with sclaude matches.
+# checking command itself. With the anchor only a process whose argv[0] is
+# sclaude matches — or whose argv[0] is a bash running it: sclaude is started
+# through its `#!/usr/bin/env bash` line, so the kernel hands bash the script's
+# path and the command line reads "bash /…/sclaude new …" (on macOS Homebrew's
+# bash, which macos.sh runs it under). `^sclaude` alone matched neither, and a
+# running step held nothing.
+SCLAUDE_PROC='^([^ ]*/)?sclaude( |$)|^([^ ]*/)?bash ([^ ]*/)?sclaude( |$)'
+
 count_sclaude() {
   local -A prev=()
   read_snapshot prev
@@ -389,12 +437,12 @@ count_sclaude() {
   local p=$$
   while [[ "$p" -gt 1 ]]; do
     skip[$p]=1
-    p=$(ppid_of "$p")
+    p=$(proc_parent "$p")
     [[ -z "$p" ]] && break
   done
 
   local pid alive=0
-  for pid in $(pgrep -f '^sclaude' 2>/dev/null); do
+  for pid in $(pgrep -f "$SCLAUDE_PROC" 2>/dev/null); do
     [[ -n "${skip[$pid]:-}" ]] && continue
     alive=1
     break
@@ -486,20 +534,20 @@ transcript_size() {
 # catches any command where the path is merely mentioned — the check itself
 # included. The answer is binary: the server spawns nine processes, but the
 # holder here is one — the editor is either connected or not.
+#
+# On macOS the editor is the app itself, on this machine: its processes run
+# from inside the bundle, and its journal is in Application Support. The ^
+# anchors the pattern to argv[0] there too; the bundle's path holds spaces,
+# so its directories are matched as anything up to the bundle's name.
 VSCODE_HISTORY="$HOME/.vscode-server/data/User/History"
+VSCODE_PROC="^$HOME/.vscode-server/"
+if procinfo_darwin; then
+  VSCODE_HISTORY="$HOME/Library/Application Support/Code/User/History"
+  VSCODE_PROC='^/.*/Visual Studio Code[^/]*\.app/Contents/MacOS/'
+fi
 
 count_vscode() {
-  local pid a0 connected=0
-  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
-    # We suppress stderr of the whole substitution rather than of tr alone:
-    # bash opens the file itself, before the command even starts, and a
-    # "2>/dev/null" inside the substitution does not catch its complaint about a
-    # process that has gone. Processes end between ls /proc and reading cmdline
-    # all the time — that is normal, not a failure.
-    a0=$( { tr '\0' '\n' < "/proc/$pid/cmdline" | head -1; } 2>/dev/null ) || continue
-    if [[ "$a0" == "$HOME/.vscode-server/"* ]]; then connected=1; break; fi
-  done
-  (( connected )) || { printf '0'; return; }
+  pgrep -f "$VSCODE_PROC" >/dev/null 2>&1 || { printf '0'; return; }
 
   [[ -d "$VSCODE_HISTORY" ]] || { printf '0'; return; }
   # Depth 2: History/<file hash>/<version>. We look at the freshest entry in the
@@ -529,9 +577,10 @@ count_vscode() {
 # leads there regardless of whose feature it is and who started the server.
 #
 # If the log is not there — the server was started by hand somewhere else — we
-# look at the counter of bytes written in /proc. The same fact (the server wrote
-# something), measured by the kernel instead of the filesystem, and it works for
-# any server on this port.
+# look at the counter of bytes it put out (proc_output_bytes). The same fact
+# (the server answered something), measured by the kernel instead of the
+# filesystem, and it works for any server on this port — on Linux: macOS
+# keeps no such counter, so there a server started by hand is not counted.
 #
 # But writing is not enough either. A request comes not from a person but from a
 # browser: a tab left open goes to the server by itself — an HMR reconnect, the
@@ -569,12 +618,12 @@ count_dev() {
   # means "first appearance", that is an hour of holding for a log that has not
   # changed since the night. So every server is asked, even after one has
   # already said yes.
-  local active=0 port pid cwd log mtime wchar
+  local active=0 port pid cwd log mtime out
   local -A seen=()
   while read -r port pid; do
     [[ -n "$pid" && -z "${seen[$pid]:-}" ]] || continue
     seen[$pid]=1
-    cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null)
+    cwd=$(proc_cwd "$pid")
     log="$cwd/$DEV_LOG_REL"
     # A server an older sclaude started logs in the old place.
     [[ -f "$log" ]] || log="$cwd/.feature/dev.log"
@@ -583,24 +632,24 @@ count_dev() {
       mtime=$(stat -L -c %Y "$log" 2>/dev/null || echo 0)
       grew "dev:$log" "$mtime" 1 prev && active=1
     elif [[ "$port" == "$DEV_PORT" ]] \
-         && ! tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline" | grep -q sclaude-proxy; then
-      wchar=$(io_wchar_of "$pid")
-      [[ -n "$wchar" ]] || continue
+         && ! proc_cmdline "$pid" | grep -q sclaude-proxy; then
+      out=$(proc_output_bytes "$pid")
+      [[ -n "$out" ]] || continue
       # A threshold in bytes rather than zero: the server occasionally writes
       # housekeeping even in silence. One request's log line is under a hundred
       # bytes, so a quarter of a kilobyte separates real traffic from background
       # noise without losing single requests.
-      grew "dev:$pid" "$wchar" 256 prev && active=1
+      grew "dev:$pid" "$out" 256 prev && active=1
     fi
-  done < <(ss -ltnp 2>/dev/null | awk -v one="$DEV_PORT" \
+  done < <(ports_pids | awk -v one="$DEV_PORT" \
              -v first="$DEV_PORT_FIRST" -v last="$DEV_PORT_LAST" '
-    { port = $4; sub(/.*:/, "", port)
+    { port = $1
       if (port !~ /^[0-9]+$/) next
-      # A number from here on: after sub() it is a string, and a string
+      # A number from here on: read from a line it is a string, and a string
       # compared with a number compares as text — "31234" > "3199" is false.
       port = port + 0
       if (port != one && (port < first + 0 || port > last + 0)) next
-      if (match($0, /pid=[0-9]+/)) print port, substr($0, RSTART + 4, RLENGTH - 4) }')
+      print port, $2 }')
 
   (( active )) && ! someone_around && active=0
   printf '%d' "$active"
@@ -630,6 +679,13 @@ BUSY_LOADAVG=0.7
 # a live person — what they type moves atime, and the shell's echo immediately
 # moves mtime, so a live session has both fresh at once.
 #
+# Except on macOS, where a terminal's atime does not move on reading: it stays
+# at the moment the terminal was opened, and the smaller stamp would call every
+# session idle — work over SSH from the phone with the lid closed included,
+# and the bot would ask every hour whether to let the Mac sleep while the
+# person typed. There mtime is all there is: the echo of a keystroke moves it,
+# and so, unavoidably, does a forgotten tab still printing.
+#
 # Prints 999999 if there are no interactive sessions at all. That is not "a very
 # long idle" but "nothing to measure": the reading side is obliged to tell one
 # from the other, otherwise you get "277 hours without input" on a machine that
@@ -643,12 +699,14 @@ idle_seconds() {
   # on a day spent at the machine since morning. Whose terminal it is does not
   # matter; typing in it is the same either way.
   for tty in $(ps -u "$USER" -o tty= 2>/dev/null | sort -u); do
-    [[ -z "$tty" || "$tty" == "?" ]] && continue
+    # "?" is no terminal, "??" on macOS.
+    [[ -z "$tty" || "$tty" == "?"* ]] && continue
     [[ -c "/dev/$tty" ]] || continue
     mtime=$(stat -c %Y "/dev/$tty" 2>/dev/null || echo 0)
     atime=$(stat -c %X "/dev/$tty" 2>/dev/null || echo 0)
     # The smaller stamp is that very "both are silent". Across terminals we
     # then take the largest: one where work is really happening is enough.
+    procinfo_darwin && atime=$mtime
     seen=$(( mtime < atime ? mtime : atime ))
     (( seen > newest )) && newest=$seen
   done
@@ -660,6 +718,15 @@ idle_seconds() {
     local hb; hb=$(stat -c %Y "$CODE_HEARTBEAT" 2>/dev/null || echo 0)
     (( hb > newest )) && newest=$hb
   fi
+  # On a Mac the person may be at the machine itself, in an editor or a
+  # browser, with no terminal touched: its keyboard and mouse are as much a
+  # sign of presence (input_idle, the HID system's idle time). WSL cannot see
+  # Windows' keyboard, nor a Linux service its session's, so there it says
+  # nothing.
+  local hid
+  if hid=$(input_idle) && (( now - hid > newest )); then
+    newest=$(( now - hid ))
+  fi
 
   (( newest == 0 )) && { printf '%d' 999999; return; }
   printf '%d' $(( now - newest ))
@@ -670,7 +737,7 @@ idle_seconds() {
 # anyone here at all".
 loaded() {
   local load
-  load=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
+  load=$(load_one || echo 0)
   awk -v l="$load" -v t="$BUSY_LOADAVG" 'BEGIN{exit !(l > t)}'
 }
 
@@ -800,8 +867,24 @@ tools_version() {
   printf '%s' "$desc"
 }
 
+# A service's state in systemd's words. On macOS launchd answers for the agent
+# its label names: "active" for one loaded that runs, or that is loaded at all
+# when it is a timer, whose runs come and go; "inactive" for a service loaded
+# but not running; "not loaded" for a plist launchd does not have.
 unit_state() {
-  local unit="$1" out
+  local unit="$1" label="${2:-}" out
+  if procinfo_darwin; then
+    if [[ -z "$label" || ! -f "$HOME/Library/LaunchAgents/$label.plist" ]]; then
+      printf 'not installed'
+    elif ! out=$(launchctl print "gui/$(id -u)/$label" 2>/dev/null); then
+      printf 'not loaded'
+    elif [[ "$unit" == *.timer ]] || grep -q '^[[:space:]]*state = running' <<<"$out"; then
+      printf 'active'
+    else
+      printf 'inactive'
+    fi
+    return
+  fi
   out=$(systemctl --user is-active "$unit" 2>/dev/null)
   if [[ -z "$out" || "$out" == "inactive" ]] \
      && ! systemctl --user cat "$unit" >/dev/null 2>&1; then
@@ -866,6 +949,9 @@ cmd_status() {
   # sleep" is the one thing status is most often opened for, and it must not
   # have to be assembled from the lines below.
   local left=$((until - now))
+  local platform; platform=$(state platform)
+  local sleeper='the machine'
+  [[ "$platform" == wsl ]] && sleeper=Windows
   if state hold; then
     if [[ "$hard" == "True" ]]; then
       # A hard holder does not look at the deadline: while one is there, there
@@ -875,7 +961,7 @@ cmd_status() {
       printf '🟢 HOLD until %s (%s)\n' "$until_local" "$(human_left $left)"
     fi
   else
-    printf '⚪ HOLD released — Windows sleeps by its own rules\n'
+    printf '⚪ HOLD released — %s sleeps by its own rules\n' "$sleeper"
   fi
 
   # We list all the holders, the zero ones included. Showing only the active
@@ -972,15 +1058,14 @@ cmd_status() {
   # behind a pipeline is grep's status, and the "could not ask" branch below was
   # dead. Status then lied "not running" every time tasklist.exe simply was not
   # found, that is under systemd — where there are no Windows paths in PATH.
-  local ps_out rc ps_alive win_line platform side
-  platform=$(state platform)
+  local ps_out rc ps_alive win_line side
   local win_bad=0 win_unknown=0
-  if [[ "$platform" == "linux" ]]; then
-    # No Windows: the holding side is keepawake-linux on this machine, and
-    # systemd knows whether it is alive.
+  if [[ "$platform" == "linux" || "$platform" == "macos" ]]; then
+    # No Windows: the holding side is keepawake-linux or keepawake-macos on
+    # this machine, and systemd or launchd knows whether it is alive.
     side="the holding side"
-    local holder; holder=$(unit_state keepawake-linux.service)
-    win_line="keepawake-linux $holder"
+    local holder; holder=$(unit_state "keepawake-$platform.service" keepawake.hold)
+    win_line="keepawake-$platform $holder"
     [[ "$holder" == "active" ]] || win_bad=1
   else
   side="the Windows side"
@@ -1003,22 +1088,31 @@ cmd_status() {
   fi
 
   local daemon timer stale=0
-  daemon=$(unit_state keepawake-telegram.service)
-  timer=$(unit_state keepawake.timer)
+  daemon=$(unit_state keepawake-telegram.service keepawake.telegram)
+  timer=$(unit_state keepawake.timer keepawake)
   # We take the staleness threshold from state.py: that is where it decides to
   # release the hold.
   local stale_after; stale_after=$(state const STALE_AFTER)
   (( age > ${stale_after:-900} )) && stale=1
 
+  # macOS's sshd is Remote Login, which launchd starts on a connection: the
+  # system domain has its job while Remote Login is on.
   local ssh_up=0
-  systemctl is-active ssh >/dev/null 2>&1 && ssh_up=1
+  if procinfo_darwin; then
+    launchctl print system/com.openssh.sshd >/dev/null 2>&1 && ssh_up=1
+  else
+    systemctl is-active ssh >/dev/null 2>&1 && ssh_up=1
+  fi
 
   local bad=()
   (( win_bad )) && bad+=("$side is not holding")
   [[ "$daemon" != "active" ]] && bad+=("daemon $daemon")
   [[ "$timer" != "active" ]] && bad+=("timer $timer")
   (( stale )) && bad+=("the file is not being updated")
-  (( ssh_up )) || bad+=("SSH is not running")
+  # What the person turns on, in the system's words.
+  local ssh_off='SSH is not running'
+  procinfo_darwin && ssh_off='Remote Login is off'
+  (( ssh_up )) || bad+=("$ssh_off")
 
   printf '\n'
   if (( ${#bad[@]} == 0 && win_unknown == 0 )); then
@@ -1047,7 +1141,7 @@ cmd_status() {
   if (( ssh_up )); then
     printf '   • remote access — SSH is listening\n'
   else
-    printf '   • remote access — SSH is not running, no way in from a phone\n'
+    printf '   • remote access — %s, no way in from a phone\n' "$ssh_off"
   fi
 
   printf '   • version — %s\n' "$(tools_version)"
@@ -1068,8 +1162,10 @@ win_log() {
   # PowerShell 5.1 puts a BOM at the start of the file — we drop it when
   # reading.
   # We drop the date: the entry is always today's, and it takes up room.
-  # The pattern must match what KeepAwake.ps1 and keepawake-linux write: "hold
-  # set", "hold released" and "holding" all start with "hold".
+  # The pattern must match what KeepAwake.ps1 and keepawake/hold_loop.py
+  # (keepawake-linux, keepawake-macos) write: "hold set", "hold released",
+  # "holding, until …", and hold_loop's own "holding: <why>" for a release that
+  # left a Mac's lid held — "holding, until" alone would lose that one.
   local psline
   psline=$(sed '1s/^\xEF\xBB\xBF//' "$pslog" | grep -E "hold set|hold released|holding" | tail -1)
   psline=${psline:-$(tail -1 "$pslog" | sed '1s/^\xEF\xBB\xBF//')}

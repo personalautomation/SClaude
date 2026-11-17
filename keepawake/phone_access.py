@@ -15,7 +15,7 @@ import urllib.request
 
 from keepawake.i18n import t
 from keepawake.state import locked, read
-from keepawake import card_view, services, shell
+from keepawake import card_view, services, shell, units
 
 
 log = logging.getLogger("keepawake")
@@ -126,12 +126,21 @@ def phone_on():
     On means the funnel is set up; the app opens once the address is
     published (gate_origin)."""
     PUBLISHED.update(host="", ok=False)
-    start = "" if port_open(GATE_PORT) else "systemctl --user start sclaude-gate.socket && "
+    start = "" if port_open(GATE_PORT) else units.command("start", "sclaude-gate.socket") + " && "
     out = shell.run(start + FUNNEL_ON, timeout=60)
     with locked() as st:
         st["phone_on_at"] = int(time.time())
         st.pop("published", None)
     return bool(gate_origin(None, False)), out
+
+
+def fail_text(out):
+    """What the chat says when phone access did not turn on: the commands'
+    last lines (tailscale's link to allow funnel, most often), and what is
+    needed once on this system."""
+    from keepawake import status_report
+    key = "chrome.gatefailmac" if units.on_macos() else "chrome.gatefail"
+    return t(key, log=status_report.escape(out[-1500:]))
 
 
 # A funnel just turned on is not reachable at once: Tailscale publishes its

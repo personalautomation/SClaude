@@ -172,7 +172,7 @@ check("gh failing: a failure", run(["bash", "-c", FETCH], broken)[1], 1)
 def draw(script):
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv("/bin/bash", ["bash", "-c", script])
+        os.execvp("bash", ["bash", "-c", script])
     buf = b""
     while True:
         try:
@@ -219,7 +219,7 @@ check("no settings row unasked", "config.json" in draw_config("", 1), False)
 def pick(flag, keys):
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv("/bin/bash", ["bash", "-c",
+        os.execvp("bash", ["bash", "-c",
                  'BOLD=""; DIM=""; GREEN=""; OFF=""; YELLOW=""\n'
                  'source "%s/core/picker.sh"\n'
                  'person_at_terminal() { true; }\n'

@@ -19,6 +19,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -109,8 +112,7 @@ os.unlink(written)
 def in_tty(body, env):
     cmd = 'bash -c \'source "%s/core/ui.sh" 2>/dev/null; source "%s/core/picker.sh" 2>/dev/null;' \
           ' source "%s/core/developer.sh" 2>/dev/null; %s; echo "rc=$?"\'' % (LIB, LIB, LIB, body)
-    out = subprocess.run(["script", "-qec", cmd, "/dev/null"], capture_output=True, text=True,
-                         stdin=subprocess.DEVNULL, env=dict(os.environ, **env)).stdout
+    out = benchlib.on_terminal(cmd, env=dict(os.environ, **env))
     return out.strip().splitlines()[-1].strip() if out.strip() else "?"
 
 
@@ -127,8 +129,7 @@ check("ask, terminal alone: no answer in a tab started from the phone",
              {"SCLAUDE_FROM_PHONE": "1"}), "rc=1")
 def typed(body, env, keys):
     cmd = 'bash -c \'source "%s/core/ui.sh" 2>/dev/null; %s\'' % (LIB, body)
-    return subprocess.run(["script", "-qec", cmd, "/dev/null"], capture_output=True, text=True,
-                          input=keys, env=dict(os.environ, **env)).stdout
+    return benchlib.on_terminal(cmd, input=keys, env=dict(os.environ, **env))
 
 
 SECRET = ('source "%s/core/environment.sh" 2>/dev/null; warn() { :; }; envs() { return 1; };'
@@ -149,7 +150,7 @@ check("update_can_ask: at a terminal",
 import time  # noqa: E402
 from keepawake import asks  # noqa: E402
 for flag, want in (("1", False), ("", True)):
-    with subprocess.Popen(["script", "-qec", "sleep 5", "/dev/null"], stdin=subprocess.PIPE,
+    with subprocess.Popen(benchlib.under_terminal("sleep 5"), stdin=subprocess.PIPE,
                           stdout=subprocess.DEVNULL, env=dict(os.environ, SCLAUDE_FROM_PHONE=flag)) as p:
         kid = 0
         for _ in range(50):

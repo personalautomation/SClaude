@@ -87,6 +87,7 @@ import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
 import dev_login  # noqa: E402
 import process  # noqa: E402 — the process map, and a feature's place on it
 import page_asset  # noqa: E402 — the tab's icon
+import procinfo  # noqa: E402 — other processes and their ports, Linux or macOS
 
 PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
@@ -595,30 +596,21 @@ def status_page(label, wt, state):
 
 # --- stopping the idle --------------------------------------------------------
 #
-# The check runs in a worker thread: it reads all of /proc and runs `ss`, and
-# on the event loop that would stall every proxied connection — HMR sockets and
-# page loads of every feature — for the length of it. The thread gets a
-# snapshot of what the loop knows and returns the features to stop; the loop
-# alone touches STARTING and STOPPING and starts processes.
+# The check runs in a worker thread: it reads every process's directory and
+# the listening ports (procinfo), and on the event loop that would stall every
+# proxied connection — HMR sockets and page loads of every feature — for the
+# length of it. The thread gets a snapshot of what the loop knows and returns
+# the features to stop; the loop alone touches STARTING and STOPPING and
+# starts processes.
 
 def listeners():
-    """{port: set of process groups listening on it}, from one `ss` run."""
-    try:
-        out = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True,
-                             timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
+    """{port: set of process groups listening on it}, from one `ss` run
+    (`lsof` on macOS)."""
     groups = {}
-    for line in out.splitlines():
-        cols = line.split()
-        if len(cols) < 4:
-            continue
-        port = cols[3].rsplit(":", 1)[-1]
-        if not port.isdigit():
-            continue
-        for pid in re.findall(r"pid=(\d+)", line):
+    for port, pids in procinfo.listening_pids().items():
+        for pid in pids:
             try:
-                groups.setdefault(int(port), set()).add(os.getpgid(int(pid)))
+                groups.setdefault(port, set()).add(os.getpgid(pid))
             except OSError:
                 pass
     return groups
@@ -626,14 +618,11 @@ def listeners():
 
 def working_dirs():
     """[(pid, pgid, cwd)] of every process whose directory can be read, from
-    one pass over /proc."""
+    one pass over /proc (`lsof` on macOS)."""
     out = []
-    for name in os.listdir("/proc"):
-        if not name.isdigit():
-            continue
-        pid = int(name)
+    for pid, cwd in procinfo.working_dirs():
         try:
-            out.append((pid, os.getpgid(pid), os.readlink("/proc/%d/cwd" % pid)))
+            out.append((pid, os.getpgid(pid), cwd))
         except OSError:
             continue
     return out
@@ -676,6 +665,11 @@ def idle_features(snapshot):
         return []
     groups = listeners()
     processes = working_dirs()
+    # Never empty on a live system — the proxy itself has a directory — so an
+    # empty list is lsof that failed or timed out on macOS: nothing is known,
+    # and nothing is stopped.
+    if not processes:
+        return []
     return [(label, wt) for label, wt, port in candidates
             if not busy(os.path.realpath(wt), groups.get(port, set()), processes,
                         snapshot["mine"])]
@@ -883,25 +877,25 @@ async def own_page(target, host, headers=None):
                            await gather_listing(host, "No such feature: %s" % label))
         # Started only when nothing answers yet: the socket, or a code-server
         # run some other way, is already the way in.
-        if not await asyncio.to_thread(code_running) and not await asyncio.to_thread(answers, 8080):
+        if not await asyncio.to_thread(code_running) and not await asyncio.to_thread(code_answers):
             try:
                 done = await asyncio.to_thread(
-                    subprocess.run, ["systemctl", "--user", "start", CODE_SERVICE],
+                    subprocess.run, ["bash", "-c", keepawake_units().command("start", CODE_SERVICE)],
                     stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
-                why = done.stderr.strip() if done.returncode else ""
+                why = (done.stderr.strip() or "it would not start") if done.returncode else ""
             except (OSError, subprocess.TimeoutExpired) as exc:
-                why = str(exc) or "systemctl did not answer"
+                why = str(exc) or "the service manager did not answer"
             if why:
                 return respond("502 Bad Gateway", page("Not started", (
                     "<h1>code-server did not start</h1><p>%s</p>" % html.escape(why))))
         # Whatever the service says: active comes the moment it forks, the
         # port only once it has bound — and with the socket, at once.
         for _ in range(20):
-            if await asyncio.to_thread(answers, 8080):
+            if await asyncio.to_thread(code_answers):
                 break
             await asyncio.sleep(0.5)
         return respond("303 See Other", "", (
-            "Location: %s/?%s" % (CODE_LOCAL, urlencode({"folder": found[0]})),))
+            "Location: %s/?%s" % (code_local()[0], urlencode({"folder": found[0]})),))
     if url.path == "/__sclaude/bpmn":
         # The whole cycle with no feature's place on it: the printed page,
         # drawn from the model now rather than read from a build, as this
@@ -1070,29 +1064,55 @@ MAP_NAME = "Process map (BPMN)"
 # as it stands. Only main's — the numbers are the product's, not a feature's.
 DORA_PAGE = ".sclaude/local/dora/index.html"
 DORA_NAME = "DORA metrics"
-# code-server for this machine's browser, at one address either way install.sh
-# sets it up: code-server-local.socket listening here and starting code-server
-# on contact (bind-addr elsewhere), or code-server itself on 127.0.0.1:8080
-# with the socket left off — and then nothing starts it on contact, so
-# /__sclaude/code starts the service first. Whether it runs is the
+# code-server for this machine's browser. On Linux at one address either way
+# install.sh sets it up: code-server-local.socket listening here and starting
+# code-server on contact (bind-addr elsewhere), or code-server itself on
+# 127.0.0.1:8080 with the socket left off — and then nothing starts it on
+# contact, so /__sclaude/code starts the service first. Whether it runs is the
 # service's to say: the socket's port always answers.
+#
+# On a Mac there is no forward: the forward is for a Windows browser outside
+# the tailnet, and a Mac's browser is on a machine in it. code-server is
+# reached at its own address there, from its config (code_server).
 CODE_LOCAL = "http://127.0.0.1:8080"
 CODE_SERVICE = os.environ.get("SCLAUDE_CODE_SERVICE") or "code-server.service"
+
+
+def keepawake_units():
+    """keepawake/units.py: a service as systemd's unit or launchd's agent."""
+    root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from keepawake import units
+    return units
+
+
+def code_local():
+    """(address, host, port) of code-server for this machine's browser."""
+    if keepawake_units().on_macos():
+        host, port = code_server()
+        # Every address includes loopback, and a browser refuses 0.0.0.0.
+        # localhost stays: code-server bound to it listens on ::1 alone on a
+        # Mac, which 127.0.0.1 would not reach.
+        if host in ("", "0.0.0.0", "::", "[::]"):
+            host = "127.0.0.1"
+        return "http://%s:%d" % (host, port), host.strip("[]"), port
+    return CODE_LOCAL, "127.0.0.1", 8080
+
+
+def code_answers():
+    _, host, port = code_local()
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
 
 
 def code_running():
     """True while code-server's service runs, False while it does not, None
     where there is no such service — no line for it then."""
-    try:
-        done = subprocess.run(["systemctl", "--user", "show", "-p", "LoadState,ActiveState", "--value",
-                               CODE_SERVICE], stdin=subprocess.DEVNULL, capture_output=True,
-                              text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    load, _, active = done.stdout.strip().partition("\n")
-    if done.returncode != 0 or load.strip() != "loaded":
-        return None
-    return active.strip() == "active"
+    return keepawake_units().status(CODE_SERVICE)
 FLOW_FRESH = float(os.environ.get("SCLAUDE_FLOW_FRESH") or 14)
 FLOW_LIMIT = 60
 FLOW = {}
@@ -1342,8 +1362,9 @@ async def handle(reader, writer):
 # --- the gate: the phone's entry from the internet ---------------------------
 #
 # `sclaude-proxy --gate` is what `tailscale funnel` publishes for the phone's
-# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the bot turns the
-# funnel on and off with phone access). It routes nothing itself: a request it lets
+# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001, launchd's
+# sclaude.gate on a Mac; the bot turns the funnel on and off with phone
+# access). It routes nothing itself: a request it lets
 # in goes on to the proxy on :3000 as it came, so starting, routing and idling
 # stay in one process. Its own job is who: a page opened from the bot proves
 # itself with Telegram's signed initData once (tg_webapp.py) and then carries
@@ -1977,6 +1998,37 @@ def gate_code_runs():
         return False
 
 
+# The name of the gate's socket in launchd/sclaude.gate.plist (Sockets).
+LAUNCHD_SOCKET = "Listeners"
+
+
+def launchd_sockets(name):
+    """The listening sockets launchd holds for this job under `name` in its
+    plist's Sockets, as file descriptors; [] when launchd did not start this
+    process with one (launch_activate_socket says ESRCH then), or off macOS.
+    launchd's socket activation, as LISTEN_FDS is systemd's."""
+    if sys.platform != "darwin":
+        return []
+    import ctypes
+    import ctypes.util
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        activate = libc.launch_activate_socket
+    except (OSError, AttributeError):
+        return []
+    activate.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+                         ctypes.POINTER(ctypes.c_size_t)]
+    activate.restype = ctypes.c_int
+    fds = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t(0)
+    if activate(name.encode(), ctypes.byref(fds), ctypes.byref(count)) != 0:
+        return []
+    out = [fds[i] for i in range(count.value)]
+    libc.free.argtypes = [ctypes.c_void_p]
+    libc.free(ctypes.cast(fds, ctypes.c_void_p))
+    return out
+
+
 async def gate_main():
     env = tg_webapp.read_env(GATE_ENV)
     token = env.get("KEEPAWAKE_BOT_TOKEN", "")
@@ -1988,10 +2040,19 @@ async def gate_main():
     GATE.update(token=token, owner=int(owner), last=time.time())
     socketed = os.environ.get("LISTEN_PID") == str(os.getpid()) \
         and int(os.environ.get("LISTEN_FDS") or 0) >= 1
+    launchd = [] if socketed else launchd_sockets(LAUNCHD_SOCKET)
     if socketed:
         # sclaude-gate.socket holds the port; exiting when idle gives it back
         # to systemd, which starts the gate again on the next connection.
         sock = socket.socket(fileno=3)
+    elif launchd:
+        # The same with launchd's sclaude.gate: it keeps listening while the
+        # gate is gone, and starts it on the next connection. One address is
+        # all the plist names.
+        sock = socket.socket(fileno=launchd[0])
+        for extra in launchd[1:]:
+            os.close(extra)
+        socketed = True
     else:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

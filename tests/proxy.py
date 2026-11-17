@@ -40,6 +40,26 @@ def free_port():
         return s.getsockname()[1]
 
 
+def bound_in_block(slot):
+    """A block's base (a multiple of ten) and a socket listening on base + slot.
+
+    The base comes from a free port, but base + slot is another port, which a
+    bench running beside this one may hold: try blocks until one binds.
+    """
+    for _ in range(50):
+        base = free_port()
+        base -= base % 10
+        sock = socket.socket()
+        try:
+            sock.bind(("127.0.0.1", base + slot))
+        except OSError:
+            sock.close()
+            continue
+        sock.listen(1)
+        return base, sock
+    raise RuntimeError("no block with base + %d free" % slot)
+
+
 def answers_on(port):
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
@@ -251,6 +271,25 @@ def check_peers(registry, stub, log):
     loader = SourceFileLoader("sclaude_proxy", PROXY)
     mod = module_from_spec(spec_from_loader("sclaude_proxy", loader))
     loader.exec_module(mod)
+    # code-server for this machine's browser: Linux's forward on
+    # 127.0.0.1:8080, a Mac's code-server at its own address.
+    saved_os = os.environ.get("SCLAUDE_OS")
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write("bind-addr: 100.64.0.5:8080\n")
+    mod.CODE_CONFIG = fh.name
+    try:
+        os.environ["SCLAUDE_OS"] = "linux"
+        check("code-server: the forward on Linux", mod.code_local(),
+              ("http://127.0.0.1:8080", "127.0.0.1", 8080))
+        os.environ["SCLAUDE_OS"] = "macos"
+        check("code-server: its own address on a Mac", mod.code_local(),
+              ("http://100.64.0.5:8080", "100.64.0.5", 8080))
+    finally:
+        os.remove(fh.name)
+        if saved_os is None:
+            os.environ.pop("SCLAUDE_OS", None)
+        else:
+            os.environ["SCLAUDE_OS"] = saved_os
     # A tree an older sclaude still runs keeps its state in .feature/.
     old = tempfile.mkdtemp(prefix="proxy-old-")
     try:
@@ -689,17 +728,13 @@ def main():
         # enabled in the stub config and actually listening, at base + 3 — but
         # not Inbucket: disabled in that same config, so its port (base + 4)
         # is never even guessed at, let alone offered as a dead link.
-        svc_base = free_port()
-        svc_base -= svc_base % 10  # a block boundary, so base+3 is ours to bind
-        svc_wt = register(registry, root, "svc", free_port(), db_base=svc_base)
-        os.makedirs(os.path.join(svc_wt, "supabase"))
-        with open(os.path.join(svc_wt, "supabase", "config.toml"), "w") as fh:
-            fh.write("[studio]\nenabled = true\nport = 999\n"
-                     "[local_smtp]\nenabled = false\nport = 999\n")
-        studio = socket.socket()
-        studio.bind(("127.0.0.1", svc_base + 3))
-        studio.listen(1)
+        svc_base, studio = bound_in_block(3)
         try:
+            svc_wt = register(registry, root, "svc", free_port(), db_base=svc_base)
+            os.makedirs(os.path.join(svc_wt, "supabase"))
+            with open(os.path.join(svc_wt, "supabase", "config.toml"), "w") as fh:
+                fh.write("[studio]\nenabled = true\nport = 999\n"
+                         "[local_smtp]\nenabled = false\nport = 999\n")
             status, _, body = request(port, host)
             check("a running, enabled service is offered, by its own port",
                   "href='http://127.0.0.1:%d/'" % (svc_base + 3) in body
@@ -713,6 +748,9 @@ def main():
         # nothing listening on Studio's port this time.
         svc_base2 = free_port()
         svc_base2 -= svc_base2 % 10
+        while answers_on(svc_base2 + 3):  # a bench beside this one's server
+            svc_base2 = free_port()
+            svc_base2 -= svc_base2 % 10
         svc2_wt = register(registry, root, "svc2", free_port(), db_base=svc_base2)
         os.makedirs(os.path.join(svc2_wt, "supabase"))
         with open(os.path.join(svc2_wt, "supabase", "config.toml"), "w") as fh:
@@ -986,10 +1024,11 @@ def main():
             proc = subprocess.Popen([sys.executable, "-c", launcher], env=senv,
                                     stdout=subprocess.DEVNULL, stderr=errfh)
         try:
-            wait_for(lambda: answers_on(port), 5)
-            # The socket listens before the proxy is up on it: give it time
-            # to read its own file first.
-            time.sleep(1)
+            # The socket listens before the proxy is up on it, and the proxy
+            # takes its file's time once its imports are done — seconds under
+            # a full parallel run. An HTTP answer comes only from the running
+            # loop, after that: a touch before it would be the baseline.
+            wait_for(lambda: http_answers(port), 30)
             os.utime(copy, (time.time() + 10, time.time() + 10))
             # The new code is tried in a child first: waited for by what the
             # proxy says, seconds under a full parallel run.

@@ -354,6 +354,13 @@ exec %s "$@"
         reader = threading.Thread(target=drain, daemon=True)
         reader.start()
         try:
+            # On macOS the answers wait for sclaude's first output: it records
+            # its run under script, and BSD's script puts the terminal in raw
+            # mode with TCSAFLUSH, dropping what was typed before it started.
+            if sys.platform == "darwin":
+                wait_until = time.time() + 30
+                while not chunks and proc.poll() is None and time.time() < wait_until:
+                    time.sleep(0.05)
             try:
                 os.write(primary, answers.encode())
             except OSError:

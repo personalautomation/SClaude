@@ -132,7 +132,7 @@ def card(name, slug, note="", in_topic=True, feats=None, config=None, slim=False
             # worktree: nothing of it on the card.
             pass
         elif services.code_running():
-            text += t("card.code", url=services.code_url() + folder, local="http://127.0.0.1:8080" + folder)
+            text += t("card.code", url=services.code_url() + folder, local=services.code_local() + folder)
             last += services.code_app_button(origin, topics.feature_wt(repo, slug))
         else:
             text += t("card.nocode")

@@ -314,12 +314,21 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   rounds in a row — at the moment shown when the history is played back;
   a click folds it to a sliver, one icicle summing its files as the one
   behind the rounds' names sums them all, and again opens it, remembered
-  for that feature. The icicle behind the rounds' names is centred: its
-  width is the lines a round touched, its colours left to right their
-  share by outcome. None is drawn where the
+  for that feature. Both summed icicles, behind the rounds' names
+  and in a folded block, put the development's code left of a dotted axis
+  and the review's own right: the development's lines on top, then each
+  round's touched lines — left those the development wrote or you asked
+  for, right those earlier rounds of review had already written — coloured
+  by outcome outward from the axis; a line on the same scale says how much
+  the round grew the code (right) or shrank it (left), darker (lighter on
+  a dark page) the more threads review posted in it (0, 1–2, 3–5, 6 or
+  more; threads you opened yourself not counted). An icicle that leans right
+  is review working on its own code. None is drawn where the
   file's icicle goes on through the row; the row it closes in keeps it. Dots are the threads, piled into a column where a round
   posted several close together, so a tall pile is a place the review kept
-  finding things; ✋ with a number how many times you
+  finding things — every dot one size, and a pile taller than its row
+  shows what fits, open threads and reversals first, the rest as +n
+  at its foot, its hover listing them; ✋ with a number how many times you
   stepped in during a round or at one place (answers and your own threads),
   ringed red where you took the recommended answer within seconds — the
   questions are in its tooltip. Hovering an icicle tells where it is, what

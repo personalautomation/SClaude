@@ -486,9 +486,17 @@ its fixes landed (fixed elsewhere) stay in the place's chain, and the round afte
 that checks it (a small point in its row, no line drawn down to it); the touched files are
 ordered so that each next one shares the most rounds with the last; the
 heights are scaled to fit the panel, which can also cover the whole page.
-Behind the rows' names one pale icicle sums every file: the development's
-lines on top, then the lines each round touched (a fix's larger side), on a
-square-root scale, each row split by its threads' outcomes. A hunk whose
+Behind the rows' names one icicle sums every file, and a folded block's
+icicle sums its own (`summed`): left of a dotted axis the development's
+code, right the review's own — the development's lines on top, then each
+round's touched lines (a fix's larger side), left those the development
+wrote or the person asked for, right those earlier rounds had already
+written (a hunk's `own`, the share of its span on the axis that earlier
+rounds' hunks covered; a hunk off the axis counts as the development's),
+each side on a square-root scale and split by outcome outward from the
+axis. A line on the same scale gives each round's added minus deleted
+lines (asks left out), right grown, left shrunk, its tone by how many
+threads review posted in the round, to the moment shown. A hunk whose
 added lines are mostly from a commit the person asked for (`asked_lines`: a
 `feat` subject or a `Requirement:` trailer, by a blame of the round's range)
 is `asked`, drawn as the development's; a place's lightness is how many

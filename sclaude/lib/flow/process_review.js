@@ -18,8 +18,9 @@
 //     the kind of file (tests, schema, docs and config), dots for comments;
 //   dots: the threads, where they were posted; ✋ the person, ringed red
 //     where the answer was the recommended one given within seconds;
-//   behind the rows' names: one pale icicle of every file at once, the
-//     development's lines over the lines each round touched.
+//   behind the rows' names, and in a folded block: one icicle summing the
+//     files, the development's code left of an axis and the review's own
+//     right, and a line for how much each round grew or shrank the code.
 const reviewMap = (() => {
   const REVIEW = new Set(['review_run', 'review_close', 'review']);
   const OUT = {
@@ -71,6 +72,11 @@ const reviewMap = (() => {
   // The development's code, before the review or asked for during it.
   function devColour(alpha) {
     return 'oklch(' + (dark() ? 0.56 : 0.74) + ' 0.09 75 / ' + alpha + ')';
+  }
+  // The summed icicles' line: no hue (the hues are the outcomes'), a
+  // lightness by how many threads review posted in its round, k = 0..3.
+  function netTone(k) {
+    return 'oklch(' + (dark() ? 0.45 + 0.16 * k : 0.74 - 0.17 * k).toFixed(2) + ' 0 0)';
   }
   // What kind of file a fix lands in: each kind a place touched is a
   // pattern of its own over its colour; ordinary code is the solid fill.
@@ -623,6 +629,18 @@ const reviewMap = (() => {
         const seen = new Set();
         if (x.p0 != null) (byPath[x.path] || []).forEach((y) => { if (y.r < x.r && y.p0 < x.p1 && y.p1 > x.p0) seen.add(y.r); });
         x.depth = seen.size;
+        // How many of its lines are the review's own: the share of its
+        // span that earlier rounds' fixes had already written or rewritten.
+        // The rest is the development's code — the person's asks included,
+        // and a hunk off the axis, which has no span to compare (its depth
+        // is 0).
+        const v = Math.max(x.add, x.del);
+        if (x.asked || !x.depth) { x.own = 0; return; }
+        const spans = (byPath[x.path] || []).filter((y) => y.r < x.r && y.p0 < x.p1 && y.p1 > x.p0)
+          .map((y) => [Math.max(x.p0, y.p0), Math.min(x.p1, y.p1)]).sort((a, b) => a[0] - b[0]);
+        let cov = 0, end = x.p0;
+        spans.forEach(([a, b]) => { if (b > end) { cov += b - Math.max(a, end); end = b; } });
+        x.own = Math.round(v * cov / (x.p1 - x.p0));
       });
     }
     rounds.forEach((r, ri) => {
@@ -740,51 +758,75 @@ const reviewMap = (() => {
       p.cx = Math.min(p.hi - p.w / 2, Math.max(p.lo + p.w / 2, (p.x0 + p.x1) / 2));
       p.l = p.cx - p.w / 2; p.r = p.cx + p.w / 2;
     });
-    // Behind the rows' names, one quiet icicle of every file at once: the
-    // development's lines on top, then the lines each round touched (a
-    // fix's larger side, so a line rewritten counts once, as the
-    // development's lines do), on a square-root scale so a round stays visible under a large development.
-    // Coloured as the icicles are, paler: a row split by how its lines'
-    // threads ended, saturated by code against comments, hatched where the
-    // round added more than it took away.
-    {
-      const per = places.map((ps) => {
-        const r = {changed: 0, out: {}};
-        ps.forEach((p) => {
-          p.hs.forEach((x) => {
-            const k = x.asked ? 'asked' : x.outcome;
-            const o = r.out[k] = r.out[k] || {n: 0, code: 0, comment: 0};
-            const n = Math.max(x.add, x.del);
-            o.n += n; r.changed += n; o.code += x.code; o.comment += x.comment;
+    // A summed icicle — the one behind the rows' names, of the whole pull
+    // request, and a folded block's, of its files. Right of its axis is the
+    // review's own code, left the development's, on both of its channels:
+    // - the body: the development's lines on top, all left; then each row
+    //   the lines the round touched (a fix's larger side), left those of
+    //   the development, right those earlier rounds had already written,
+    //   each side on a square-root scale and split outward from the axis
+    //   by how their threads ended;
+    // - a line, on the same scale: how far the round grew the code (added
+    //   minus deleted, the person's asks left out) — right grown, left
+    //   shrunk; darker (lighter on a dark page) the more threads review
+    //   posted there in the round (0, 1–2, 3–5, 6+), the person's own not
+    //   counted.
+    function summed(hunk, thread, dev, lo, hi, cls, title) {
+      const per = rounds.map((r, ri) => {
+        const row = {L: 0, R: 0, net: 0, outL: {}, outR: {}, th: 0};
+        d.hunks.forEach((x) => {
+          if (x.r !== ri || !hunk(x)) return;
+          const k = x.asked ? 'asked' : x.outcome, v = Math.max(x.add, x.del), own = Math.min(v, x.own || 0);
+          row.L += v - own; row.R += own;
+          row.outL[k] = (row.outL[k] || 0) + v - own;
+          row.outR[k] = (row.outR[k] || 0) + own;
+          if (!x.asked) row.net += x.add - x.del;
+        });
+        row.th = d.threads.filter((t) => t.r === ri && t.by !== 'person' && thread(t) && (until == null || t.t * 1000 <= until)).length;
+        return row;
+      });
+      const most = Math.max(1, dev, ...per.map((r) => Math.max(r.L, r.R, Math.abs(r.net))));
+      const half = (hi - lo) / 2 - 2, mid = (lo + hi) / 2;
+      const wOf = (v) => v ? Math.max(1, half * Math.sqrt(v / most)) : 0;
+      const out = ['<g class="' + cls + '">' + (title ? '<title>' + title + '</title>' : '')];
+      if (dev) out.push('<rect x="' + f1(mid - wOf(dev)) + '" y="' + top + '" width="' + f1(wOf(dev)) + '" height="' + f1(ys[0] - top) + '" fill="' + devColour(1) + '"/>');
+      let pL = wOf(dev), pR = 0;
+      per.forEach((r, i) => {
+        const y0 = ys[i], y1 = ys[i + 1], L = wOf(r.L), R = wOf(r.R);
+        // After rounds that left a side alone it starts at its own width:
+        // a point would read as code written there.
+        if (!pL) pL = L;
+        if (!pR) pR = R;
+        [[-1, pL, L, r.outL, r.L], [1, pR, R, r.outR, r.R]].forEach(([side, w0, w1, o, sum]) => {
+          let a = 0;
+          Object.keys(OUT).filter((k) => o[k]).forEach((k) => {
+            const b = a + o[k] / sum;
+            out.push('<path d="M' + f1(mid + side * w0 * a) + ',' + f1(y0) + ' L' + f1(mid + side * w0 * b) + ',' + f1(y0)
+              + ' L' + f1(mid + side * w1 * b) + ',' + f1(y1) + ' L' + f1(mid + side * w1 * a) + ',' + f1(y1) + 'Z" fill="' + colour(k, 1) + '"/>');
+            a = b;
           });
         });
-        return r;
+        pL = L; pR = R;
       });
-      const most = Math.max(1, devAdd, ...per.map((r) => r.changed));
-      const wOf = (v) => (GUT - 16) * Math.sqrt(v / most), mid = (GUT - 4) / 2;
-      const lerp = (wd, t) => mid - wd / 2 + wd * t;
-      const out = ['<g class="rv-sumi">'];
-      let wPrev = wOf(devAdd);
-      out.push('<rect x="' + f1(mid - wPrev / 2) + '" y="' + top + '" width="' + f1(wPrev) + '" height="' + f1(ys[0] - top) + '" fill="' + devColour(1) + '"/>');
+      out.push('</g>');
+      const body = out.join('');
+      out.length = 0;
+      out.push('<g class="rv-net">');
+      out.push('<line class="rv-axis" x1="' + f1(mid) + '" x2="' + f1(mid) + '" y1="' + f1(ys[0]) + '" y2="' + f1(ys[rounds.length]) + '"/>');
+      let px = mid, py = ys[0];
       per.forEach((r, i) => {
-        const w = wOf(r.changed), y0 = ys[i], y1 = ys[i + 1];
-        const parts = Object.keys(OUT).filter((k) => r.out[k] && r.out[k].n);
-        const sum = parts.reduce((a, k) => a + r.out[k].n, 0);
-        const outline = 'M' + f1(mid - wPrev / 2) + ',' + f1(y0) + ' L' + f1(mid + wPrev / 2) + ',' + f1(y0)
-          + ' L' + f1(mid + w / 2) + ',' + f1(y1) + ' L' + f1(mid - w / 2) + ',' + f1(y1) + 'Z';
-        if (!sum) out.push('<path d="' + outline + '" fill="' + colour('side', 1) + '"/>');
-        let a = 0;
-        parts.forEach((k) => {
-          const o = r.out[k], b = a + o.n / sum;
-          out.push('<path d="M' + f1(lerp(wPrev, a)) + ',' + f1(y0) + ' L' + f1(lerp(wPrev, b)) + ',' + f1(y0)
-            + ' L' + f1(lerp(w, b)) + ',' + f1(y1) + ' L' + f1(lerp(w, a)) + ',' + f1(y1) + 'Z" fill="'
-            + colour(k, 1) + '"/>');
-          a = b;
-        });
-        wPrev = w;
+        const x = mid + Math.sign(r.net) * wOf(Math.abs(r.net)), y = (ys[i] + ys[i + 1]) / 2;
+        const k = !r.th ? 0 : r.th <= 2 ? 1 : r.th <= 5 ? 2 : 3;
+        out.push('<line x1="' + f1(px) + '" y1="' + f1(py) + '" x2="' + f1(x) + '" y2="' + f1(y) + '" stroke="' + netTone(k) + '"/>');
+        px = x; py = y;
       });
-      svg.splice(sumAt, 0, out.join('') + '</g>');
+      return [body, out.join('') + '</g>'];
     }
+    // The body under the rounds' names, which have a halo to read over
+    // it; the line over them, thin enough not to hide a word.
+    const [sumBody, sumNet] = summed((x) => fi[x.path] != null, (t) => fi[t.path] != null, devAdd, 0, GUT - 4, 'rv-sumi', '');
+    svg.splice(sumAt, 0, sumBody);
+    svg.push(sumNet);
     // For the hover: each place's round, the places that hang from it, the
     // threads posted at it in its round and your answers about them.
     const flat = [];
@@ -1070,48 +1112,13 @@ const reviewMap = (() => {
           + ' and found nothing there:\n' + h(b.f.join('\n')) + '</title></line>');
       });
     });
-    // A folded block: one icicle of all its files, as the one behind the
-    // rows' names sums the whole pull request — the development's lines on
-    // top, then the lines each round touched in the block (a fix's larger
-    // side), on a square-root scale, centred, each row split left to right
-    // by how its lines' threads ended.
+    // A folded block: one icicle of all its files, drawn as the one behind
+    // the rows' names (summed, above).
     groups.filter((g) => g.fold).forEach((g) => {
-      const mine = files.filter((f) => blockOf[f] === g.g).flatMap(stackOf);
-      const inBlock = new Set(mine);
-      const dev = mine.reduce((a, f) => a + ((devf[f] || {}).add || 0), 0);
-      const per = rounds.map((r, ri) => {
-        const out = {};
-        let n = 0;
-        d.hunks.forEach((x) => {
-          if (x.r !== ri || !inBlock.has(x.path)) return;
-          const k = x.asked ? 'asked' : x.outcome, v = Math.max(x.add, x.del);
-          out[k] = (out[k] || 0) + v; n += v;
-        });
-        return {n: n, out: out};
-      });
-      const most = Math.max(1, dev, ...per.map((r) => r.n));
-      const full = g.x1 - g.x0 - 4, mid = (g.x0 + g.x1) / 2;
-      const wOf = (v) => v ? Math.max(2, full * Math.sqrt(v / most)) : 0;
-      let wPrev = wOf(dev);
-      const out = ['<g class="rv-fold"><title>Block folded: every file of it in one icicle — the lines each round touched there, split by how their threads ended. Click its name to open it.</title>'];
-      if (wPrev) out.push('<rect x="' + f1(mid - wPrev / 2) + '" y="' + top + '" width="' + f1(wPrev) + '" height="' + f1(ys[0] - top) + '" fill="' + devColour(1) + '"/>');
-      per.forEach((r, i) => {
-        const w = wOf(r.n), y0 = ys[i], y1 = ys[i + 1];
-        // After rounds that left the block alone it starts at its own width:
-        // a point would read as code written there.
-        if (!wPrev) wPrev = w;
-        const lerp = (wd, t) => mid - wd / 2 + wd * t;
-        const parts = Object.keys(OUT).filter((k) => r.out[k]);
-        let a = 0;
-        parts.forEach((k) => {
-          const b = a + r.out[k] / r.n;
-          out.push('<path d="M' + f1(lerp(wPrev, a)) + ',' + f1(y0) + ' L' + f1(lerp(wPrev, b)) + ',' + f1(y0)
-            + ' L' + f1(lerp(w, b)) + ',' + f1(y1) + ' L' + f1(lerp(w, a)) + ',' + f1(y1) + 'Z" fill="' + colour(k, 1) + '"/>');
-          a = b;
-        });
-        wPrev = w;
-      });
-      svg.push(out.join('') + '</g>');
+      const inBlock = new Set(files.filter((f) => blockOf[f] === g.g).flatMap(stackOf));
+      const dev = [...inBlock].reduce((a, f) => a + ((devf[f] || {}).add || 0), 0);
+      svg.push(...summed((x) => inBlock.has(x.path), (t) => inBlock.has(t.path), dev, g.x0, g.x1, 'rv-fold',
+        'Block folded: every file of it in one icicle. Left of its axis the development\'s code, right the review\'s own: the lines each round touched, split by how their threads ended; the line, how much the round grew (right) or shrank (left) the code, ' + (dark() ? 'lighter' : 'darker') + ' the more threads review posted. Click its name to open it.'));
     });
     svg.push(...nexts);
     const offs = {};
@@ -1146,9 +1153,14 @@ const reviewMap = (() => {
     // The threads, stacked: those a round posted close together in the code
     // pile down from the round's line into one column, a dot each in the
     // colour of how it ended — the taller the column, the more the review
-    // found there. Squeezed to fit the round's height where a pile is tall.
+    // found there.
     const ORDER = ['open', 'reversal', 'yours', 'night', 'declined', 'fixed', 'side'];
-    const piles = {};
+    // A dot's radius, and what a pile takes across with its outline (or
+    // its +n), for the ✋ to keep clear of.
+    // How the dots, the +n and the ✋ are laid out and kept off one another
+    // is settled at the user's word (2026-11-17): a touch left in a crowded
+    // row is accepted, and the layout is not to be tuned further.
+    const R = 2.8, piles = {}, pileAt = {}, handAt = {};
     d.threads.forEach((t) => {
       if (t.r == null || t.r >= rounds.length || fi[t.path] == null || (until != null && t.t * 1000 > until)) return;
       const x = threadX(t);
@@ -1159,21 +1171,34 @@ const reviewMap = (() => {
     Object.values(piles).forEach((p) => {
       p.all.sort((a, b) => ORDER.indexOf(a.outcome) - ORDER.indexOf(b.outcome));
       const x = p.xs.reduce((a, v) => a + v, 0) / p.xs.length;
-      const room = ys[p.r + 1] - ys[p.r] - 10;
-      const step = Math.min(8.5, room / Math.max(1, p.all.length));
-      const r = Math.max(1.8, Math.min(4, step / 2 + 0.3));
-      // A capsule under the pile, so its dots read over an icicle of the
-      // same colour.
-      const len = step * (p.all.length - 1);
-      svg.push('<rect class="rv-pile" x="' + (x - r - 1.5).toFixed(1) + '" y="' + (ys[p.r] + 5 - r - 1.5).toFixed(1) + '" width="' + (2 * r + 3).toFixed(1)
-        + '" height="' + (len + 2 * r + 3).toFixed(1) + '" rx="' + (r + 1.5).toFixed(1) + '"/>');
-      p.all.forEach((t, k) => {
-        const y = ys[p.r] + 5 + k * step;
+      // One size for every dot on the map, so size says nothing; a pile
+      // longer than its row shows what fits, alarms first (ORDER), and the
+      // rest as +n in the column's last place, so it never runs into a
+      // neighbour's. Dots nearly touch, each with its own dark outline,
+      // which is what sets them off an icicle of the same colour; the
+      // shortest row (ROWMIN) holds two and the +n, clear of both
+      // rounds' lines: past the dot's outline (up to 1, your thread's) and
+      // half a block's line (1).
+      const STEP = 2 * R + 0.6, TOP = R + 2;
+      const room = ys[p.r + 1] - ys[p.r] - 2 * TOP;
+      const fit = Math.floor(room / STEP) + 1;
+      const over = p.all.length > fit;
+      const shown = over ? p.all.slice(0, fit - 1) : p.all;
+      const more = over ? '+' + (p.all.length - shown.length) : '';
+      (pileAt[p.r] = pileAt[p.r] || []).push([x, Math.max(R + 0.5, more.length * 2.3 + 1)]);
+      shown.forEach((t, k) => {
+        const y = ys[p.r] + TOP + k * STEP;
         svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
-          + '" r="' + r.toFixed(1) + '" fill="' + colour(t.outcome, 1) + '"><title>' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
+          + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '"><title>' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
           + (t.by === 'person' ? '\nyour thread' : '')
           + (p.all.length > 1 ? '\n' + p.all.length + ' threads here' : '') + '</title></circle></a>');
       });
+      if (over) {
+        const rest = p.all.slice(shown.length);
+        const y = ys[p.r] + TOP + shown.length * STEP;
+        svg.push('<text class="rv-more" x="' + x.toFixed(1) + '" y="' + (y + 2.5).toFixed(1) + '">' + more + '<title>'
+          + h(rest.map((t) => t.path + ':' + t.line + ' — ' + t.title + ' (' + howEnded(t) + ')').join('\n')) + '</title></text>');
+      }
     });
     // The person, gathered: one ✋ for each round's answers in the margin,
     // and one for the answers and threads at one place of a file, with how
@@ -1194,7 +1219,24 @@ const reviewMap = (() => {
         const fast = all.filter((p) => p.rec && p.waited != null && p.waited <= FAST).length;
         const mine = all.filter((p) => p.kind === 'thread').length, said = all.filter((p) => p.kind === 'sclaude').length;
         const waits = all.map((p) => p.waited).filter((w) => w != null).sort((a, b) => a - b);
-        const x = g.x != null ? g.x + 8 : GUT - 34;
+        // Clear of the threads' dots: past a dot (R) and the ring (8, its
+        // stroke up to 2.5), its count going outward. The first of four
+        // spots with room for both, off the round's piles (a +n is wider)
+        // and hands placed before it, inside the map and right of the
+        // rounds' names and their ✋; in a row crowded with piles, the
+        // first off the other hands at least, else to the right.
+        const tw = n > 1 ? 10 + String(n + (fast ? ' · ' + fast : '')).length * 6.5 + (fast ? 12 : 0) : 10;
+        const span = (v) => [g.x + v - (v < 0 ? tw : 9), g.x + v + (v < 0 ? 9 : tw)];
+        const free = (v, piles) => {
+          const [a, b] = span(v);
+          return a > GUT && b < W && !(handAt[g.r] || []).some(([c, e]) => e > a && c < b)
+            && !(piles && (pileAt[g.r] || []).some(([px, half]) => px + half > a && px - half < b));
+        };
+        const SPOTS = [13, -13, 26, -26];
+        const dx = g.x == null ? 0 : SPOTS.find((v) => free(v, true)) || SPOTS.find((v) => free(v, false)) || 13;
+        if (g.x != null) (handAt[g.r] = handAt[g.r] || []).push(span(dx));
+        const left = dx < 0;
+        const x = g.x == null ? GUT - 34 : g.x + dx;
         const y = ys[g.r] + (g.x != null ? 14 : Math.min(two(g.r + 1) ? 52 : 30, Math.max(14, ys[g.r + 1] - ys[g.r] - 4)));
         const head = n + (n === 1 ? ' time' : ' times') + ' you stepped in'
           + (rec ? '\n' + rec + ' took the recommended answer' + (fast ? ', ' + fast + ' within ' + FAST + ' s' : '') : '')
@@ -1205,7 +1247,7 @@ const reviewMap = (() => {
         svg.push('<g class="rv-hand' + (fast ? ' fast' : rec ? ' rec' : '') + '"><title>' + h(head) + list + (all.filter((p) => p.q).length > 8 ? '\n…' : '') + '</title>'
           + (fast || rec ? '<circle cx="' + x.toFixed(1) + '" cy="' + (y - 4).toFixed(1) + '" r="8"/>' : '')
           + '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '">✋</text>'
-          + (n > 1 ? '<text class="rv-hn" x="' + (x + 10).toFixed(1) + '" y="' + y.toFixed(1) + '">' + n + (fast ? ' · ' + fast + '⚡' : '') + '</text>' : '') + '</g>');
+          + (n > 1 ? '<text class="rv-hn" x="' + (left ? x - 10 : x + 10).toFixed(1) + '"' + (left ? ' style="text-anchor:end"' : '') + ' y="' + y.toFixed(1) + '">' + n + (fast ? ' · ' + fast + '⚡' : '') + '</text>' : '') + '</g>');
       });
     }
     svg.push('</svg>');
@@ -1412,13 +1454,15 @@ const reviewMap = (() => {
     panel.querySelector('.rv-legend').innerHTML = '<svg width="0" height="0" style="position:absolute"><defs>' + patterns('rv-lp') + '</defs></svg>' + sw(devColour(1), 'the development\'s code (before the review, or asked for in it)')
       + ['fixed', 'declined', 'yours', 'night', 'reversal', 'open', 'side'].map((k) => sw(colour(k, 1), OUT[k][1])).join('')
       + '<span class="rv-k rv-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + colour('fixed', k) + '"></i>').join('')
-      + ' darker: rewritten by 0, 1, 2, 3+ earlier rounds</span>'
+      + ' ' + (dark() ? 'lighter' : 'darker') + ': rewritten by 0, 1, 2, 3+ earlier rounds</span>'
+      + '<span class="rv-k rv-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + netTone(k) + '"></i>').join('')
+      + ' summed icicles (behind the rounds, a folded block): left of the axis the development\'s code, right the review\'s own; the line, right grown, left shrunk; ' + (dark() ? 'lighter' : 'darker') + ': 0, 1–2, 3–5, 6+ threads review posted</span>'
       + pat('schema', 'solid: code changed, \\ a migration among it', true)
       + '<span class="rv-k rv-hol" style="--c:' + colour('fixed', 1) + '">hollow: no code or migration, only</span>'
       + pat('test', 'tests') + pat('doc', 'docs, config') + pat('comment', 'comments')
       + '<span class="rv-k rv-uk">pale: no round has opened that code since</span><span>⋯ dashed close: read by the round still fixing</span>'
       + '<span class="rv-k rv-ck">read whole, nothing found</span><span class="rv-k rv-dk">read the last fixes, nothing found</span><span class="rv-k rv-pk">looked at a part, nothing found</span>'
-      + '<span>⋮ threads, a dot each, piled where they are many</span><span><b class="rv-fast">◯✋ 5 · 2⚡</b> 5 times you stepped in, 2 took the recommended answer within ' + FAST + ' s</span>';
+      + '<span>⋮ threads, a dot each, piled where they are many, +n for those past the row</span><span><b class="rv-fast">◯✋ 5 · 2⚡</b> 5 times you stepped in, 2 took the recommended answer within ' + FAST + ' s</span>';
   }
   legend();
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { legend(); draw(); });

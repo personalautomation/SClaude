@@ -95,7 +95,7 @@ malformed = []
 for t in templates:
     rendered = subprocess.run(
         ["bash", "-c", 'source "%s/core/launchd.sh"; INSTRUMENTS="$1"; HOME="$2"; '
-                       'launchd_logs() { echo "$2/Logs--x"; }; launchd_render "$3" "$4"'
+                       'launchd_render "$3" "$4"'
          % LIB, "_", ROOT, "/Users/a--b&c", t, awkward],
         capture_output=True, text=True).stdout
     for kind, text in (("raw", read("launchd", t + ".plist")), ("rendered", rendered)):

@@ -134,6 +134,24 @@ def set_lid(on):
     return ok
 
 
+def let_go_lid():
+    """Turns disablesleep off; True when the lid is no longer ours to hold.
+
+    A refusal while the sudoers rule stands is a passing one (a slow sudo):
+    False, and the caller tries again. With the rule gone the person took the
+    lid back — LID_OFF, which install.sh prints, turns disablesleep off as it
+    removes the rule — so the mark goes and nothing tries again."""
+    if set_lid(False):
+        return True
+    if lid_allowed():
+        return False
+    try:
+        os.unlink(LID_MARK)
+    except OSError:
+        pass
+    return True
+
+
 class Holder(hold_loop.Holder):
     """The power assertion, and the lid where the sudoers rule allows it."""
 
@@ -152,9 +170,13 @@ class Holder(hold_loop.Holder):
         # that the Mac does not stay up with nothing holding it. Only once the
         # lock is ours: a second holder that loses it would otherwise turn the
         # lid off under the running one, which goes on believing it holds it.
-        # One pmset refuses stays marked held, so that tick() tries again.
-        if os.path.exists(LID_MARK) and not set_lid(False):
-            self.lid = True
+        # One pmset refuses while the rule stands stays marked held, so that
+        # tick() tries again (let_go_lid).
+        if os.path.exists(LID_MARK):
+            if let_go_lid():
+                hold_loop.log("hold released")
+            else:
+                self.lid = True
 
     def holding(self):
         return self.aid is not None
@@ -184,9 +206,9 @@ class Holder(hold_loop.Holder):
             except Exception:
                 pass  # the assertion goes with the process in any case
             self.aid = None
-        # A pmset that failed leaves the lid held: kept True, the next tick
-        # finds held() and tries the release again.
-        if self.lid and set_lid(False):
+        # A refusal while the rule stands leaves the lid held: kept True, the
+        # next tick finds held() and tries the release again (let_go_lid).
+        if self.lid and let_go_lid():
             self.lid = False
 
 

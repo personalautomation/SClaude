@@ -1162,8 +1162,10 @@ win_log() {
   # PowerShell 5.1 puts a BOM at the start of the file — we drop it when
   # reading.
   # We drop the date: the entry is always today's, and it takes up room.
-  # The pattern must match what KeepAwake.ps1 and keepawake-linux write: "hold
-  # set", "hold released" and "holding" all start with "hold".
+  # The pattern must match what KeepAwake.ps1 and keepawake/hold_loop.py
+  # (keepawake-linux, keepawake-macos) write: "hold set", "hold released",
+  # "holding, until …", and hold_loop's own "holding: <why>" for a release that
+  # left a Mac's lid held — "holding, until" alone would lose that one.
   local psline
   psline=$(sed '1s/^\xEF\xBB\xBF//' "$pslog" | grep -E "hold set|hold released|holding" | tail -1)
   psline=${psline:-$(tail -1 "$pslog" | sed '1s/^\xEF\xBB\xBF//')}

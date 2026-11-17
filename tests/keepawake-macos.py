@@ -80,6 +80,7 @@ with open(stub, "w") as fh:
     fh.write('#!/usr/bin/env bash\n'
              '[[ "$RULE" == yes ]] || exit 1\n'
              '[[ "$1" == check ]] && exit 0\n'
+             '[[ -n "$PMSET_FAIL" ]] && exit 1\n'
              'echo "$*" >> %s\n' % calls)
 os.chmod(stub, 0o755)
 os.environ["KEEPAWAKE_PMSET"] = stub
@@ -179,7 +180,7 @@ try:
     set_state(updated_ts=now, until_ts=now + 3600)
     holder.tick(now)
     set_state(updated_ts=now, until_ts=now - 1)
-    os.environ["RULE"] = "no"            # sudo refuses: the rule just removed
+    os.environ["PMSET_FAIL"] = "1"       # a passing refusal: the rule stands
     holder.tick(now)
     check("lid-kept-on-refusal", (holder.lid, holder.held()), (True, True))
     holder.tick(now)
@@ -193,11 +194,10 @@ try:
     # Refused once more as that hold ends: said again, not left at the hold's
     # "hold set" line.
     set_state(updated_ts=now, until_ts=now - 1)
-    os.environ["RULE"] = "no"
     holder.tick(now)
     check("second-refusal-said", log_lines()[-1].startswith("holding: pmset refused"), True)
     set_state(updated_ts=now, until_ts=now - 1)
-    os.environ["RULE"] = "yes"
+    os.environ.pop("PMSET_FAIL")
     holder.tick(now)
     check("lid-let-go-on-retry", (holder.lid, pmset_calls()[-1], log_lines()[-1]),
           (False, "-a disablesleep 0", "hold released"))
@@ -230,17 +230,31 @@ try:
         pass
     check("the-next-holder-turns-it-off", pmset_calls()[-1], "-a disablesleep 0")
 
-    # One whose pmset refuses keeps the lid marked held, for tick() to retry.
+    # One whose pmset refuses while the rule stands keeps the lid marked
+    # held, for tick() to retry.
     open(km.LID_MARK, "w").close()
-    os.environ["RULE"] = "no"
+    os.environ["PMSET_FAIL"] = "1"
     refused_start = km.Holder(fake)
     refused_start.started()
     check("a-refused-start-keeps-the-lid", (refused_start.lid, refused_start.held()), (True, True))
-    os.environ["RULE"] = "yes"
+    os.environ.pop("PMSET_FAIL")
     set_state(updated_ts=now, until_ts=now - 1)
     refused_start.tick(now)
     check("and-lets-it-go-on-the-next-tick", (refused_start.lid, os.path.exists(km.LID_MARK)),
           (False, False))
+    check("a-lid-let-go-at-start-is-said", log_lines()[-1], "hold released")
+    # With the rule gone the person took the lid back (LID_OFF turns it off
+    # too): the mark goes, and nothing tries again or claims the lid.
+    open(km.LID_MARK, "w").close()
+    os.environ["RULE"] = "no"
+    gone = km.Holder(fake)
+    gone.started()
+    check("rule-gone-at-start-lets-go", (gone.lid, os.path.exists(km.LID_MARK)), (False, False))
+    gone.lid = True
+    open(km.LID_MARK, "w").close()
+    gone.release()
+    check("rule-gone-at-release-lets-go", (gone.lid, os.path.exists(km.LID_MARK)), (False, False))
+    os.environ["RULE"] = "yes"
     set_state(updated_ts=now, until_ts=now + 3600)   # what the checks below hold under
     # The person's own disablesleep has no mark, and is left alone.
     before = len(pmset_calls())

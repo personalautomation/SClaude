@@ -148,6 +148,15 @@ night = open(os.path.join(ROOT, "skills", "isleep", "night.py"), encoding="utf-8
 check("night.py reads macOS beside each /proc",
       night.count('Path(f"/proc/') <= night.count("if DARWIN"), True)
 
+# procinfo.sh hands macOS's environment questions to procinfo.py by the name
+# of a subcommand: each name it calls is one main() takes (2 is its usage).
+called = re.findall(r'"\$PROCINFO_PY" ([\w-]+)', open(os.path.join(LIB, "core", "procinfo.sh")).read())
+check("procinfo.sh calls procinfo.py", sorted(set(called)), ["env-anywhere", "env-has"])
+for sub in sorted(set(called)):
+    args = [sub, str(os.getpid()), "PATH=" + os.environ.get("PATH", "")] if sub == "env-has" \
+        else [sub, "PATH=" + os.environ.get("PATH", "")]
+    check("procinfo.py takes %s" % sub, procinfo.main(args) != 2, True)
+
 if failures:
     print("FAILED: %d" % len(failures))
     sys.exit(1)

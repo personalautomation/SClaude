@@ -1024,10 +1024,11 @@ def main():
             proc = subprocess.Popen([sys.executable, "-c", launcher], env=senv,
                                     stdout=subprocess.DEVNULL, stderr=errfh)
         try:
-            wait_for(lambda: answers_on(port), 5)
-            # The socket listens before the proxy is up on it: give it time
-            # to read its own file first.
-            time.sleep(1)
+            # The socket listens before the proxy is up on it, and the proxy
+            # takes its file's time once its imports are done — seconds under
+            # a full parallel run. An HTTP answer comes only from the running
+            # loop, after that: a touch before it would be the baseline.
+            wait_for(lambda: http_answers(port), 30)
             os.utime(copy, (time.time() + 10, time.time() + 10))
             # The new code is tried in a child first: waited for by what the
             # proxy says, seconds under a full parallel run.

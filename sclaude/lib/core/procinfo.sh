@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+#
 # What sclaude asks about other processes and the ports they listen on, on
 # Linux and on macOS alike.
 #

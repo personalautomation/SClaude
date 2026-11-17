@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+#
 # What sclaude's bash entry points do first on macOS: Homebrew's bash 5 in
 # place of the system's 3.2, and the GNU tools ahead of the BSD ones.
 #

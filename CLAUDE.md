@@ -122,6 +122,26 @@ breaks the other silently — grep before you edit:
   `lid_allowed`); sudo matches a rule's command exactly, so a spelling
   changed on one side alone leaves the lid unheld without an error.
   `tests/keepawake-macos.py` checks the two agree.
+- A macOS agent's label is its template's name, `launchd/<label>.plist`,
+  which `install.sh` writes and loads and `launchd_labels` in
+  `sclaude/lib/core/launchd.sh` lists (`sclaude.*` the core, `keepawake*` the
+  extras). The same label is written out in `LABELS` and `LOG_FILES` in
+  `keepawake/units.py` (each `LABELS` key a unit in `systemd/`), in
+  `service_up`/`unit_state` in `bin/keepawake`, in `install.sh`'s port table
+  and bot exception, in `doctor.sh` and in the `launchctl print` lines of
+  `keepawake/docs.py`; the gate's socket name, `LAUNCHD_SOCKET` in
+  `bin/sclaude-proxy`, is the key under `Sockets` in `sclaude.gate.plist`.
+  `tests/launchd-labels.py` checks each. Renamed on one side alone, the
+  bot's buttons and `keepawake status` ask after an agent that is not there
+  and say "not installed", without an error.
+- `sclaude/lib/core/procinfo.sh` and `procinfo.py` answer the same questions
+  about other processes and ports, the shell's callers and Python's; on
+  macOS the shell hands the environment to `procinfo.py env-has` and
+  `env-anywhere` by name. `tests/procinfo.py` runs both halves on a real
+  process and checks the subcommands the shell calls are ones `main` takes.
+
+  <!-- Added by Claude on 2026-11-17 at the user's request, finishing the
+  macOS port taken in from a contributor's branch. -->
 - `keepawake status` prints the section headings `HOLD` and `HEALTH`; both
   halves of `docs.py` quote them, and `tests/keepawake.py` asserts on them.
 - `OWN_MARKERS` in `sclaude/hooks/collect-denials.py` must match the text the

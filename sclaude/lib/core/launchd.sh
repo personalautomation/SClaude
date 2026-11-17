@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+#
 # sclaude's launchd agents on macOS: what systemd's user units are on Linux.
 #
 # The templates are launchd/<label>.plist in the checkout. install.sh writes

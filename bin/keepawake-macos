@@ -138,6 +138,8 @@ class Holder(hold_loop.Holder):
     """The power assertion, and the lid where the sudoers rule allows it."""
 
     refused = "IOKit refused the power assertion (%s)" % ASSERTION_TYPE
+    stuck_text = ("pmset refused to turn disablesleep off: a closed lid still does not "
+                  "sleep; tried again every tick")
 
     def __init__(self, assertion=None):
         super().__init__()
@@ -169,7 +171,9 @@ class Holder(hold_loop.Holder):
         self.aid = self.assertion.create()
         if self.aid is None:
             return False
-        self.lid = lid_allowed() and set_lid(True)
+        # A lid still held from a release pmset refused stays held, and known.
+        if not self.lid:
+            self.lid = lid_allowed() and set_lid(True)
         return True
 
     def release(self):

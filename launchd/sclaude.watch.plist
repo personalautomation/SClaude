@@ -4,7 +4,7 @@
   macOS's sclaude-watch.timer and sclaude-watch.service in one: asking GitHub
   what QA has done with the features sclaude is waiting on, every five minutes.
   Written into ~/Library/LaunchAgents by install.sh (sclaude/lib/core/launchd.sh),
-  with @HOME@, @PATH@ and @LOGS@ put in.
+  with the home, PATH and the log directory put in.
 -->
 <plist version="1.0">
 <dict>

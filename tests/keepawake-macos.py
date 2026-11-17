@@ -182,9 +182,19 @@ try:
     os.environ["RULE"] = "no"            # sudo refuses: the rule just removed
     holder.tick(now)
     check("lid-kept-on-refusal", (holder.lid, holder.held()), (True, True))
+    holder.tick(now)
+    stuck = [line for line in log_lines() if line.startswith("holding: pmset refused")]
+    check("refusal-said-once", (len(stuck), log_lines()[-1].startswith("holding:")), (1, True))
+    # A hold that comes back meanwhile keeps the lid it still has, whatever
+    # the sudoers question says now.
+    set_state(updated_ts=now, until_ts=now + 3600)
+    holder.tick(now)
+    check("lid-kept-on-new-hold", holder.lid, True)
+    set_state(updated_ts=now, until_ts=now - 1)
     os.environ["RULE"] = "yes"
     holder.tick(now)
-    check("lid-let-go-on-retry", (holder.lid, pmset_calls()[-1]), (False, "-a disablesleep 0"))
+    check("lid-let-go-on-retry", (holder.lid, pmset_calls()[-1], log_lines()[-1]),
+          (False, "-a disablesleep 0", "hold released"))
 
     print("a killed holder's lid")
     # A holder killed while holding leaves disablesleep on, and its mark.

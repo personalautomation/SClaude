@@ -57,12 +57,16 @@ class Holder:
 
     # What a refusal of every lock is logged as: "ERROR: <refused>".
     refused = "the lock was refused"
+    # What a release that left part of the hold in place is logged as:
+    # "holding: <stuck_text>".
+    stuck_text = "part of the hold would not let go; trying again"
 
     def __init__(self):
         self.broken = False       # report a refusal once, not every 30 seconds
         self.logged_until = 0
         self.last_log = 0
         self.said_partial = False  # the "part refused" note, once per process
+        self.stuck = False         # a release that did not fully go, said once
 
     def acquire(self):
         raise NotImplementedError
@@ -109,9 +113,17 @@ class Holder:
                 log("ERROR: " + self.refused)
         elif not want and self.held():
             self.release()
-            log("hold released")
-            self.logged_until = 0
-            self.last_log = now
+            if self.held():
+                # Part of the hold would not go (a Mac's lid, pmset refusing):
+                # said once, and tried again on every tick, quietly.
+                if not self.stuck:
+                    self.stuck = True
+                    log("holding: " + self.stuck_text)
+            else:
+                self.stuck = False
+                log("hold released")
+                self.logged_until = 0
+                self.last_log = now
         elif want and (now - self.last_log) >= LOG_EVERY_SECONDS \
                 and (data.get("until_ts") or 0) != self.logged_until:
             log("holding, until %s" % until_label(data))

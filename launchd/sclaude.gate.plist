@@ -4,7 +4,7 @@
   macOS's sclaude-gate.socket and sclaude-gate.service: the phone's entry to
   features through Telegram (sclaude-proxy --gate), behind `tailscale funnel`
   on :8443. Written into ~/Library/LaunchAgents by install.sh
-  (sclaude/lib/core/launchd.sh), with @HOME@, @PATH@ and @LOGS@ put in.
+  (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put in.
 
   Started on demand, as the socket unit starts it: launchd listens on
   127.0.0.1:3001 while the agent is loaded and starts the gate on the first

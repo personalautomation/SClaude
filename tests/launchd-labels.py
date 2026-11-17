@@ -75,6 +75,15 @@ docs = read("keepawake", "docs.py")
 in_docs = re.findall(r"gui/\$\(id -u\)/([\w.-]+)", docs)
 check("docs.py's launchctl lines name templates", unknown(in_docs), [])
 
+# launchd_render puts values in wherever a placeholder stands: one in a
+# comment would carry a path's "--" into it, which XML forbids there.
+in_comments = []
+for t in templates:
+    for n, line in enumerate(read("launchd", t + ".plist").splitlines(), 1):
+        if "<string>" not in line and re.search(r"@[A-Z]+@", line):
+            in_comments.append("%s.plist:%d" % (t, n))
+check("placeholders only inside <string>", in_comments, [])
+
 # launchd_labels in launchd.sh: core:sclaude.*, extras:keepawake*.
 check("every template is the core's or the extras'",
       [t for t in templates if not (t.startswith("sclaude.") or t.startswith("keepawake"))], [])

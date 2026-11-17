@@ -4,7 +4,7 @@
   macOS's keepawake-linux.service: keepawake's holding side, the power
   assertion bin/keepawake-macos keeps while the state says to hold. One of the
   extras (./install.sh --extras); written into ~/Library/LaunchAgents by
-  install.sh (sclaude/lib/core/launchd.sh), with @HOME@, @PATH@ and @LOGS@ put
+  install.sh (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put
   in.
 
   An agent of the user's session, not a daemon: the assertion needs no root,

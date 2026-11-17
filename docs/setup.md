@@ -139,7 +139,9 @@ A closed lid is held only with a sudoers rule for `pmset`, which `install.sh`
 offers, shows the undo for, and adds at your yes (`--lid` without asking).
 
 code-server comes from Homebrew (`brew install code-server`) or its standalone
-install in `~/.local`, configured in `~/.config/code-server/config.yaml` as on
+install in `~/.local`, run by keepawake's own agent, which the bot starts and
+stops — not with `brew services`, which neither the bot nor keepawake sees —
+and configured in `~/.config/code-server/config.yaml` as on
 Linux. A Mac has no `localhost:8080` forward: that one is for a Windows
 browser outside the tailnet, and a Mac's browser opens code-server at its own
 address. The bot's links and the funnel need the `tailscale` command on

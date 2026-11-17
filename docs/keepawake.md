@@ -170,8 +170,8 @@ that a forgotten tab still printing counts as someone too.
 from `ps` and `lsof` through `procinfo.sh` (a dev server started by hand,
 outside sclaude, does not hold a Mac: it has no log of sclaude's to watch,
 and macOS keeps no count of the bytes a process wrote); the services are launchd agents in the user's session, and
-code-server is keepawake's own agent, or Homebrew's service when that is the
-one running; an SSH session needs
+code-server counts as keepawake's own agent, the one the bot starts and
+stops (one started with `brew services` does not hold the Mac); an SSH session needs
 Remote Login, whose job launchd keeps in the system domain while it is on;
 since OpenSSH 9.8 a session is an `sshd-session` process, on Linux too.
 

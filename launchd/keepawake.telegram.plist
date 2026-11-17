@@ -3,8 +3,8 @@
 <!--
   macOS's keepawake-telegram.service: keepawake's Telegram bot. One of the
   extras (./install.sh --extras), written into ~/Library/LaunchAgents by
-  install.sh (sclaude/lib/core/launchd.sh) with @HOME@, @PATH@, @LOGS@ and
-  @REPO@ put in, and only once ~/.config/keepawake/env has the token and the
+  install.sh (sclaude/lib/core/launchd.sh) with the home, PATH, the log directory and
+  the checkout put in, and only once ~/.config/keepawake/env has the token and the
   chat id (bot_env_set): the bot exits without either, and an agent restarting
   every ten seconds for want of one helps nobody.
 

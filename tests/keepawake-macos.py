@@ -229,6 +229,8 @@ try:
     except SystemExit:
         pass
     check("the-next-holder-turns-it-off", pmset_calls()[-1], "-a disablesleep 0")
+    # started() says it before run()'s "start:" line.
+    check("and-says-it-let-go", log_lines()[-2:-1], ["hold released"])
 
     # One whose pmset refuses while the rule stands keeps the lid marked
     # held, for tick() to retry.
@@ -254,6 +256,16 @@ try:
     open(km.LID_MARK, "w").close()
     gone.release()
     check("rule-gone-at-release-lets-go", (gone.lid, os.path.exists(km.LID_MARK)), (False, False))
+    # A sudo that cannot be asked at all (gone, or timing out) says nothing
+    # about the rule: the lid stays held and marked, for the next try.
+    gone.lid = True
+    open(km.LID_MARK, "w").close()
+    os.environ["KEEPAWAKE_PMSET"] = os.path.join(tmp, "no-such-pmset")
+    gone.release()
+    os.environ["KEEPAWAKE_PMSET"] = stub
+    check("sudo-unasked-keeps-the-lid", (gone.lid, os.path.exists(km.LID_MARK)), (True, True))
+    gone.lid = False
+    os.unlink(km.LID_MARK)
     os.environ["RULE"] = "yes"
     set_state(updated_ts=now, until_ts=now + 3600)   # what the checks below hold under
     # The person's own disablesleep has no mark, and is left alone.

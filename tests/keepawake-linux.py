@@ -160,13 +160,13 @@ try:
     for line in ("hold set, until 14:00", "hold set: a person is at the machine",
                  "hold released", "holding, until 14:00",
                  "holding: pmset refused to turn disablesleep off"):
-        check("status-greps-%s" % line.split(",")[0].split(":")[0].replace(" ", "-"),
+        check("status-greps-%s" % line.split(",")[0].replace(" ", "-")[:24],
               re.search(pattern, line) is not None, True)
     # The loop keepawake-linux and keepawake-macos share writes them.
     source = open(os.path.join(ROOT, "keepawake", "hold_loop.py"), encoding="utf-8").read()
     for literal in ('"hold set: a person is at the machine"', '"hold set, until %s"',
                     '"hold released"', '"holding, until %s"', '"holding: "'):
-        check("loop-writes-%s" % literal.strip('"').split(",")[0].split(":")[0].replace(" ", "-"),
+        check("loop-writes-%s" % literal.strip('"').split(",")[0].replace(" ", "-")[:24],
               literal in source, True)
     for holder_bin in ("keepawake-linux", "keepawake-macos"):
         text = open(os.path.join(ROOT, "bin", holder_bin), encoding="utf-8").read()

@@ -101,7 +101,8 @@ def pmset_command(args):
 
 def lid_allowed():
     """Whether the sudoers rule lets this user turn disablesleep on, asked
-    without running it and without a password prompt."""
+    without running it and without a password prompt; None when sudo could
+    not be asked (it did not run, or timed out), which says nothing either way."""
     override = os.environ.get("KEEPAWAKE_PMSET")
     argv = ([override, "check"] if override
             else ["sudo", "-n", "-l", PMSET, "-a", "disablesleep", "1"])
@@ -109,7 +110,7 @@ def lid_allowed():
         return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL, timeout=10).returncode == 0
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
 
 
 def set_lid(on):
@@ -143,7 +144,7 @@ def let_go_lid():
     removes the rule — so the mark goes and nothing tries again."""
     if set_lid(False):
         return True
-    if lid_allowed():
+    if lid_allowed() is not False:      # the rule stands, or sudo could not say
         return False
     try:
         os.unlink(LID_MARK)

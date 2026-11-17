@@ -77,6 +77,34 @@ with tempfile.TemporaryDirectory() as clone:
     if subprocess.run([sys.executable, build_py, inner], capture_output=True, text=True).returncode:
         failures.append("a folder inside a clone read the clone's history")
 
+# Named no clone, the build keeps its own in the checkout's git directory,
+# cloned from origin's address with .wiki.git in place of .git.
+with tempfile.TemporaryDirectory() as world:
+    def sh(*args, cwd=world):
+        subprocess.run(["git", "-c", "user.name=A", "-c", "user.email=t@t", *args],
+                       cwd=cwd, check=True, capture_output=True)
+    sh("init", "-q", "--bare", "SClaude.wiki.git")
+    sh("clone", "-q", os.path.join(world, "SClaude.wiki.git"), "seed")
+    sh("commit", "-q", "--allow-empty", "-m", "Rebuild from SClaude main 000", cwd=os.path.join(world, "seed"))
+    sh("push", "-q", "origin", "HEAD", cwd=os.path.join(world, "seed"))
+    checkout = os.path.join(world, "checkout")
+    shutil.copytree(os.path.join(ROOT, "wiki"), os.path.join(checkout, "wiki"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    for doc in ("docs", "CONTRIBUTING.md"):
+        src = os.path.join(ROOT, doc)
+        (shutil.copytree if os.path.isdir(src) else shutil.copy)(src, os.path.join(checkout, doc))
+    sh("init", "-q", cwd=checkout)
+    sh("remote", "add", "origin", os.path.join(world, "SClaude.git"), cwd=checkout)
+    run = subprocess.run([sys.executable, os.path.join(checkout, "wiki", "build.py")],
+                         capture_output=True, text=True)
+    own = os.path.join(checkout, ".git", "wiki")
+    if run.returncode or not os.path.exists(os.path.join(own, "Home.md")):
+        failures.append("with no clone named, the build did not clone the wiki into "
+                        ".git/wiki and build there:\n" + run.stdout + run.stderr)
+    elif subprocess.run([sys.executable, os.path.join(checkout, "wiki", "build.py")],
+                        capture_output=True, text=True).returncode:
+        failures.append("a second build into the kept clone failed")
+
 with tempfile.TemporaryDirectory() as out:
     run = subprocess.run([sys.executable, os.path.join(ROOT, "wiki", "build.py"), out],
                          capture_output=True, text=True)

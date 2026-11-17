@@ -836,9 +836,10 @@ guides under docs/. -->
 
 The GitHub wiki is built from the same material: `wiki/pages/` holds its
 front page, its concept pages and its sidebar, written by hand and kept in step
-with the README the same way, and `python3 wiki/build.py <clone of
-SClaude.wiki.git>` turns every guide and `docs/sclaude.md`/`docs/keepawake.md`
-into its detailed pages. A heading renamed in `docs/` renames a wiki page;
+with the README the same way, and `python3 wiki/build.py` turns every guide and `docs/sclaude.md`/`docs/keepawake.md`
+into its detailed pages, in the wiki's clone it keeps at `.git/wiki` of the
+checkout (`own_clone`, cloned from origin's address on first use; a path
+argument names another clone). A heading renamed in `docs/` renames a wiki page;
 `tests/wiki.py` fails on a link of `wiki/pages/` left pointing at the old
 name.
 
@@ -856,6 +857,9 @@ before they are overwritten; `--overwrite` goes on once they have.
 
 <!-- Added by Claude on 2026-11-17 at the user's request: wiki edits by
 collaborators are watched at each rebuild, not overwritten unseen. -->
+
+<!-- Added by Claude on 2026-11-17 at the user's request: a machine with no
+wiki clone left the rebuild undone; the build now keeps its own. -->
 
 <!-- Added by Claude on 2026-11-09 at the user's request: a significant new
 feature of the tools updates the README and the wiki, not only the guides. -->

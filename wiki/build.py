@@ -13,8 +13,11 @@ from, and are rebuilt rather than edited. Links between the documents are
 rewritten to the wiki pages that now hold their targets; links to anything
 else in the repository go to its file on GitHub.
 
-    python3 wiki/build.py OUT_DIR    # OUT_DIR: a clone of SClaude.wiki.git
-    python3 wiki/build.py --overwrite OUT_DIR
+    python3 wiki/build.py [--overwrite] [OUT_DIR]
+
+OUT_DIR is a clone of SClaude.wiki.git. Without it the build uses the clone
+kept in the checkout's git directory (.git/wiki), cloning it there from
+origin's address the first time, so no machine lacks one.
 
 Every .md file in OUT_DIR is removed first: the wiki is all built from here.
 So before that, a clone's commits since the last rebuild — anybody's edit on
@@ -227,12 +230,39 @@ def edits_since_rebuild(out):
         edits.append(" ".join(fields))
     return edits
 
+def own_clone():
+    """The wiki's clone kept in this checkout's git directory, cloned there
+    from origin's address (SClaude.git -> SClaude.wiki.git) when missing."""
+    common = subprocess.run(["git", "-C", ROOT, "rev-parse", "--path-format=absolute",
+                             "--git-common-dir"], capture_output=True, text=True)
+    if common.returncode:
+        sys.exit("wiki/build.py: %s is not a git checkout; name the clone: "
+                 "wiki/build.py OUT_DIR" % ROOT)
+    out = os.path.join(common.stdout.strip(), "wiki")
+    if os.path.isdir(os.path.join(out, ".git")):
+        return out
+    origin = subprocess.run(["git", "-C", ROOT, "remote", "get-url", "origin"],
+                            capture_output=True, text=True).stdout.strip()
+    if not origin:
+        sys.exit("wiki/build.py: no origin to find the wiki by; name the clone: "
+                 "wiki/build.py OUT_DIR")
+    url = re.sub(r"(\.git)?/?$", ".wiki.git", origin, count=1)
+    cloned = subprocess.run(["git", "clone", "-q", url, out], capture_output=True, text=True)
+    if cloned.returncode:
+        sys.exit("wiki/build.py: could not clone %s into %s:\n%s"
+                 % (url, out, cloned.stderr.strip()))
+    print("cloned %s into %s" % (url, out))
+    return out
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     overwrite = "--overwrite" in args
     args = [a for a in args if a != "--overwrite"]
+    if not args:
+        args = [own_clone()]
     if len(args) != 1 or not os.path.isdir(args[0]):
-        sys.exit("usage: wiki/build.py [--overwrite] OUT_DIR")
+        sys.exit("usage: wiki/build.py [--overwrite] [OUT_DIR]")
     edits = edits_since_rebuild(args[0])
     if edits and not overwrite:
         sys.exit("The wiki was edited since its last rebuild; read these before they are\n"

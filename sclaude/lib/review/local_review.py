@@ -41,12 +41,6 @@
 #                                                 has no count or nothing could be posted
 #   local_review.py open <cwd> <pr> <repo> <journal>  post what waits to be posted,
 #                                                 then say how many are open
-#   local_review.py schema                        the JSON Schema of a review's answer
-#
-# A headless pass answers in the structured output its schema (SCHEMA)
-# asks for — `claude -p --json-schema … --output-format json` — which Claude
-# Code itself holds to the schema; `record` also takes the text format
-# /sreview's reviewer writes (HEADING, RESOLVED, COUNT and DONE).
 #
 # The journal (JOURNAL, review-rounds.jsonl) is one line per review run,
 # wherever it ran: when, how long, which head. A pass here adds the range and
@@ -81,33 +75,6 @@ COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
 # it): a session that hands back an interim answer — "FINDINGS: 0" before its
 # agents report — would otherwise record a head as clean.
 DONE = "REVIEW: complete"
-# The headless pass's answer: its new findings, the earlier ones the code no
-# longer has, and whether it is complete — true only once the code-review
-# skill and every agent it started have finished (local_review_prompt says
-# so): the same guard as DONE, held by the schema.
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "findings": {"type": "array", "description": "New findings, one each", "items": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "minLength": 1, "description": "The file, relative to the repository; a concern about the whole pull request goes on the file it is most about"},
-                "line": {"type": "integer", "minimum": 1, "description": "The line in the reviewed head"},
-                "title": {"type": "string", "minLength": 1, "description": "The finding in one line"},
-                "scenario": {"type": "string", "description": "The failure scenario: concrete inputs or state, and the wrong result"},
-            },
-            "required": ["path", "line", "title", "scenario"]}},
-        "resolved": {"type": "array", "description": "Earlier open findings the code no longer has", "items": {
-            "type": "object",
-            "properties": {
-                "id": {"type": "string", "pattern": "^r[0-9]+$", "description": "The finding's id, as it was given"},
-                "how": {"type": "string", "description": "How it was fixed, in a sentence"},
-            },
-            "required": ["id", "how"]}},
-        "complete": {"type": "boolean", "description": "True only once the code-review skill and every agent it started have finished"},
-    },
-    "required": ["findings", "resolved", "complete"],
-}
 
 
 def gh_try(args, cwd):
@@ -230,37 +197,8 @@ def prompt(cwd, pr, repo, journal):
     return 0
 
 
-def structured(answer):
-    """(new findings, {rid: how}, count, complete) from a headless pass's
-    JSON answer — `--output-format json`'s object with its `structured_output`
-    — or None when the answer is not one; a run that ended in an error, or
-    returned no structured output, answers with no count."""
-    try:
-        d = json.loads(answer)
-    except ValueError:
-        return None
-    if not isinstance(d, dict):
-        return None
-    so = d.get("structured_output")
-    if d.get("is_error") or not isinstance(so, dict):
-        return [], {}, None, False
-    # Every finding is kept and counted, one with no path too (the schema
-    # asks for one, so it is a slip): `post` falls back to the conversation
-    # as for a file outside the diff, and none takes the others down with it.
-    found = [{"path": str(f.get("path") or "").strip(), "line": int(f.get("line") or 1),
-              "title": str(f.get("title") or "").strip(), "body": str(f.get("scenario") or "").strip()}
-             for f in so.get("findings") or [] if isinstance(f, dict)]
-    resolved = {str(r["id"]): str(r.get("how") or "").strip()
-                for r in so.get("resolved") or [] if isinstance(r, dict) and RID.match(str(r.get("id") or ""))}
-    return found, resolved, len(found), so.get("complete") is True
-
-
-RID = re.compile(r"^r\d+$")
-
-
 def parse(answer):
-    """(new findings, {rid: how}, count or None) from a run's answer in the
-    text format."""
+    """(new findings, {rid: how}, count or None) from a run's answer."""
     found, resolved, count, current = [], {}, None, None
     for line in answer.splitlines():
         m = HEADING.match(line)
@@ -288,13 +226,7 @@ def parse(answer):
 
 def post(cwd, pr, repo, head, f):
     """One finding as a thread on its line, else on its file, else in the
-    conversation: "thread", "conversation", or None when GitHub took none.
-    One with no path (a slip past the schema) has no place for a thread: to
-    the conversation at once, saying it names no file."""
-    if not f["path"]:
-        return "conversation" if gh(["pr", "comment", str(pr), "--body", "(no file named) — **%s**\n\n%s\n\n"
-                                     "_From the review run on this machine, on %s._" % (f["title"], f["body"], head[:7])],
-                                    cwd) is not None else None
+    conversation: "thread", "conversation", or None when GitHub took none."""
     body = "**%s**\n\n%s\n\n%s · %s</sub>" % (f["title"], f["body"], LOCAL_SIGNATURE, head[:7])
     base = ["api", "repos/%s/pulls/%s/comments" % (repo, pr), "-f", "body=%s" % body,
             "-f", "commit_id=%s" % head, "-f", "path=%s" % f["path"]]
@@ -387,18 +319,12 @@ def resolve(cwd, t, how, head):
 def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mode=""):
     with open(answer_path, encoding="utf-8") as fh:
         text = fh.read()
-    got = structured(text)
-    if got is not None:
-        found, resolved, count, complete = got
-    else:
-        found, resolved, count = parse(text)
-        complete = DONE in [line.strip() for line in text.splitlines()]
+    found, resolved, count = parse(text)
     if count is None:
-        sys.stderr.write("the answer has no findings count (no structured output, or an error)\n")
+        sys.stderr.write("the answer has no `FINDINGS: <n>` line it could read (an error, no answer, or the line in another form)\n")
         return 1
-    if mode != "verify" and not complete:
-        sys.stderr.write("the answer is not complete (%s): the review handed back before it was done\n"
-                         % ("complete: false" if got is not None else "no %r line" % DONE))
+    if mode != "verify" and DONE not in [line.strip() for line in text.splitlines()]:
+        sys.stderr.write("the answer has no %r line: the review handed back before it was done\n" % DONE)
         return 1
     if mode == "verify":
         # A check of the fixes after the search was ended: whatever it
@@ -604,9 +530,6 @@ def main(argv):
         return record(*args)
     if cmd == "spent" and len(args) in (5, 6):
         return spent(*args)
-    if cmd == "schema" and not args:
-        sys.stdout.write(json.dumps(SCHEMA) + "\n")
-        return 0
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.
         _, waiting = flush(args[0], args[1], args[2], args[3])

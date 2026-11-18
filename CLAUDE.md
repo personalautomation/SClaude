@@ -430,15 +430,12 @@ breaks the other silently — grep before you edit:
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error. -->
 
-- A review's answer says it is complete only once its `code-review` skill and
-  every agent it started are done, and `record` in
-  `sclaude/lib/review/local_review.py` refuses one that does not, so a
-  session that hands back an interim "no findings" does not record a head as
-  clean: the headless pass by `complete` in `SCHEMA` (its structured output,
-  `claude -p --json-schema`, asked for by `local_review_prompt` in
-  `local_review.sh`, which names the schema's fields), /sreview's reviewer by
-  the text line `DONE` (`REVIEW: complete`, in `skills/sreview/SKILL.md`).
-  `tests/local-review.py` checks the prompt, the schema and the skill.
+- `DONE` in `sclaude/lib/review/local_review.py` (`REVIEW: complete`) is the
+  line a review's answer must end with once its `code-review` skill and every
+  agent it started are done: `local_review_prompt` in `local_review.sh` and
+  `skills/sreview/SKILL.md` ask for it, and `record` refuses an answer
+  without it, so a session that hands back an interim "FINDINGS: 0" does not
+  record a head as clean; `tests/local-review.py` checks the prompt names it.
 
 - `review-checked`, which `cmd_checks` writes as it returns, is what
   `review_pane_keys` in `local_review.sh` prints the report by;

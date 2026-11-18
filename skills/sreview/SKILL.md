@@ -166,8 +166,7 @@ skill is done — "FINDINGS: 0" first, the real list after. So:
   findings join the iteration, and a mark already written comes off.
 
 In PR mode `local_review.py record` refuses an answer without that line, as
-it refuses sclaude's own headless review whose structured output is not
-`complete`.
+it does sclaude's own headless review.
 
 ## 2. Triage — yours, not the subagent's
 

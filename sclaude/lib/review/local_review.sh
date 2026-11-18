@@ -47,7 +47,7 @@ LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 #                               report counts, and the head last reviewed
 #   local-review-unposted.json  findings GitHub would not take yet, posted on
 #                               the next call and counted open until then
-#   local-review-answer.json    the last run's answer: claude -p's JSON, its structured output
+#   local-review-answer.md      the last run's answer, as the model gave it
 #   local-review.log            the last run's stderr
 review_journal() {
   echo "$1/.sclaude/local/feature/review-rounds.jsonl"
@@ -275,7 +275,7 @@ local_review_run() {
 
   local earlier began new more cap pass=1 round
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
-  answer="$(local_review_file "$wt" -answer.json)"
+  answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears
   # of the review by these two, here and at the end.
   ask_feed say "$(phase_line started local-review "${pr:-?}" "$round" $verify)"
@@ -299,7 +299,7 @@ local_review_run() {
     # The open findings are the block local_review.py prompt heads "still
     # open"; the rest of what it says (declined, fixed) is no work here.
     if [[ -n "$verify" && "$earlier" != *"still open"* ]]; then
-      printf '{"structured_output": {"findings": [], "resolved": [], "complete": true}}\n' > "$answer"
+      printf 'FINDINGS: 0\n' > "$answer"
       read -r count new more < <(python3 "$LIB/review/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                    "$base" "$head" 0 "$journal" 0 verify 2>>"$(local_review_file "$wt" .log)") \
         || count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
@@ -318,11 +318,12 @@ local_review_run() {
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
     # Into a file of its own until it ends: a pass stopped half-way leaves
     # the last whole answer where it was.
-    # The answer in the structured output its schema asks for, held to it by
-    # Claude Code (SCHEMA in local_review.py): no heading to misread.
-    local schema; schema="$(python3 "$LIB/review/local_review.py" schema)"
+    # The answer is text, not --json-schema structured output: with a schema
+    # the forked code-review skill takes the StructuredOutput tool itself and
+    # hands the session back nothing but "Skill execution completed" — the
+    # findings stay in the fork (seen live, 2026-11-18: 3 of 4 and 5 of 5 lost).
     ( cd "$wt" && exec claude -p "$text" --session-id "$pass_session" \
-             --model "$LOCAL_REVIEW_MODEL" --json-schema "$schema" --output-format json \
+             --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
@@ -362,7 +363,7 @@ local_review_run() {
         count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
         break
       fi
-      warn "  The local review was not recorded: no structured answer (an error), an answer not complete (it handed back before it was done), or GitHub took none of them." >&2
+      warn "  The local review was not recorded: no findings count in its answer, no \`REVIEW: complete\` line (it handed back before it was done), or GitHub took none of them." >&2
       warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
       return 1
     fi
@@ -814,7 +815,7 @@ The search for new findings on this pull request is over. Do not review the code
 
 $earlier
 
-Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Your answer is the structured output: \`resolved\` — each finding the code no longer has, by its id, with how in a sentence; \`findings\` empty; \`complete\` true.
+Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Answer with nothing else: a \`RESOLVED: <id> — <how, in a sentence>\` line for each finding the code no longer has, and last a line of its own, \`FINDINGS: 0\`.
 TEXT
 }
 
@@ -841,7 +842,14 @@ TEXT
 
 Post nothing to GitHub and change no file: sclaude posts your findings from your answer.
 
-When the skill is done, your answer is the structured output: \`findings\` — each new finding, with its \`path\` and \`line\` (a concern about the whole pull request goes on the file and line it is most about: a finding is a thread, and a thread needs a place), \`title\` (the finding in one line) and \`scenario\` (the failure scenario: concrete inputs or state, and the wrong result), empty when there are none; \`resolved\` — each earlier open finding the code no longer has, by its id, with how in a sentence; and \`complete\` — true only once the skill and every agent it started have finished. An answer with \`complete\` false is taken as unfinished, and the head is not recorded as reviewed.
+When the skill is done, answer with nothing else. First the new findings, one per section:
+
+### <path>:<line> — <the finding in one line>
+<the failure scenario: concrete inputs or state, and the wrong result>
+
+A concern about the whole pull request goes on the file and line it is most about: a finding is a thread, and a thread needs a place.
+
+then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open finding the code no longer has, then a line of its own, \`FINDINGS: <n>\`, the number of new findings above — \`FINDINGS: 0\` when there are none — and last, only once the skill and every agent it started have finished, the line \`REVIEW: complete\`. An answer without it is taken as unfinished, and the head is not recorded as reviewed.
 TEXT
 }
 

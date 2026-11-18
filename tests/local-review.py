@@ -46,19 +46,6 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import pr_context  # noqa: E402
 import local_review  # noqa: E402
 
-
-def as_json(text, complete=True):
-    """A text-format answer as claude -p --output-format json gives it with
-    the review's schema; one with no count stays text, as a run that
-    returned no structured output."""
-    found, resolved, count = local_review.parse(text)
-    if count is None:
-        return text
-    return json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": {
-        "findings": [{"path": f["path"], "line": f["line"], "title": f["title"], "scenario": f["body"]} for f in found],
-        "resolved": [{"id": k, "how": v} for k, v in resolved.items()],
-        "complete": complete}})
-
 failures = []
 
 
@@ -274,11 +261,10 @@ try:
     ask_dir = os.path.join(tmp, "ask")
     feed = os.path.join(ask_dir, "ask", "demo", "notes", "feed.tsv")
 
-    # Every answer as claude -p gives it: the structured output, complete
-    # (as_json); `text` keeps the text format /sreview's reviewer writes,
-    # which `record` reads too.
-    def review(answer, text=False):
-        write(os.path.join(tmp, "answer"), answer + local_review.DONE + "\n" if text else as_json(answer))
+    # Every answer ends as the prompt asks, once the review is done; one
+    # handed back before it is refused (an-unfinished-answer-is-refused).
+    def review(answer):
+        write(os.path.join(tmp, "answer"), answer + local_review.DONE + "\n")
         return run_bash('REPO=%s; local_review %s 7' % (repo, repo),
                         {"ASK_DIR": ask_dir, "ASK_SLUG": "demo"})
 
@@ -313,7 +299,7 @@ try:
     check("first-told", told(), ["🔍 Local review started: PR #7, round 1",
                                  "🔍 Local review finished: PR #7, round 1 · 2 open"])
     first = prompts()
-    check_true("prompt-asks-structured-and-complete", "structured output" in first and "`complete`" in first)
+    check_true("prompt-asks-the-end-line", local_review.DONE in first)
     check_true("prompt-forbids-waiting", "never end a turn to wait" in first)
     check_true("first-reads-whole-pr", "the whole pull request" in first
                and "git diff %s..%s" % (base, head) in first)
@@ -430,7 +416,7 @@ try:
     named = json.loads(before.splitlines()[-1]).get("session") or ""
     check_true("pass-session-journaled",
                re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", named))
-    _, _, rc = review("### a.txt:1 — one\nx\n\n## Something else\n\nFINDINGS: 2\n", text=True)
+    _, _, rc = review("### a.txt:1 — one\nx\n\n## Something else\n\nFINDINGS: 2\n")
     check("count-mismatch-fails", rc, 1)
     with open(journal) as fh:
         check("count-mismatch-not-recorded", recorded(fh.read()), recorded(before))
@@ -508,7 +494,7 @@ try:
             write(os.path.join(q, "%02d" % i), a)
 
     def batch(tag, n):
-        return as_json("".join("### a.txt:1 — %s %d\nx\n\n" % (tag, i) for i in range(n)) + "FINDINGS: %d\n" % n)
+        return "".join("### a.txt:1 — %s %d\nx\n\n" % (tag, i) for i in range(n)) + "FINDINGS: %d\n" % n + local_review.DONE + "\n"
 
     for name, passes, answers, want_calls in (
             ("cap-reruns", "5", (batch("p1", 2), batch("p2", 2), batch("p3", 1)), 3),
@@ -620,7 +606,7 @@ try:
         check_true("verify-%s-resolved" % said,
                    [t for t in threads() if t["id"] == first["id"]][0]["isResolved"])
         check_true("verify-%s-count" % said, out.strip().isdigit())
-    write(os.path.join(tmp, "answer"), as_json("FINDINGS: 0\n"))
+    write(os.path.join(tmp, "answer"), "FINDINGS: 0\n" + local_review.DONE + "\n")
 
     # `x` twice at the terminal stops a pass now: nothing of it is posted or
     # recorded, the word is kept as `now`, and the count of what is open is
@@ -697,7 +683,7 @@ try:
         after = fh.read()
     check("stop-now-not-recorded", recorded(after), recorded(before))
     check_true("stop-now-spent-journaled", after.count('"spent": true') > before.count('"spent": true'))
-    answer_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-answer.json")
+    answer_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-answer.md")
     with open(answer_file) as fh:
         check_true("stop-now-keeps-last-answer", "never" not in fh.read())
     check("stop-now-no-part", os.path.exists(answer_file + ".part"), False)
@@ -827,22 +813,6 @@ with tempfile.TemporaryDirectory() as tmp_done:
         fh.write("FINDINGS: 0\n")
     check("an-unfinished-answer-is-refused",
           local_review.record(tmp_done, "7", "o/r", early, "a", "b", "1", os.path.join(tmp_done, "j")), 1)
-    for name, body in (("complete-false", as_json("FINDINGS: 0\n", complete=False)),
-                       ("an-error", json.dumps({"is_error": True, "subtype": "error_max_turns"}))):
-        with open(early, "w") as fh:
-            fh.write(body)
-        check("a-structured-answer-refused-%s" % name,
-              local_review.record(tmp_done, "7", "o/r", early, "a", "b", "1", os.path.join(tmp_done, "j")), 1)
-    # A finding with no path (a slip past the schema), beside one with a
-    # path: both kept and counted, none dropping the other.
-    got = local_review.structured(json.dumps({"is_error": False, "structured_output": {"findings": [
-        {"path": "", "line": 1, "title": "about the whole pull request", "scenario": "x"},
-        {"path": "a.txt", "line": 3, "title": "on a line", "scenario": "y"}], "resolved": [], "complete": True}}))
-    check("a-finding-with-no-path-is-kept", ([f["path"] for f in got[0]], got[2]), (["", "a.txt"], 2))
-    check("the-schema-asks-a-path", local_review.SCHEMA["properties"]["findings"]["items"]["properties"]["path"].get("minLength"), 1)
-    check("the-schema-asks-complete", local_review.SCHEMA["required"], ["findings", "resolved", "complete"])
-with open(os.path.join(LIB, "review", "local_review.sh"), encoding="utf-8") as fh:
-    check_true("the-pass-asks-the-schema", '--json-schema "$schema" --output-format json' in fh.read())
 # /sreview asks its reviewer for the same line, and records through `record`.
 with open(os.path.join(ROOT, "skills", "sreview", "SKILL.md"), encoding="utf-8") as fh:
     check_true("sreview-asks-the-end-line", "`%s`" % local_review.DONE in fh.read())

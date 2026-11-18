@@ -51,8 +51,11 @@ round has read a fix and found nothing, a problem found later nearby starts
 an icicle of its own — unless it sits on the very lines that fix wrote, a
 check that missed, which the map marks in purple. Its colour says how the thread ended (fixed, declined, left to you, would
 undo a fix), with the share the person asked for during the
-review in the development's beige; it darkens the more often review had
-already rewritten that spot; a pattern marks a migration among changed code,
+review in the development's beige, and code merely moved from one file to
+another in its own muted colour, counted apart from the fixes; it darkens
+the more often review had already rewritten those lines; rows where nothing
+happened to an icicle are a thin stem, and a removed file ends its icicle
+with a ✕; a pattern marks a migration among changed code,
 and a place where neither code nor a migration changed is hollow, its
 patterns saying what was touched instead: tests, docs and config, comments. A green line under a file in a round's row says that
 round read it and found nothing (blue and thin: only the last fixes;

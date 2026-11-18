@@ -87,6 +87,13 @@ RID = re.compile(r"discussion_r(\d+)")
 # How far, in lines, a fix may sit from a thread of its round to count as
 # its answer.
 NEAR = 15
+# Code moved between files: the telling lines (MOVE_LINE characters or
+# more) a hunk shares with another file's removal, at least MOVE_MIN.
+MOVE_LINE = 6
+MOVE_MIN = 3
+# The share of a hunk's telling lines that must have moved for it to lose
+# a thread found near it.
+MOVE_ALL = 0.8
 
 
 def ts(text):
@@ -194,21 +201,33 @@ def comment_line(path, text):
     return bool(s) and s.startswith(COMMENT_STARTS)
 
 
-def hunks(tree, a, b):
+def hunks(tree, a, b, texts=False):
     """[{path, x, n, add, del, code, comment}] of `git diff a b`: x and n the
-    hunk's first line and length in b."""
+    hunk's first line and length in b. A file b no longer has keeps its
+    path, and its hunk is the whole file removed (x and n 0, `removed`). With `texts`,
+    each hunk keeps the lines it wrote and removed as `_plus`/`_minus`."""
     out = git(tree, "diff", "-U0", "--no-color", "--no-ext-diff", "-M", a, b)
     if out is None:
         return []
-    found, path, cur = [], None, None
+    # The `---`/`+++` lines are headers only between `diff --git` and the
+    # first hunk: inside a hunk with -U0, a removed `-- note` (SQL) reads
+    # `--- note`, an added `++ x` reads `+++ x`.
+    found, path, old, cur, head, removed = [], None, None, None, False, False
     for line in out.splitlines():
-        if line.startswith("+++ "):
-            path = line[6:] if line.startswith("+++ b/") else None
+        if line.startswith("diff --git"):
+            path = old = cur = None
+            head, removed = True, False
             continue
-        if line.startswith("--- ") or line.startswith("diff --git"):
+        if head and line.startswith("--- "):
+            old = line[6:] if line.startswith("--- a/") else None
+            continue
+        if head and line.startswith("+++ "):
+            removed = line == "+++ /dev/null"
+            path = line[6:] if line.startswith("+++ b/") else old if removed else None
             continue
         m = HUNK.match(line)
         if m:
+            head = False
             if path is None:
                 cur = None
                 continue
@@ -216,14 +235,92 @@ def hunks(tree, a, b):
                    "n": int(m.group(4)) if m.group(4) is not None else 1,
                    "ox": int(m.group(1)), "on": int(m.group(2)) if m.group(2) is not None else 1,
                    "add": 0, "del": 0, "code": 0, "comment": 0}
+            if removed:
+                cur["removed"] = True
+            if texts:
+                cur["_plus"], cur["_minus"] = [], []
             found.append(cur)
             continue
         if cur is None or not line or line[0] not in "+-":
             continue
         cur["add" if line[0] == "+" else "del"] += 1
+        if texts:
+            cur["_plus" if line[0] == "+" else "_minus"].append(line[1:].strip())
         if line[1:].strip():
             cur["comment" if comment_line(path, line[1:]) else "code"] += 1
     return found
+
+
+# A line that says something on its own, for telling code moved between
+# files from code written anew: not a brace, a keyword alone or a blank.
+def telling(s):
+    return len(s) >= MOVE_LINE and any(c.isalnum() for c in s)
+
+
+def moves(hs):
+    """Code one round moved from one file to another: a hunk whose telling
+    added lines are mostly lines another file's hunk of the same round
+    removed (at least MOVE_MIN of them, and half its own) keeps those hunks
+    as `_moved_from`, and each of them keeps it in `_moved_to`; a removal
+    half of whose telling lines went on so is `_moved_out`, code moved away
+    rather than deleted. `_moved_share` is the part of a side's telling
+    lines that moved, from or to the files it names. A removed line accounts
+    for as many added ones in the whole round as it was removed, no more.
+    Content alone says it — no blame follows a line across files."""
+    gone, told, sent, left = {}, {}, {}, {}
+    for k, h in enumerate(hs):
+        for s in h.get("_minus", ()):
+            if telling(s):
+                at = gone.setdefault(s, {})
+                at[k] = at.get(k, 0) + 1
+                told[k] = told.get(k, 0) + 1
+    for k, h in enumerate(hs):
+        plus = [s for s in h.get("_plus", ()) if telling(s)]
+        if len(plus) < MOVE_MIN:
+            continue
+        # The sources first, by every line each could give (what is left of
+        # it this round); then each line goes to one of them only, so a hunk
+        # that happens to share a line or two with the real source takes
+        # none from it. Tried on a copy: only a move takes what it matched.
+        can, held = {}, {}
+        for s in plus:
+            for j, n in gone.get(s, {}).items():
+                if hs[j]["path"] != h["path"] and left.get((s, j), n) - held.get((s, j), 0) > 0:
+                    held[s, j] = held.get((s, j), 0) + 1
+                    can[j] = can.get(j, 0) + 1
+        most = max(can.values(), default=0)
+        srcs = {j for j, n in can.items() if n >= min(MOVE_MIN, most)}
+        by, took = {}, {}
+        for s in plus:
+            for j, n in gone.get(s, {}).items():
+                key = (s, j)
+                if j in srcs and left.get(key, n) - took.get(key, 0) > 0:
+                    took[key] = took.get(key, 0) + 1
+                    by[j] = by.get(j, 0) + 1
+                    break
+        # The bar is on what a source could give, each removed copy once
+        # (`held`): handed out, a line two sources share goes to one, and
+        # the other keeps the lines only it removed.
+        srcs = [j for j in srcs if by.get(j)]
+        hit = sum(by[j] for j in srcs)
+        if hit < MOVE_MIN or hit * 2 < len(plus):
+            continue
+        for (s, j), n in took.items():
+            if j in srcs:
+                left[s, j] = left.get((s, j), gone[s][j]) - n
+        h["_moved_from"] = [hs[j] for j in sorted(srcs)]
+        h["_moved_share"] = hit / len(plus)
+        for j in srcs:
+            hs[j].setdefault("_moved_to", []).append(h)
+            sent[j] = sent.get(j, 0) + by[j]
+    for j, n in sent.items():
+        share = n / told[j]
+        if share * 2 >= 1:
+            hs[j]["_moved_out"] = True
+            hs[j]["_moved_share"] = max(share, hs[j].get("_moved_share", 0))
+    for h in hs:
+        h.pop("_plus", None)
+        h.pop("_minus", None)
 
 
 def asked_lines(tree, a, b):
@@ -271,13 +368,16 @@ def project(paths, rounds, fixes, threads, dev, final):
     `_of`, the fix that wrote the line it was posted on: lineage() reads
     both."""
     lengths = {}
+    by_spot = {}
+    for h in fixes:
+        by_spot.setdefault((h["r"], h["path"]), []).append(h)
     for f in paths:
         n0 = rounds[0]["lines"].get(f, 0)
         cur, axis, nxt = list(range(n0)), list(range(n0)), n0
         snaps, owned, ok, writer = [], [], True, {}
         for i, r in enumerate(rounds):
             snaps.append(list(cur))
-            hs = sorted((h for h in fixes if h["r"] == i and h["path"] == f), key=lambda h: h["ox"])
+            hs = sorted(by_spot.get((i, f), ()), key=lambda h: h["ox"])
             plans = []
             for h in hs:
                 gone = cur[h["ox"] - 1:h["ox"] - 1 + h["on"]] if h["on"] else []
@@ -354,6 +454,56 @@ def line_counts(tree, rev, paths):
     return counts
 
 
+def alive(tree, base, first, end, paths, moved=()):
+    """{path: [dev, review, main]}: the lines of each file at `end` by who
+    wrote them, by blame — the development (a commit before the first
+    round, after `base`), the review's time (a commit of the branch after
+    the first round's head: its fixes and the person's asks alike), or
+    main (the rest: what was there before the pull request, or merged in:
+    the review's commits are the branch's own, its first parents, so main's
+    commits a sync brought in stay main's). Blame stops at `base`: older
+    lines are main's whatever their commit. Once the feature is merged into
+    main, `base` is the first round's head and the development counts for
+    nothing here — as everywhere on the map, which reads a feature in review.
+    What is left of the development's code, against what it wrote."""
+    def listed(*args):
+        return set((git(tree, "rev-list", *args) or "").split())
+    dev = listed(first, "--not", base) if base else set()
+    later = listed("--first-parent", end, "--not", first, *([base] if base else []))
+    # A block file the review renamed is blamed under its name at the end;
+    # re-indented code keeps its writer (-w), and in a file code was moved
+    # into (`moved`, the map's movedFrom) so does code from another file
+    # (-C) — costly, so there alone: the map counts a move apart from the
+    # fixes.
+    # -z: a path git would quote (a non-ASCII name) is read as it is. (A
+    # path with a file of its own again at the end is no rename to git.)
+    renamed = {}
+    fields = (git(tree, "diff", "-z", "--name-status", "-M", "--diff-filter=R", first, end) or "").split("\0")
+    for k in range(0, len(fields) - 2, 3):
+        if fields[k].startswith("R"):
+            renamed[fields[k + 1]] = fields[k + 2]
+    out = {}
+    for f in paths:
+        n = [0, 0, 0]
+        at = renamed.get(f, f)
+        for line in (git(tree, "blame", "--porcelain", "-M", "-w", *(["-C"] if at in moved else []),
+                         base + ".." + end if base else end, "--", at) or "").splitlines():
+            p = line.split(" ")
+            # A header line: the commit, its line there, its line here[, count].
+            if len(p) >= 3 and len(p[0]) == 40 and p[1].isdigit() and p[2].isdigit():
+                n[0 if p[0] in dev else 1 if p[0] in later else 2] += 1
+        if any(n):
+            out[f] = n
+    return out
+
+
+def absent_files(tree, rev, paths):
+    """The paths rev does not have, sorted. The whole tree is listed rather
+    than asked by pathspec, which would read `[id]` in a path as a glob."""
+    have = set((git(tree, "ls-tree", "-r", "-z", "--name-only", rev) or "").split("\0"))
+    return sorted(p for p in paths if p not in have)
+
+
 # --- the threads ---------------------------------------------------------------
 
 def thread_nodes(tree, pr, repo):
@@ -414,7 +564,8 @@ def shifted(tree, a, b, path, line, cache):
         elif line < h["ox"]:
             break
         elif line < h["ox"] + h["on"]:
-            return max(1, h["x"])
+            # The whole file removed: no line of b to move it to.
+            return line if h.get("removed") else max(1, h["x"])
         delta += h["n"] - h["on"]
     return max(1, line + delta)
 
@@ -515,19 +666,24 @@ def replied(tree, rounds, ends, threads, fixes):
             spans[key] = [(ox, on) for ox, on, _ in changes(head, full, h["path"]) - changes(head, full + "^", h["path"])]
         lo, hi = h["ox"], h["ox"] + max(h["on"], 1) - 1
         return any(ox <= hi and lo <= ox + max(on, 1) - 1 for ox, on in spans[key])
+    # Each round's commits: those after its head and up to its end on a line
+    # of descent between them (`--ancestry-path`, so main's commits a merge
+    # brought in are none of them) — one listing a round, not two ancestry
+    # questions a round for every commit a reply names.
+    member = {}
     def round_of(sha):
         if sha not in commits:
             full = (git(tree, "rev-parse", "--verify", "-q", sha + "^{commit}") or "").strip()
             commits[sha] = None
-            if full:
+            if full and not member:
                 for i, r in enumerate(rounds):
-                    if r["head"] != ends[i] \
-                            and git(tree, "merge-base", "--is-ancestor", r["head"], full) is not None \
-                            and git(tree, "merge-base", "--is-ancestor", full, ends[i]) is not None \
-                            and full != r["head"]:
-                        names = [n for n in (git(tree, "show", "--name-only", "--format=", full) or "").splitlines() if n]
-                        commits[sha] = (i, names, full)
-                        break
+                    if r["head"] != ends[i]:
+                        for c in (git(tree, "rev-list", "--ancestry-path", r["head"] + ".." + ends[i]) or "").split():
+                            member.setdefault(c, i)
+                member.setdefault("", None)
+            if full and member.get(full) is not None:
+                names = [n for n in (git(tree, "show", "--name-only", "--format=", full) or "").splitlines() if n]
+                commits[sha] = (member[full], names, full)
         return commits[sha]
     for t in threads:
         # A thread left as it is names commits as its reasons — the fix it
@@ -599,7 +755,8 @@ def lineage(rounds, fixes, threads):
     A chain closes at the first round after its last fix or thread that
     read it whole and found nothing there: every thread of it settled, the
     round neither stopped nor cut short at its cap (`more`), all its files
-    opened (a GitHub run, which leaves no transcript here, taken as read),
+    that are still there opened (a GitHub run, which leaves no transcript
+    here, taken as read; a file the fixes removed asks no reading),
     and no thread of that round on its lines — unless that round's own
     fixing then lands on it, which keeps it going. After that a change there is
     something new and starts an icicle of its own — except a thread on the
@@ -630,7 +787,11 @@ def lineage(rounds, fixes, threads):
                     continue
                 if any(t["r"] == i for t in on.get(c, [])):
                     continue
-                if r["seen"] is not None and not ch["files"] <= set(r["seen"]):
+                # A file the fixes removed is read by nobody: what is left of
+                # the chain is what the round has to open. All of it gone,
+                # nothing is left to check but its threads.
+                there = ch["files"] - set(r.get("absent") or ())
+                if r["seen"] is not None and not there <= set(r["seen"]):
                     continue
                 answered = [by_rid[fixes[k]["thread"]] for k in ch["members"] if fixes[k]["thread"] in by_rid]
                 if all(settled(t) for t in answered + [t for t in on.get(c, []) if t["r"] < i]):
@@ -998,7 +1159,13 @@ def build(tree):
             own = set((git(tree, "log", "--first-parent", "--no-merges", "--name-only", "--format=",
                            r["head"] + ".." + ends[i]) or "").split("\n")) - {""}
             asked = asked_lines(tree, r["head"], ends[i])
-            for h in hunks(tree, r["head"], ends[i]):
+            got = hunks(tree, r["head"], ends[i], texts=True)
+            # Main's changes brought in by a merge are no side of a move.
+            moves([h for h in got if h["path"] in own])
+            for h in got:
+                h.pop("_plus", None)
+                h.pop("_minus", None)
+            for h in got:
                 h["r"] = i
                 # Lines the person asked for are the development's, wherever
                 # in the review they came: the page draws them as such.
@@ -1020,8 +1187,9 @@ def build(tree):
     if base:
         paths = [p for p in (git(tree, "diff", "--name-only", "--no-renames", base, rounds[0]["head"]) or "").splitlines() if p]
         for h in hunks(tree, base, rounds[0]["head"]):
-            f = dev["files"].setdefault(h["path"], {"add": 0, "code": 0, "comment": 0, "regions": []})
+            f = dev["files"].setdefault(h["path"], {"add": 0, "del": 0, "code": 0, "comment": 0, "regions": []})
             f["add"] += h["add"]
+            f["del"] += h["del"]
             f["code"] += h["code"]
             f["comment"] += h["comment"]
             if h["add"]:
@@ -1034,7 +1202,11 @@ def build(tree):
     paths.sort()
     for i, r in enumerate(rounds):
         r["lines"] = line_counts(tree, r["head"], paths)
+        # A file not there at the round's head — not yet written, or removed
+        # by the fixes before it: an empty file has no lines either, but is there.
+        r["absent"] = absent_files(tree, r["head"], paths)
     final = line_counts(tree, ends[-1], paths)
+    absent_end = absent_files(tree, ends[-1], paths)
     for r in rounds:
         sessions = r["sessions"]
         # A stopped pass said nothing that counts: it read nothing either.
@@ -1044,6 +1216,12 @@ def build(tree):
     for k, h in enumerate(fixes):
         h["i"] = k
     axis = project(paths, rounds, fixes + carried, threads, dev, final)
+    # Code moved from another file grows from the fixes that wrote it there:
+    # the blame of the removal it came from.
+    for h in fixes:
+        srcs = h.get("_moved_from") or []
+        if srcs and not h.get("asked"):
+            h["_blame"] = sorted(set(h.get("_blame", [])) | {b for s in srcs for b in s.get("_blame", [])})
     # Each fix's answer: the nearest thread of its round in its file, within
     # NEAR lines; failing that, the thread a subagent of its round was given
     # when it edited the fix's file — one of the brief's threads in that file,
@@ -1079,6 +1257,20 @@ def build(tree):
         if best:
             h["outcome"], h["thread"], h["via"] = best[1]["outcome"], best[1]["rid"], "near"
     replied(tree, rounds, ends, threads, fixes)
+    # Moved code is no answer to a thread found near it: only a reply or a
+    # subagent's brief ties it to one. Each side names the other's files.
+    for h in fixes + carried:
+        to, frm = h.pop("_moved_to", None), h.pop("_moved_from", None)
+        out = h.pop("_moved_out", False)
+        if frm:
+            h["movedFrom"] = sorted({s["path"] for s in frm})
+        if to and out:
+            h["movedTo"] = sorted({s["path"] for s in to})
+        share = h.pop("_moved_share", 0)
+        # A thread found near it gives way only to a hunk that is almost all
+        # moved code: half moved, the other half may be the fix of that thread.
+        if (frm or (to and out)) and not h.get("asked") and (h.get("via") == "" or (h.get("via") == "near" and share >= MOVE_ALL)):
+            h["outcome"], h["thread"], h["via"] = "moved", "", "move"
     lineage(rounds, fixes, threads)
     for h in fixes:
         h.pop("i", None)
@@ -1098,6 +1290,9 @@ def build(tree):
                  "files": b.get("files") or [], "criteria": b.get("criteria") or []}
                 for i, b in enumerate(bs or []) if isinstance(b, dict)]
     blocks = shown(cut.get("blocks"))
+    # What is left of the development's code in every block's file, now.
+    survive = alive(tree, base, rounds[0]["head"], ends[-1], sorted({f for b in blocks for f in b["files"]}),
+                    {h["path"] for h in fixes if h.get("movedFrom")}) if blocks else {}
     # Each block's size now, as the split measures it (review_blocks.py
     # outgrown): its files' changed lines, generated ones left out, against
     # reviewBlocks.size.
@@ -1128,7 +1323,7 @@ def build(tree):
     step = state.get("step") or ""
     closed = step == "done" or step in places and places.index(step) > places.index("review")
     now = (state.get("blocks") or {}).get("current")
-    return {"pr": pr, "repo": repo, "head": head, "final": final, "dev": dev, "blocks": blocks, "earlier": earlier,
+    return {"pr": pr, "repo": repo, "head": head, "final": final, "absentEnd": absent_end, "alive": survive, "dev": dev, "blocks": blocks, "earlier": earlier,
             "blockNow": now if isinstance(now, int) and blocks and not closed else None, "closed": closed,
             "blockSize": int(size) if size.isdigit() else review_blocks.SIZE,
             "files": [dict({"path": p, "lines": rounds[0]["lines"].get(p, 0)},

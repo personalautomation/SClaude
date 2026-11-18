@@ -45,7 +45,7 @@ FILES = [
     ("review-blocks.json", "the cut of a pull request too big for one review into review blocks (blocks_file, FEATURE_BLOCKS in review_blocks.py, BLOCKS_FILE in pr_context.py)"),
     ("review-rounds.jsonl", "the review's journal, one line per run wherever it ran (review_journal, JOURNAL in local_review.py)"),
     ("local-review<suffix>", "a review run on this machine: -unposted.json "
-                             "findings GitHub would not take yet, -answer.md the last answer, -blocks.md the cut's answer, .log its stderr"),
+                             "findings GitHub would not take yet, -answer.json the last answer, -blocks.md the cut's answer, .log its stderr"),
 
     # --- regression and deploy -------------------------------------------------
     ("regression.log", "the latest regression run's log: a link into logs/"),

@@ -150,7 +150,24 @@ It answers in sclaude's format, so PR mode can post it unchanged:
 ```
 
 then `RESOLVED: <id> — <how>` for each earlier open finding the code no longer
-has (PR mode), and last `FINDINGS: <n>`.
+has (PR mode), then `FINDINGS: <n>`, and last the line `REVIEW: complete` —
+written only once the `code-review` skill and every agent it started have
+finished. Tell it so: it answers once, at the end, never with an interim list.
+
+**Take the answer only when it is whole.** A reviewer can hand back before its
+skill is done — "FINDINGS: 0" first, the real list after. So:
+
+- wait for the subagent's task to be reported finished, not only for its
+  message, and take its last report;
+- an answer without `REVIEW: complete` is not an answer: ask the subagent to
+  finish (`SendMessage`), or spawn the review again — never triage it, never
+  call the round clean on it, never write the mark of a finished run on it;
+- a report that comes after you acted on an earlier one replaces it: its
+  findings join the iteration, and a mark already written comes off.
+
+In PR mode `local_review.py record` refuses an answer without that line, as
+it refuses sclaude's own headless review whose structured output is not
+`complete`.
 
 ## 2. Triage — yours, not the subagent's
 

@@ -271,16 +271,24 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   by those two maps' headings a list chooses which pass to play. While it
   plays the History follows it, and a click on a line plays from there.
   On a review step — where the feature stands, the step you click, or the
-  player passing it — the lower half of the page shows **the review's map**,
+  player passing it — the lower half of the page shows **the review's map**
+  (its header gives the lines the review's fixes added and removed; hovering
+  its title gives those beside what you asked for and the code moved
+  between files, and a table, block by block, of what the development
+  wrote, how much of it is still there and how much was written during the
+  review),
   and the step is centred in the half above. On top lies all the code the
   development wrote, as tall as the log of how long it took, a column for
-  each file the review touched (the others thin strips); below it a band for
+  each file (one the review never touched at the narrowest width, its name
+  paler); below it a band for
   each review round, the same way. A line keeps its place across the rounds
   — a line a fix deleted keeps its room, the lines it wrote stand next to
   what they replaced — so a column stays the same code from top to bottom.
   Two ways to draw the icicles, chosen by the switch in the panel: **by
   fix** joins the files one fix touched, **by file** keeps one icicle a file
-  that splits where its changes part. From the code hang icicles: each place
+  that splits where its changes part. Either way, a place's hover lists the
+  same finding's fixes in other files of that round — the same thread, or
+  one subagent's work — each a link that scrolls the map there. From the code hang icicles: each place
   the review sent fixes to, a straight-sided band a round whose bottom is as
   wide as the lines that round changed there and whose top is the round
   before's: it narrows as fewer lines are touched, widens as more are or
@@ -305,8 +313,15 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   and a purple ring the thread found later.
   A round that never opened the file — a review that stopped after its
   findings, or did not get there — found nothing there by not looking: the
-  icicle goes on through it in its own colour fading down, still to be
-  checked. A pull request read in review blocks has its columns grouped by
+  icicle goes on through it as a dashed outline, faintly filled, still to
+  be checked. Rows where nothing happened to an icicle's code — between a
+  fix and the next one there, or the round that read it — are a thin stem
+  in the colour of the place above, so the eye goes to the rows with
+  fixes. A file the fixes removed ends its icicle at the foot of that
+  round's row, with a line and a ✕; code moved from one file to another in
+  one round (the same lines removed there and written here) is mauve,
+  neither a fix nor new code, its icicle going on from the file it came
+  from, and it is counted apart from the review's fixes. A pull request read in review blocks has its columns grouped by
   block, each block's name over its files and a line between two, so a
   round of block 1 not opening block 4's files reads as the cut, and a pale
   icicle inside its own block as a gap; the hover says which: a later
@@ -330,14 +345,18 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   and the round after reads past them. The hover says what
   an open icicle waits for. A place
   with nothing above it — code first touched in a later round, or a file
-  the development did not write — starts as a point in the middle of its
-  round. An icicle's colour is how the thread it answered ended (fixed, declined,
+  the development did not write — starts flat at its own width, where its
+  code is: the width at either end of an icicle is never more than the code
+  changed there. An icicle's colour is how the thread it answered ended (fixed, declined,
   left to you (a night's decision too), would undo a fix, open, or no thread at
   all — a finding noted as undoing a fix stays that colour however its
   thread ended later, which its hover says); the share of it that is code you asked for during the review (a
   `feat` commit, or one with a `Requirement:` line) is beige, as the code
   written before the review is; darker the more earlier rounds had already
-  rewritten that spot (0, 1, 2, 3 or more). Solid where a line of code or
+  rewritten those lines (0, 1, 2, 3 or more, weighted by how many of the
+  place's lines they were). A fix tied to its thread only by sitting near
+  it in the same round has a dashed edge and a lighter fill: its colour is
+  likely, not certain. Thin lines are always drawn over the fills. Solid where a line of code or
   a migration changed — what the product does — with \ when a migration
   was among it; hollow where neither did, with a pattern for what was
   touched instead, laid over one another: tests /, docs and config —,
@@ -347,8 +366,14 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   change; a dashed yellow one, a part only. A review block's name is
   green once it is read and closed, blue while it is read; hovering it
   gives its changed lines against what one pass reads whole, its files and
-  criteria, and what its rounds cost and found, the threads of its last
-  rounds in a row — at the moment shown when the history is played back;
+  criteria, the development's change to its files and what every round
+  changed in them since, summed, as +added −removed (the review's fixes,
+  what you asked for and code moved between files apart), how much of what
+  the development wrote is still there now and how much was written during
+  the review, and what its rounds cost and found, the threads of its last
+  rounds in a row and the rounds that mostly added what you asked for —
+  the threads after those are partly about that new code — at the moment
+  shown when the history is played back;
   a click folds it to a sliver, one icicle summing its files as the one
   behind the rounds' names sums them all, and again opens it, remembered
   for that feature. Both summed icicles, behind the rounds' names
@@ -359,7 +384,9 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   by outcome outward from the axis; a line on the same scale says how much
   the round grew the code (right) or shrank it (left), darker (lighter on
   a dark page) the more threads review posted in it (0, 1–2, 3–5, 6 or
-  more; threads you opened yourself not counted). An icicle that leans right
+  more; threads you opened yourself not counted) — the line and its axis
+  only over the rounds that did something there, so a folded block whose
+  rounds are over shows no stem below them. An icicle that leans right
   is review working on its own code. None is drawn where the
   file's icicle goes on through the row; the row it closes in keeps it. Dots are the threads, piled into a column where a round
   posted several close together, so a tall pile is a place the review kept

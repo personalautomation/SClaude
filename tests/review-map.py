@@ -454,6 +454,131 @@ review_map.lineage(made(4), fx, th)
 check("a closed chain that fixed no thread misses none: the thread there starts anew",
       "missed" not in th[0] and th[0]["of"] is None and fx[1]["from"] == [])
 
+# A chain whose file its own round's fixes removed is read by nobody: the
+# next round closes it without opening the file, once its threads settled.
+rs = made(3, seen=[])
+for r in rs[1:]:
+    r["absent"] = ["f"]
+fx = [fix(0, 0, "t1"), fix(1, 2, blame=[0])]
+review_map.lineage(rs, fx, [finding("t1", 0)])
+check("a chain whose file was removed closes without a reading", fx[1]["from"] == [])
+
+# A removed file keeps its path, and code moved to another file in the same
+# round is told by its lines: both sides know it.
+with tempfile.TemporaryDirectory() as tmp3:
+    t3 = os.path.join(tmp3, "t")
+    os.makedirs(t3)
+    git(t3, "init", "-q")
+    git(t3, "config", "user.email", "t@t")
+    git(t3, "config", "user.name", "t")
+    body = ["select value_%d from things where id = %d;" % (i, i) for i in range(8)]
+    with open(os.path.join(t3, "old.sql"), "w") as fh:
+        fh.write("\n".join(body) + "\n")
+    with open(os.path.join(t3, "new.sql"), "w") as fh:
+        fh.write("-- head\n")
+    git(t3, "add", ".")
+    git(t3, "commit", "-qm", "base")
+    base = git(t3, "rev-parse", "HEAD")
+    os.remove(os.path.join(t3, "old.sql"))
+    with open(os.path.join(t3, "new.sql"), "a") as fh:
+        fh.write("\n".join(body) + "\nend;\n")
+    git(t3, "add", "-A")
+    git(t3, "commit", "-qm", "fold")
+    end = git(t3, "rev-parse", "HEAD")
+    hs = review_map.hunks(t3, base, end, texts=True)
+    old = [h for h in hs if h["path"] == "old.sql"]
+    check("a removed file keeps its path: its hunk removes it whole (%s)" % old,
+          len(old) == 1 and old[0]["del"] == 8 and old[0]["n"] == 0 and old[0]["x"] == 0)
+    review_map.moves(hs)
+    new = [h for h in hs if h["path"] == "new.sql"]
+    check("code moved between files in one round is known on both sides",
+          new and new[0].get("_moved_from") == old and old[0].get("_moved_to") == new and old[0].get("_moved_out")
+          and "_plus" not in new[0] and "_minus" not in old[0])
+    present = review_map.absent_files(t3, end, ["old.sql", "new.sql"])
+    check("the files a round no longer has are listed", present == ["old.sql"])
+    check("a thread's line in a file removed after it stays as it was",
+          review_map.shifted(t3, base, end, "old.sql", 5, {}) == 5)
+
+    # A removed SQL comment reads `--- …` inside a hunk: still a line, not a header.
+    with open(os.path.join(t3, "new.sql")) as fh:
+        ls = fh.read().splitlines()
+    with open(os.path.join(t3, "new.sql"), "w") as fh:
+        fh.write("\n".join(["-- note"] + ls) + "\n")
+    git(t3, "commit", "-qam", "note")
+    noted = git(t3, "rev-parse", "HEAD")
+    with open(os.path.join(t3, "new.sql"), "w") as fh:
+        fh.write("\n".join(ls) + "\n")
+    git(t3, "commit", "-qam", "drop note")
+    hs = review_map.hunks(t3, noted, git(t3, "rev-parse", "HEAD"))
+    check("a removed `-- note` inside a hunk counts as a removed line (%s)" % hs,
+          len(hs) == 1 and hs[0]["path"] == "new.sql" and hs[0]["del"] == 1)
+
+# What is left of the development: blame on the end, by who wrote each line.
+with tempfile.TemporaryDirectory() as tmp4:
+    t4 = os.path.join(tmp4, "t")
+    os.makedirs(t4)
+    git(t4, "init", "-q")
+    git(t4, "config", "user.email", "t@t")
+    git(t4, "config", "user.name", "t")
+    def wrote(ls, msg):
+        with open(os.path.join(t4, "f.py"), "w") as fh:
+            fh.write("\n".join(ls) + "\n")
+        git(t4, "add", "f.py")
+        git(t4, "commit", "-qm", msg)
+        return git(t4, "rev-parse", "HEAD")
+    base = wrote(["main_%d = 0" % i for i in range(3)], "main")
+    first = wrote(["main_%d = 0" % i for i in range(3)] + ["dev_%d = 1" % i for i in range(4)], "dev")
+    end = wrote(["main_%d = 0" % i for i in range(3)] + ["dev_0 = 1", "dev_1 = 1", "fix_0 = 2"], "fix")
+    check("blame counts the development's lines left, the review's and main's",
+          review_map.alive(t4, base, first, end, ["f.py"]) == {"f.py": [2, 1, 3]})
+    # Main moves on after the first round and a sync merges it in: its new
+    # line is main's, not the review's.
+    work = git(t4, "rev-parse", "--abbrev-ref", "HEAD")
+    git(t4, "checkout", "-qb", "trunk", base)
+    wrote(["main_0 = 9", "main_1 = 0", "main_2 = 0"], "main moves on")
+    git(t4, "checkout", "-q", work)
+    git(t4, "merge", "-q", "--no-edit", "trunk")
+    synced = git(t4, "rev-parse", "HEAD")
+    check("main merged in after the first round stays main's",
+          review_map.alive(t4, base, first, synced, ["f.py"]) == {"f.py": [2, 1, 3]})
+    # Renamed under a name git would quote: followed all the same.
+    git(t4, "mv", "f.py", "ü.py")
+    git(t4, "commit", "-qm", "rename")
+    check("a block file renamed to a non-ASCII name is blamed under its new name",
+          review_map.alive(t4, base, first, git(t4, "rev-parse", "HEAD"), ["f.py"]) == {"f.py": [2, 1, 3]})
+
+# One removed line accounts for one added line, not for every copy of it.
+line = "return value_from_cache;"
+a = {"path": "a", "_minus": [line], "_plus": []}
+b = {"path": "b", "_minus": [], "_plus": [line] * 4}
+review_map.moves([a, b])
+check("a line removed once does not make four copies of it moved", "_moved_from" not in b and "_moved_out" not in a)
+three = ["first_moved_line();", "second_moved_line();", "third_moved_line();"]
+a = {"path": "a", "_minus": list(three), "_plus": []}
+bs = [{"path": p, "_minus": [], "_plus": list(three)} for p in ("b", "c", "d")]
+review_map.moves([a] + bs)
+six = ["moved_line_%d();" % i for i in range(6)]
+by_chance = {"path": "a", "_minus": six[:2], "_plus": []}
+source = {"path": "b", "_minus": list(six), "_plus": []}
+target = {"path": "c", "_minus": [], "_plus": list(six)}
+review_map.moves([by_chance, source, target])
+check("a file sharing a line or two with the real source takes none of the move from it",
+      target.get("_moved_from") == [source] and source.get("_moved_out") and "_moved_to" not in by_chance)
+once = {"path": "x", "_minus": ["self.assertTrue(result_ok)"], "_plus": []}
+source = {"path": "b", "_minus": list(six), "_plus": []}
+target = {"path": "c", "_minus": [], "_plus": list(six) + ["self.assertTrue(result_ok)"] * 3}
+review_map.moves([once, source, target])
+check("a line removed once and added three times is no source of a move",
+      target.get("_moved_from") == [source] and "_moved_out" not in once)
+p_ = {"path": "p", "_minus": ["shared_a1();", "only_p_a2();", "only_p_a3();"], "_plus": []}
+q_ = {"path": "q", "_minus": ["shared_a1();", "only_q_b1();", "only_q_b2();"], "_plus": []}
+t_ = {"path": "t", "_minus": [], "_plus": ["shared_a1();", "only_p_a2();", "only_p_a3();", "only_q_b1();", "only_q_b2();", "new_n1();", "new_n2();"]}
+review_map.moves([p_, q_, t_])
+check("two sources sharing a line both keep the lines only they removed",
+      t_.get("_moved_from") == [p_, q_] and p_.get("_moved_out") and q_.get("_moved_out"))
+check("lines removed once move into one file of the round, not into each that has them",
+      [("_moved_from" in x) for x in bs] == [True, False, False] and len(a.get("_moved_to", [])) == 1)
+
 # The page carries the panel, its script, and the player's and the poll's hooks.
 page = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "flow", "process.py"),
                        "page", "x"], capture_output=True, text=True).stdout
@@ -468,5 +593,11 @@ check("a jump's two marks link each other, and a column goes on in the next file
       "data-go" in page and "rvj-" in page and "rv-next" in page)
 check("the page hangs a place from its lineage and marks a check that missed",
       "x.from" in page and "t.missed" in page and "rv-missed" in page)
+check("the page ends an icicle at a removed file and follows moved code",
+      "rv-gone" in page and "d.absentEnd" in page and "x.movedFrom" in page and "joutMoved" in page)
+check("a place's hover links the same finding's fixes in other files",
+      "function alsoIn" in page and "t-go" in page)
+check("the page draws thin lines over every fill",
+      "...thins" in page and "data-body" in page)
 
 sys.exit(1 if failures else 0)

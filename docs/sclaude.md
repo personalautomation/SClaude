@@ -479,8 +479,9 @@ in proportion to their widths (a split); each is a trapezoid, its bottom as
 wide as the lines the round changed there on one scale for the map (the one
 at which four places in five fit their columns, the rest held to theirs),
 its top the slices of the places above (a parent always shares a file with
-it), its own width under the development's code in the first round, or a
-point mid-row where nothing is above it; a place no later round came back to
+it), its own width under the development's code in the first round, or
+its own width, flat, where nothing is above it (a close is never wider than
+what it closes: the place's bottom, or the stem); a place no later round came back to
 is cut flat, and closes to a point mid-way down the next row only once its
 chain is done — every thread of it and of the places it grew from fixed,
 declined or declined as undoing a fix, the first round after its fix that
@@ -489,8 +490,41 @@ journal's `more`) and posted no thread there, and the round after that one
 has begun, so that round's fixes are all in. What a round opened (`seen`,
 `seen_files`) is read from its passes' transcripts — a file read, named in a
 command, or shown as a diff header in a command's output; a round that never
-opened a place's files is drawn as a continuation of its icicle in its colour fading down, and a
-GitHub run, with no transcript here, counts as having read everything; a thread whose reply names a commit of a round's range and, among
+opened a place's files is drawn, until one does, as a dashed outline of
+its width faintly filled, and once a later round read it as a thin stem
+(`STEM`, reached through a short `neck`) — as are the rows a place bridges
+to the place above it, in that place's colour — and a
+GitHub run, with no transcript here, counts as having read everything. A
+file a round's head does not have is in its `absent` (`absent_files`, the
+end's in `absentEnd`): a removed file's hunk keeps its path (`+++ /dev/null`
+in `hunks`), a chain needs only its files still there opened to close, and
+a place whose files are gone by the round after its last fix ends in its
+row with a ✕ (`rv-gone`), over (`gone` in `why`) once its threads settled. Code
+moved between files is found by content (`moves`): a hunk whose telling
+lines (`MOVE_LINE` characters or more) are mostly, and at least `MOVE_MIN`
+of them, lines another file's hunk of the same round removed — a removed
+line standing for as many added copies as it was removed, and only the
+branch's own files, not a merge's — keeps `movedFrom`, a removal half of
+whose lines went on so `movedTo`; with no reply or brief tying them to a
+thread (a nearness tie gives way only to a hunk `MOVE_ALL` moved) their
+outcome is `moved`, the target's `_blame` takes the removal's, so it grows
+from the fixes that wrote the code there (`moveUps` on the page, a stream
+or a jump), and the header counts moved lines apart. A place tied to its
+thread only by nearness (`via: near` on all its threaded hunks) is drawn
+`rv-guess`; a place's tone is its hunks' depth weighted by their `own`
+lines. What is left of the development (`alive`) is a blame of every
+block's file at the end: each line the development's (a commit before the
+first round), the review's time (a branch commit after it, fixes and asks
+alike: the branch's first parents, so not one of main's a sync merged in)
+or main's; blame runs from the
+merge-base only, follows a block file the review renamed, keeps re-indented
+code's writer (`-w`) and, in a file the map found code moved into, code
+moved from another file (`-C`, there alone for its cost) — the title's
+table (opened by hover, tap or focus) and each block's hover read it. A
+block file removed without a rename leaves its development's lines gone. The
+places are drawn in three layers — the outlines owed a reading,
+the bodies widest first, then every thin line — so no fill hides a stem.
+A thread whose reply names a commit of a round's range and, among
 the commit's files, the one the fix landed in (by its name, a stem that is
 no plain word, or a stem's first part with a digit that no other file of the
 commit shares — `replied`) gives that round's unthreaded fixes in the file

@@ -47,7 +47,7 @@ LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 #                               report counts, and the head last reviewed
 #   local-review-unposted.json  findings GitHub would not take yet, posted on
 #                               the next call and counted open until then
-#   local-review-answer.md      the last run's answer, as the model gave it
+#   local-review-answer.json    the last run's answer: claude -p's JSON, its structured output
 #   local-review.log            the last run's stderr
 review_journal() {
   echo "$1/.sclaude/local/feature/review-rounds.jsonl"
@@ -275,7 +275,7 @@ local_review_run() {
 
   local earlier began new more cap pass=1 round
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
-  answer="$(local_review_file "$wt" -answer.md)"
+  answer="$(local_review_file "$wt" -answer.json)"
   # The lines above are indented, and the topic leaves those out: it hears
   # of the review by these two, here and at the end.
   ask_feed say "$(phase_line started local-review "${pr:-?}" "$round" $verify)"
@@ -299,7 +299,7 @@ local_review_run() {
     # The open findings are the block local_review.py prompt heads "still
     # open"; the rest of what it says (declined, fixed) is no work here.
     if [[ -n "$verify" && "$earlier" != *"still open"* ]]; then
-      printf 'FINDINGS: 0\n' > "$answer"
+      printf '{"structured_output": {"findings": [], "resolved": [], "complete": true}}\n' > "$answer"
       read -r count new more < <(python3 "$LIB/review/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                    "$base" "$head" 0 "$journal" 0 verify 2>>"$(local_review_file "$wt" .log)") \
         || count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
@@ -318,8 +318,11 @@ local_review_run() {
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
     # Into a file of its own until it ends: a pass stopped half-way leaves
     # the last whole answer where it was.
+    # The answer in the structured output its schema asks for, held to it by
+    # Claude Code (SCHEMA in local_review.py): no heading to misread.
+    local schema; schema="$(python3 "$LIB/review/local_review.py" schema)"
     ( cd "$wt" && exec claude -p "$text" --session-id "$pass_session" \
-             --model "$LOCAL_REVIEW_MODEL" \
+             --model "$LOCAL_REVIEW_MODEL" --json-schema "$schema" --output-format json \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
@@ -359,7 +362,7 @@ local_review_run() {
         count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
         break
       fi
-      warn "  The local review was not recorded: no findings count in its answer, or GitHub took none of them." >&2
+      warn "  The local review was not recorded: no structured answer (an error), an answer not complete (it handed back before it was done), or GitHub took none of them." >&2
       warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
       return 1
     fi
@@ -811,7 +814,7 @@ The search for new findings on this pull request is over. Do not review the code
 
 $earlier
 
-Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Answer with nothing else: a \`RESOLVED: <id> — <how, in a sentence>\` line for each finding the code no longer has, and last a line of its own, \`FINDINGS: 0\`.
+Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Your answer is the structured output: \`resolved\` — each finding the code no longer has, by its id, with how in a sentence; \`findings\` empty; \`complete\` true.
 TEXT
 }
 
@@ -823,7 +826,9 @@ TEXT
 local_review_prompt() {
   local pr="$1" head="$2" scope="$3" earlier="$4"
   cat <<TEXT
-You are reviewing pull request #${pr:-?} unattended, on the developer's machine. Nobody will answer a question and nothing will wake you: when you end your turn the run is over, so collect every agent's result within this turn.
+You are reviewing pull request #${pr:-?} unattended, on the developer's machine. Nobody will answer a question and nothing will wake you: when you end your turn the process exits and the run is over, whatever was still pending.
+
+So never end a turn to wait for something. If a tool tells you an agent is running in the background and that you will be notified, you will not be — collect its result within this same turn before you continue, and if you cannot, do that step's work yourself instead. Do not schedule a wakeup, do not poll, and do not stop after launching work to report that you are waiting for it.
 
 Invoke the \`code-review\` skill with the Skill tool, with these arguments on one line:
 
@@ -836,12 +841,7 @@ TEXT
 
 Post nothing to GitHub and change no file: sclaude posts your findings from your answer.
 
-When the skill is done, answer with nothing else. First the new findings, one per section:
-
-### <path>:<line> — <the finding in one line>
-<the failure scenario: concrete inputs or state, and the wrong result>
-
-then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open finding the code no longer has, and last a line of its own, \`FINDINGS: <n>\`, the number of new findings above — \`FINDINGS: 0\` when there are none.
+When the skill is done, your answer is the structured output: \`findings\` — each new finding, with its \`path\` and \`line\` (a concern about the whole pull request goes on the file and line it is most about: a finding is a thread, and a thread needs a place), \`title\` (the finding in one line) and \`scenario\` (the failure scenario: concrete inputs or state, and the wrong result), empty when there are none; \`resolved\` — each earlier open finding the code no longer has, by its id, with how in a sentence; and \`complete\` — true only once the skill and every agent it started have finished. An answer with \`complete\` false is taken as unfinished, and the head is not recorded as reviewed.
 TEXT
 }
 

@@ -39,7 +39,11 @@ background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;al
 .rv-rt{font-size:11.5px;font-weight:700;fill:var(--ink)}
 .rv-rs{font-size:10.5px;fill:var(--muted)}
 .rv-rt,.rv-rs{paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round;stroke-opacity:.85}
-.rv-fix .rv-shape:not(.rv-hollow){stroke:none}
+.rv-fix .rv-shape:not(.rv-hollow):not(.rv-guess){stroke:none}
+.rv-fix .rv-guess{fill-opacity:.55;stroke-width:1;stroke-dasharray:3 2}
+.rv-gone{cursor:help}
+.rv-gone line{stroke:var(--ink);stroke-width:1.5;opacity:.7}
+.rv-gone text{font:700 8px var(--body);text-anchor:middle;fill:var(--ink)}
 .rv-trail{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:3 3;opacity:.6}
 .rv-stem{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
 .rv-hl{stroke:var(--ink);stroke-width:1.2;opacity:.45}
@@ -95,9 +99,11 @@ color:var(--ink);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.
 .rv-top .rv-mode label{border:0;border-radius:0;padding:3px 8px}
 .rv-mode label:has(input:checked){background:var(--auto-soft);color:var(--ink)}
 .rv-mode input{margin:0 3px 0 0}
-.rv-ghost{stroke-width:.9}
+.rv-ghost{fill-opacity:.12;stroke-width:.9;stroke-dasharray:3 2}
 .rv-tent{fill:none;stroke-width:1;stroke-dasharray:2 2}
-.rv-uk::before{background:var(--muted);opacity:.3}
+.rv-uk::before{background:color-mix(in srgb,var(--muted) 12%,transparent);border:1px dashed var(--muted)}
+.rv-stk::before{width:3px;background:var(--muted);border:0}
+.rv-gs::before{background:color-mix(in srgb,var(--c) 55%,transparent);border:1px dashed var(--c)}
 .rv-mk::before{background:var(--missed)}
 .rv-bk rect{fill:var(--lane-b,var(--paper));stroke:var(--line)}
 .rv-bk text{font:700 10.5px var(--body);fill:var(--ink)}
@@ -145,3 +151,13 @@ background:var(--surface);color:var(--ink);border:1px solid var(--line);border-l
 .rv-fix.rv-lit .rv-shape{animation:rv-flash 1.8s ease-out}
 @keyframes rv-flash{0%{filter:brightness(1.6) drop-shadow(0 0 4px var(--signal))}100%{filter:none}}
 .rv-lines{cursor:help;border-bottom:1px dotted var(--muted)}
+#rv-tip .t-go{color:var(--ink);font-weight:600;text-decoration:underline;text-decoration-style:dotted;cursor:pointer;overflow-wrap:anywhere}
+.rv-top h3{cursor:help}
+#rv-tip .t-tab{border-collapse:collapse;margin-top:5px;font-size:12px;font-variant-numeric:tabular-nums}
+#rv-tip .t-tab th{font-weight:600;color:var(--muted);text-align:right;padding:2px 6px;vertical-align:bottom;font-size:11px}
+#rv-tip .t-tab td{text-align:right;padding:2px 6px;border-top:1px solid var(--line)}
+#rv-tip .t-tab th:first-child,#rv-tip .t-tab td:first-child{text-align:left}
+#rv-tip .t-tab tr.on td{font-weight:700}
+#rv-tip .t-tab tr.sum td{border-top:2px solid var(--line);font-weight:700}
+#rv-tip:has(.t-tab){max-width:min(540px,92vw)}
+.rv-file.rv-quiet text{opacity:.6}

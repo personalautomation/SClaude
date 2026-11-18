@@ -48,7 +48,9 @@ LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 #   local-review-unposted.json  findings GitHub would not take yet, posted on
 #                               the next call and counted open until then
 #   local-review-answer.md      the last run's answer, as the model gave it
-#   local-review.log            the last run's stderr
+#   local-review-refused.md     every answer record refused, appended, a line heading each
+#   local-review.log            every pass's stderr and record's, appended, a line
+#                               heading each pass: a refusal's cause outlives the next pass
 review_journal() {
   echo "$1/.sclaude/local/feature/review-rounds.jsonl"
 }
@@ -148,12 +150,14 @@ local_review() {
   # stopped with [n n] still ends as finished, with what is open; Ctrl-C is
   # told by the pass's own trap.
   local -a LOCAL_REVIEW_TOLD=()
+  # Why, when a pass's answer was refused: said instead of "see the terminal".
+  local LOCAL_REVIEW_WHY=""
   local rc=0
   local_review_run "$@" || rc=$?
   trap - INT TERM HUP
   local_review_mark "$1" null
   [[ "$rc" -eq 0 || ${#LOCAL_REVIEW_TOLD[@]} -eq 0 ]] \
-    || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · it did not finish, see the terminal"
+    || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · ${LOCAL_REVIEW_WHY:-it did not complete, see the terminal}"
   return "$rc"
 }
 
@@ -273,7 +277,7 @@ local_review_run() {
     printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · block $(blocks_label "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
-  local earlier began new more cap pass=1 round
+  local earlier began new more cap pass=1 round retried=""
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
   answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears
@@ -291,6 +295,12 @@ local_review_run() {
   while :; do
     if ! earlier="$(python3 "$LIB/review/local_review.py" prompt "$wt" "$pr" "$repo" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
       warn "  GitHub did not say which findings are open: the local review did not run pass $pass." >&2
+      # The refused pass's second try could not start: it stays refused, the
+      # review not done — never "finished" on the earlier passes alone.
+      if [[ "$retried" == "$pass" ]]; then
+        LOCAL_REVIEW_WHY="⚠️ pass $pass refused: $why; its second try could not start; the head is not taken as reviewed"
+        return 1
+      fi
       [[ "$pass" -gt 1 ]] || return 1
       count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
@@ -318,6 +328,8 @@ local_review_run() {
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
     # Into a file of its own until it ends: a pass stopped half-way leaves
     # the last whole answer where it was.
+    printf '\n--- pass %s · %s · %s..%s · %s\n' "$pass" "$(date -Iseconds)" "${base:0:7}" "${head:0:7}" "$pass_session" \
+      >> "$(local_review_file "$wt" .log)"
     # The answer is text, not --json-schema structured output: with a schema
     # the forked code-review skill takes the StructuredOutput tool itself and
     # hands the session back nothing but "Skill execution completed" — the
@@ -328,7 +340,7 @@ local_review_run() {
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
                "Bash(git push:*)" "Bash(git commit:*)" \
-             >"$answer.part" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
+             >"$answer.part" 2>>"$(local_review_file "$wt" .log)" </dev/null ) &
     local pid=$!
     # The end told here too, the pass stopped first.
     trap 'kill -TERM "$pid" 2>/dev/null; local_review_mark "$wt" null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130' INT TERM HUP
@@ -350,21 +362,41 @@ local_review_run() {
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
     cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" || -n "$verify" ]] && cap=0
+    local log; log="$(local_review_file "$wt" .log)"
+    # On a line of its own, after whatever claude left unended.
+    printf '\n' >> "$log"
+    local lines_before; lines_before="$(wc -l < "$log" 2>/dev/null || echo 0)"
     if ! read -r count new more < <(SCLAUDE_REVIEW_SESSION="$pass_session" \
                                     python3 "$LIB/review/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                       "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
-                                      2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
+                                      2>>"$log") || [[ -z "${count:-}" ]]; then
+      # Why (REFUSED in local_review.py), from what record just wrote: into
+      # the journal, here and the topic. A failure that gave none (a crash)
+      # points at the log, which keeps it.
+      local why; why="$(tail -n "+$((lines_before + 1))" "$log" 2>/dev/null | sed -n 's/^refused: //p' | tail -n 1)"
+      [[ -n "$why" ]] || why="no reason given (see local-review.log)"
       python3 "$LIB/review/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
-        "$pass_session" "$pr" 2>/dev/null || true
-      # A later pass that fails leaves the earlier ones recorded: the head
-      # counts as reviewed with what they posted.
-      if [[ "$pass" -gt 1 ]]; then
-        warn "  Pass $pass of the local review was not recorded; the first $((pass - 1)) stand." >&2
-        count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
-        break
+        "$pass_session" "$pr" "$why" 2>/dev/null || true
+      # Kept, every refused answer, for the person to read: the try after
+      # it writes the answer file again.
+      { printf '\n--- pass %s refused · %s · %s\n' "$pass" "$(date -Iseconds)" "$why"; cat "$answer"; } \
+        >> "$(local_review_file "$wt" -refused.md)" 2>/dev/null || true
+      # One rule for every refusal (the user's word, 2026-11-18): the pass
+      # runs once more at once, on the same head — a refused answer is most
+      # often an interim one; refused again, the review is not done.
+      if [[ "$retried" != "$pass" ]]; then
+        retried="$pass"
+        warn "  Pass $pass of the local review was refused: $why — running it once more." >&2
+        continue
       fi
-      warn "  The local review was not recorded: no findings count in its answer, no \`REVIEW: complete\` line (it handed back before it was done), or GitHub took none of them." >&2
-      warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
+      # Refused twice: the review is not done, the first pass or a later one
+      # — a later pass is where the rest of a capped range was. A run on this
+      # head reads that range again (the earlier pass's row keeps its
+      # "more"); the gate asks the person, or under [g] tries again. The
+      # topic hears why (LOCAL_REVIEW_WHY, said by local_review).
+      warn "  Pass $pass of the local review was refused twice: $why." >&2
+      warn "  Its answers: $(local_review_file "$wt" -refused.md); the head is not taken as reviewed." >&2
+      LOCAL_REVIEW_WHY="⚠️ pass $pass refused twice: $why; the head is not taken as reviewed"
       return 1
     fi
     # By what the pass found, not what GitHub took: a capped pass with a

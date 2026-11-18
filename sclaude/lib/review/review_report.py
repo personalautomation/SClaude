@@ -411,6 +411,7 @@ def local_runs(cwd, since=None, root=None):
         if out and key == last:
             out[-1]["seconds"] += float(row.get("seconds") or 0)
             out[-1]["stopped"] = out[-1]["stopped"] and bool(row.get("spent"))
+            out[-1]["refused"] += [row["refused"]] if row.get("refused") else []
             if cost is not None:
                 out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
             continue
@@ -420,7 +421,10 @@ def local_runs(cwd, since=None, root=None):
                     # No pass of it left a recorded answer — stopped, or its
                     # answer not recorded: no round that found nothing, and
                     # no word for the trend.
-                    "stopped": bool(row.get("spent"))})
+                    "stopped": bool(row.get("spent")),
+                    # Why a pass's answer was not taken (local_review.py's
+                    # REFUSED, journaled by spent), one each.
+                    "refused": [row["refused"]] if row.get("refused") else []})
         last = key
     return out
 
@@ -872,6 +876,15 @@ def main():
             print("  Round%s %s left no recorded answer (stopped, or its answer not recorded): "
                   "not a round that found nothing, and not in the trend."
                   % ("s" if len(stopped) > 1 else "", ", ".join(stopped)))
+        # Every answer refused, by why: a reason that keeps coming back is
+        # how the person learns the answer's format is failing.
+        why = {}
+        for r in bot:
+            for w in r.get("refused") or []:
+                why[w] = why.get(w, 0) + 1
+        if why:
+            print(paint("  Answers refused: %d — %s" % (sum(why.values()), "; ".join(
+                "%s (%d)" % (w, n) if n > 1 else w for w, n in sorted(why.items(), key=lambda x: -x[1]))), YELLOW))
 
         def column(key, show):
             """A column's sum of what is known now: the total is where the

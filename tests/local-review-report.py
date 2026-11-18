@@ -110,6 +110,11 @@ try:
     check("spent-not-a-reviewed-head", local_review.main(["cached", journal, "h2"]), 1)
     check("spent-in-rows-only-when-asked",
           (len(local_review.rows(journal)), len(local_review.rows(journal, with_spent=True))), (3, 4))
+    # Why an answer was refused is journaled with its spent pass and carried
+    # by its run, for the report to count.
+    local_review.spent(journal, "x", "h2", 30, "p1", "", "the answer has no 'REVIEW: complete' line")
+    check("refused-carried", review_report.local_runs(wt, None, projects)[-1]["refused"],
+          ["the answer has no 'REVIEW: complete' line"])
     shutil.rmtree(projects, ignore_errors=True)
     write(journal, "\n".join(json.dumps({"at": "2026-10-15T1%d:00:00+00:00" % i, "seconds": 300,
                                          "base": "x", "head": "h%d" % i, "new": 1, "resolved": 0})

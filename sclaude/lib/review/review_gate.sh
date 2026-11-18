@@ -250,14 +250,14 @@ review_close_gate() {
           [[ "${count:-0}" -gt 0 ]] && back_from=review_run
         fi
         if [[ "$count" == "failed" ]]; then
-          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not run"
+          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not complete"
           failed=$((failed + 1))
           warn ""
-          warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+          warn "  The review on this machine did not complete on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null) — it did not run, or a pass was refused (anything posted stays open); its log: $(local_review_file "$wt" .log)"
           # On the way in the session opens on what is open, as before the
           # gate was asked there; the pass runs again at its end.
           if [[ -n "$entry" ]]; then
-            word="open: the review on this machine did not run"
+            word="open: the review on this machine did not complete"
             break
           fi
           # A "no" is not "leave": the review is what the person wants, so it
@@ -275,11 +275,11 @@ review_close_gate() {
           fi
           if ! ask "${BOLD}Go on with this head unreviewed? n reviews it again [y/n] ${OFF}" answer yn; then
             info "  Left open. Come back with: $SELF $slug"
-            review_back_edge "$wt" review_close none "" note="the review on this machine did not run"
+            review_back_edge "$wt" review_close none "" note="the review on this machine did not complete"
             return 1
           fi
           is_yes "$answer" && REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" \
-            REVIEW_CLOSE_NOTE="the head unreviewed: the review on this machine did not run"
+            REVIEW_CLOSE_NOTE="the head unreviewed: the review on this machine did not complete"
           if ! is_yes "$answer"; then
             info "  Reviewing it again; Ctrl-C leaves, and the next \`$SELF\` starts it again."
             local_due=1

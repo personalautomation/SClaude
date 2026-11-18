@@ -75,6 +75,12 @@ COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
 # it): a session that hands back an interim answer — "FINDINGS: 0" before its
 # agents report — would otherwise record a head as clean.
 DONE = "REVIEW: complete"
+# How each reason `record` refuses an answer begins, on its stderr: the
+# shell takes the line after it into its warning, the feature's topic and
+# the journal's spent row (`refused`), which the review's report counts —
+# by its words, so a reason carries no number (the details go on a line of
+# their own).
+REFUSED = "refused: "
 
 
 def gh_try(args, cwd):
@@ -321,10 +327,10 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
         text = fh.read()
     found, resolved, count = parse(text)
     if count is None:
-        sys.stderr.write("the answer has no `FINDINGS: <n>` line it could read (an error, no answer, or the line in another form)\n")
+        sys.stderr.write(REFUSED + "the answer has no `FINDINGS: <n>` line it could read (an error, no answer, or the line in another form)\n")
         return 1
     if mode != "verify" and DONE not in [line.strip() for line in text.splitlines()]:
-        sys.stderr.write("the answer has no %r line: the review handed back before it was done\n" % DONE)
+        sys.stderr.write(REFUSED + "the answer has no %r line: the review handed back before it was done\n" % DONE)
         return 1
     if mode == "verify":
         # A check of the fixes after the search was ended: whatever it
@@ -334,12 +340,13 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     if count != len(found):
         # Headings the parser did not take would be findings dropped without
         # a word, and the head recorded as reviewed: refuse the answer.
-        sys.stderr.write("the answer counts %d finding(s) but %d heading(s) were read\n"
+        sys.stderr.write(REFUSED + "the answer's count does not match its headings\n"
+                         "the answer counts %d finding(s) but %d heading(s) were read\n"
                          % (count, len(found)))
         return 1
     before = threads(cwd, pr, repo)
     if before is None:
-        sys.stderr.write("GitHub could not be read; nothing posted\n")
+        sys.stderr.write(REFUSED + "GitHub could not be read; nothing posted\n")
         return 1
     posted = talked = 0
     lost = []
@@ -356,6 +363,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     if lost and not posted:
         # Nothing reached GitHub: the run is not recorded, so the next one
         # reviews the same head again rather than losing what this one found.
+        sys.stderr.write(REFUSED + "GitHub took none of its findings\n")
         return 1
     # Some did: the run stands, and the rest wait in a file of their own, to
     # be posted on the next call (flush) and counted open until they are.
@@ -403,11 +411,12 @@ def block_now():
     return os.environ.get("SCLAUDE_REVIEW_BLOCK") or None
 
 
-def spent(journal, base, head, seconds, session, pr=""):
+def spent(journal, base, head, seconds, session, pr="", refused=""):
     """A pass that ran and was not recorded — stopped by the person, or its
     answer not taken — journaled all the same, marked `spent`, so that the
     report prices its conversation. rows() leaves it out unless asked: the
-    head it read is not a reviewed one."""
+    head it read is not a reviewed one; `refused` says why its answer was
+    not taken."""
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"), "seconds": int(seconds),
            "base": base, "head": head, "spent": True}
@@ -415,6 +424,10 @@ def spent(journal, base, head, seconds, session, pr=""):
         row["pr"] = str(pr)
     if session:
         row["session"] = session
+    # Why `record` refused the pass's answer (REFUSED), when it did; a pass
+    # the person stopped has none.
+    if refused:
+        row["refused"] = refused
     tag(row)
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -528,7 +541,7 @@ def main(argv):
         return prompt(*args)
     if cmd in ("record",) and len(args) in (8, 9, 10):
         return record(*args)
-    if cmd == "spent" and len(args) in (5, 6):
+    if cmd == "spent" and len(args) in (5, 6, 7):
         return spent(*args)
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.

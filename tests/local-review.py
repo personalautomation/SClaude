@@ -518,22 +518,42 @@ try:
             check_true(name + "-warned", "stopping at 2 passes" in err)
     shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
 
-    # A capped pass whose follow-up was interrupted: the head is not done,
-    # and the next call reads the same range again rather than nothing.
+    # A capped pass whose follow-up was refused twice (run once more at once,
+    # refused again): the review is not done — it fails, says why, in the
+    # topic too, and journals the reason — and the next call reads the same
+    # range again rather than nothing.
     write(os.path.join(repo, "a.txt"), "cut\n")
     git("commit", "-qam", "cut", cwd=repo)
     git("push", "-q", cwd=repo)
     prev = git("rev-parse", "HEAD~1", cwd=repo)
     cut = git("rev-parse", "HEAD", cwd=repo)
-    queue(batch("c1", 2), "interrupted\n")
-    _, _, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
+    queue(batch("c1", 2), "interrupted\n", "interrupted again\n")
+    told()
+    _, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo),
+                          {"LOCAL_REVIEW_CAP": "2", "ASK_DIR": ask_dir, "ASK_SLUG": "demo"})
     prompts()
-    check("cut-first-pass-stands", rc, 0)
+    check("cut-later-pass-refused-fails", rc, 1)
+    check_true("cut-refusal-runs-once-more", "running it once more" in err)
+    check_true("cut-refusal-says-why", "Pass 2 of the local review was refused twice" in err and "FINDINGS" in err)
+    check_true("cut-refusal-in-topic", any("pass 2 refused twice" in line for line in told()))
+    with open(journal) as fh:
+        last_row = json.loads(fh.read().splitlines()[-1])
+    check_true("cut-refusal-journaled", last_row.get("spent") and "FINDINGS" in (last_row.get("refused") or ""))
     _, _, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
     again = prompts()
     check("cut-not-cached", again.count("---\n"), 1)
     check_true("cut-same-range", "git diff %s..%s" % (prev, cut) in again)
     check_true("cut-told-first-pass", "c1 0" in again)
+    shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
+
+    # Refused once, then answered: the pass run once more stands.
+    write(os.path.join(repo, "a.txt"), "retry\n")
+    git("commit", "-qam", "retry", cwd=repo)
+    git("push", "-q", cwd=repo)
+    queue("handed back early\n", batch("r1", 1))
+    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo))
+    check("refused-once-then-answered", rc, 0)
+    check("refused-once-ran-twice", prompts().count("---\n"), 2)
     shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
 
     # No count in the answer, or nothing GitHub would take: nothing recorded,
@@ -543,15 +563,21 @@ try:
     git("push", "-q", cwd=repo)
     with open(journal) as fh:
         before = fh.read()
+    prompts()
     _, _, rc = review("I could not finish.\n")
     check("no-count-fails", rc, 1)
+    # The answer refused: run once more, and both answers kept for reading.
+    check("no-count-ran-twice", prompts().count("---\n"), 2)
+    with open(os.path.join(repo, ".sclaude", "local", "feature", "local-review-refused.md")) as fh:
+        check("refused-answers-kept", fh.read().count("I could not finish."), 2)
     open(world + ".down", "w").close()
     _, _, rc = review("### nowhere:1 — lost\nx\n\nFINDINGS: 1\n")
     os.remove(world + ".down")
     check("nothing-posted-fails", rc, 1)
+    # Refused by GitHub too: run once more, as every refusal is.
+    check("github-refusal-run-again", prompts().count("---\n"), 2)
     with open(journal) as fh:
         check("failures-not-recorded", recorded(fh.read()), recorded(before))
-    prompts()
 
     # A head GitHub does not have yet: no run.
     write(os.path.join(repo, "a.txt"), "g\n")
@@ -813,6 +839,16 @@ with tempfile.TemporaryDirectory() as tmp_done:
         fh.write("FINDINGS: 0\n")
     check("an-unfinished-answer-is-refused",
           local_review.record(tmp_done, "7", "o/r", early, "a", "b", "1", os.path.join(tmp_done, "j")), 1)
+# A capped pass whose follow-up never finished: a run on the same head reads
+# its range again; a head moved on starts from it.
+with tempfile.TemporaryDirectory() as tmp_since:
+    j = os.path.join(tmp_since, "j")
+    with open(j, "w") as fh:
+        fh.write(json.dumps({"at": "2026-01-01T10:00:00+00:00", "base": "B", "head": "H1", "more": True}) + "\n")
+    since = lambda h: subprocess.run([sys.executable, os.path.join(LIB, "review", "local_review.py"), "since", j, h],
+                                     capture_output=True, text=True).stdout.strip()
+    check("since-a-capped-range", (since("H1"), since("H2")), ("B", "H1"))
+
 # /sreview asks its reviewer for the same line, and records through `record`.
 with open(os.path.join(ROOT, "skills", "sreview", "SKILL.md"), encoding="utf-8") as fh:
     check_true("sreview-asks-the-end-line", "`%s`" % local_review.DONE in fh.read())

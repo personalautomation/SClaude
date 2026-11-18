@@ -390,7 +390,7 @@ run_step() {
       local_round=1
     fi
   elif [[ "$local_count" == "failed" ]]; then
-    told="$(printf 'The review on this machine did not run on this head (its log: `%s`): say so in your report, and handle what the pull request itself shows.%s' \
+    told="$(printf 'The review on this machine did not complete on this head — it did not run, or a pass was refused (its log: `%s`; anything a pass posted is open on the pull request): say so in your report, and handle what the pull request itself shows.%s' \
       "$(local_review_file "$wt" .log | sed "s|^$wt/||")" "${told:+$'\n\n'$told}")"
   fi
 

@@ -2034,6 +2034,28 @@ of step 4's sessions, posting their findings on the pull request), or none
 green — step 4 opens no session at all and closes at once, saying which of
 the three it was.
 
+**A local pass's answer is taken only whole.** It is text — findings as
+`### <path>:<line> — <title>` sections, then `FINDINGS: <n>` and the line
+`REVIEW: complete` (`DONE`), written once the code-review skill and every
+agent it started have finished; not `--json-schema` structured output, which
+the forked skill takes for itself, its findings never reaching the session.
+`record` refuses an answer with no count, a count its headings do not add up
+to, no end line, or none of its findings taken by GitHub, each reason
+starting `refused: ` (`REFUSED`). A refused pass — the first or a later one,
+which runs because the one before found the cap — leaves the review not
+done: its reason goes to the terminal, the feature's topic and the journal's
+`spent` row (`refused`), which the review's report counts ("Answers
+refused", by the reason's words, which carry no number), and the log, which
+keeps every pass's stderr; every refused answer is kept in
+`local-review-refused.md`. One rule for every refusal: the pass runs once
+more at once, on the same head — a refused answer is most often an interim
+one. Refused again, or its second try unable to start,
+the head is not taken as reviewed: the capped pass before it keeps its
+`more`, so a run on this head reads that range again (`since`, `first`;
+a session that pushes first moves the head, and the rest of that range is
+not read again), and the gate asks the person, or under `[g]` tries again
+by itself.
+
 **A review that cannot run on GitHub stops, or moves here.** When the gate
 reads a red Claude review job, `pr_context.py --fallback` (`review_fallback`)
 asks why: Claude's limit (a 429 with the reset it names, claude's own words

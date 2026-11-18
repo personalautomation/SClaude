@@ -269,9 +269,11 @@ takes its box back. `[g]` has three values, in turn on each press: `auto`
 (the default — the project's `sleep_mode` decides: by default, an /isleep night
 over every session, not an `/isleep here` one —
 and the box shows `auto ☑ (night)` or `auto ☐`), `on` (☑) and `off` (☐); on
-and off are yours and stay for the whole review, step 4 reopened included. `[n n]` (forward, now — the letter of the session keys below) stops the pass at once and ends the search for new findings, as `[s]` would after it: what is open goes to the fix session, and its fixes are checked only if you say so. A pass that did not run
-asks whether to go on with the head unreviewed, and `n` reviews it again
-rather than leaving sclaude. While a review session works in its own tab, the
+and off are yours and stay for the whole review, step 4 reopened included. `[n n]` (forward, now — the letter of the session keys below) stops the pass at once and ends the search for new findings, as `[s]` would after it: what is open goes to the fix session, and its fixes are checked only if you say so. A pass whose answer was refused (unfinished, or not in the review's
+format) runs once more at once; one that did not run, or was refused again,
+asks whether to go on with the head unreviewed — its reason in the terminal
+and the feature's topic — and `n` reviews it again rather than leaving
+sclaude. While a review session works in its own tab, the
 terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`
 too; `[s]` said then ends the search, so after that session sclaude asks
 whether to check its fixes — or checks them, with `[g]` ticked.

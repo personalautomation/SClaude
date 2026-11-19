@@ -191,6 +191,9 @@ ask_once() {
       ask_ended_quit
       exit 143
     fi
+    # Every turn starts clean: a turn that kept a line's start goes on with
+    # continue, and its timeout was what a whole line read next returned.
+    __rc=0
     if [[ -n "$__in" && -z "$__form" ]]; then
       # Free text is read with line editing, which read -t cannot give: a
       # readline read that times out drops what was typed so far, and the
@@ -200,7 +203,6 @@ ask_once() {
       # it and no time limit. Before, the arrows did not move the cursor: a
       # word inserted with them landed at the end, and their escape codes on
       # the screen.
-      __rc=0
       # IFS emptied: read would otherwise strip a space or a tab and hand
       # back "", the same as Enter — an empty answer for a line just begun.
       IFS= read -rsn1 -t "$ASK_POLL" __key < "$__in" || __rc=$?
@@ -212,8 +214,20 @@ ask_once() {
         __part+="$__key"
         __key=""
       elif [[ "$__rc" -eq 0 && -n "$__part" ]]; then
-        __key="$__part$__key"
-        __part=""
+        # The wait's end takes a plain letter in hand too, on a busy machine,
+        # when it falls on the key. What comes next acts on the kept part as
+        # on a typed one: Enter ends the answer with it — joined into the
+        # line instead, readline took the part and the Enter was gone, the
+        # question waiting for one more; Backspace erases it; an arrow is
+        # dropped below and leaves it kept — joined, both reached readline
+        # as text.
+        case "$__key" in
+          "")            printf '%s\n' "$__part" >&2
+                         __reply="$__part"; __from=tty; break ;;
+          $'\x7f'|$'\b') __part="" ;;
+          $'\e')         ;;
+          *)             __key="$__part$__key"; __part="" ;;
+        esac
       fi
       if [[ "$__rc" -eq 0 ]]; then
         case "$__key" in
@@ -250,9 +264,26 @@ ask_once() {
     elif [[ -n "$__in" ]]; then
       # read holds the pause itself: -t returns control after exactly ASK_POLL
       # if the human has typed nothing.
-      read -rt "$ASK_POLL" __reply < "$__in" && { __from=tty; break; } || __rc=$?
+      read -rt "$ASK_POLL" __reply < "$__in" && { __reply="$__part$__reply"; __from=tty; break; } || __rc=$?
     else
-      read -rt "$ASK_POLL" __reply && { __from=stdin; break; } || __rc=$?
+      read -rt "$ASK_POLL" __reply && { __reply="$__part$__reply"; __from=stdin; break; } || __rc=$?
+    fi
+    # The wait's end can fall on the line: read keeps what it took of it and
+    # reports the timeout. Dropped, a "y" and Enter typed then were lost and
+    # the question waited, or the line's start went and its rest was the
+    # answer. Kept, the rest joins it; a terminal hands a line over only
+    # once it is ended, so from there a wait with nothing more means the
+    # whole line was taken. The two reads above only: free text keeps its
+    # part itself. While the terminal's line is begun, the channel is not
+    # read: an answer from the phone landing then would take the place of
+    # the one on the screen.
+    if [[ "$__rc" -gt 128 && ( -z "$__in" || -n "$__form" ) ]]; then
+      if [[ -n "$__reply" ]]; then
+        __part+="$__reply"
+        [[ -n "$__in" ]] && continue
+      elif [[ -n "$__part" && -n "$__in" ]]; then
+        __reply="$__part"; __rc=0; __from=tty; break
+      fi
     fi
     # Exactly 128+SIGALRM is read's expired wait. Anything below 128 is the end
     # of input: there is nobody left to type, the input has ended or there never
@@ -263,7 +294,8 @@ ask_once() {
     # exhausted input returns instantly and would spin the loop idle, eating a
     # core for nothing.
     if [[ "$__rc" -lt 128 ]]; then
-      __in=""
+      # A part the terminal left is not the start of a line from stdin.
+      __in=""; __part=""
       __rc=0
       if __outside="$(ask_answer "$__id")"; then
         # Printed here too: with the terminal gone quiet, a key typed into it is
@@ -345,7 +377,9 @@ poll_pause() {
   POLL_KEY=""
   if keys_usable; then
     read -rsn1 -t "$secs" key < /dev/tty || rc=$?
-    if [[ "$rc" -eq 0 ]]; then
+    # A key taken as the wait ended is still pressed: read reports the
+    # timeout with it in hand, and it was lost.
+    if [[ "$rc" -eq 0 || -n "$key" ]]; then
       POLL_KEY="$key"
       # What the swallowing takes, by kind and count, not the text: an
       # arrow's bytes, or presses that may have meant something.

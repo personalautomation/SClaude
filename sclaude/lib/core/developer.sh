@@ -294,12 +294,18 @@ setting_pick() {
   local -a __words
   read -ra __words <<< "$2"
   printf '  Choose 1-%d: ' "${#__words[@]}" >&2
+  local __late
   while :; do
-    IFS= read -rsn1 ${__secs:+-t "$__secs"} __key < "$__src" || { echo >&2; return 1; }
+    # A key taken as the time ran out counts: read hands it back with the
+    # timeout. Not one of the numbers, the time is still out.
+    __late=""
+    IFS= read -rsn1 ${__secs:+-t "$__secs"} __key < "$__src" \
+      || { [[ -n "$__key" ]] && __late=1; } || { echo >&2; return 1; }
     # Ctrl-D: with the line mode off it arrives as a character, not as the
     # end of input, and is still the person leaving the question for later.
     [[ "$__key" == $'\x04' ]] && { echo >&2; return 1; }
     [[ "$__key" =~ ^[1-9]$ ]] && (( __key <= ${#__words[@]} )) && break
+    [[ -n "$__late" ]] && { echo >&2; return 1; }
   done
   printf '%s\n' "${__words[__key - 1]}" >&2
   printf -v "$__var" '%s' "${__words[__key - 1]}"

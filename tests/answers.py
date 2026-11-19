@@ -16,6 +16,8 @@
 #   * typed in a real terminal — "т", Backspace, "n" — the answer is no;
 #   * a yes/no question takes no default: an empty line, or a word that is
 #     neither, is asked again; the end of input stops it with an empty reply;
+#   * a key or a line the wait's end took as it reported the timeout is
+#     kept, not lost;
 #   * free text typed while the question also waits on the channel is edited
 #     in place: the arrows move the cursor, a word typed after them lands
 #     there, an arrow pressed before typing leaves nothing behind, a space
@@ -27,6 +29,7 @@
 import os
 import pty
 import select
+import shlex
 import subprocess
 import sys
 import time
@@ -105,10 +108,18 @@ while time.time() < end:
 check("typed-erased-cyrillic-then-n", "VERDICT=no" in out.decode(errors="replace"), True)
 
 # --- free text, typed while the channel is waiting too --------------------
-def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=False):
+def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=False, poll=2,
+          taken=None, form="", rc=False):
     """What ask hands back, and what the screen showed, for keys typed at a
     terminal with the channel open. end_feature ends the feature from outside
-    after the keys, as the bot does."""
+    after the keys, as the bot does. <poll> is ASK_POLL: long by default, so
+    that no key falls on the end of a wait — bash's read -t can take a key
+    and still report the wait over, and an Enter taken so is gone (rare by
+    hand; a key sent a poll after the prompt fell there every time). Short
+    for the cases about the wait's end and the channel. <taken> is what the
+    wait's first read takes as it reports the timeout — the race no keys
+    sent on time make happen — and <form> the question's form. With <rc>
+    the answer comes back with ask's exit code."""
     import fcntl
     import json
     import shutil
@@ -117,9 +128,14 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
     import termios
     d = tempfile.mkdtemp(prefix="sclaude-answers-")
     try:
+        fake = ""
+        if taken is not None:
+            fake = ('TAKEN=%s; read() { local v="${@: -1}"; if [[ -n "${TAKEN+x}" && '
+                    '( $v == __key || $v == __reply ) ]]; then printf -v "$v" %%s "$TAKEN"; '
+                    'unset TAKEN; return 142; fi; builtin read "$@"; }; ' % shlex.quote(taken))
         script = ('BOLD=$\'\\e[1m\'; OFF=$\'\\e[0m\'; source "%s/core/io.sh"; source "%s/core/ui.sh"; '
-                  'ASK_DIR=%s; ASK_SLUG=demo; ASK_POLL=0.3; ask "${BOLD}%s${OFF}" said; '
-                  'echo "SAID[$said]"' % (LIB, LIB, d, prompt))
+                  '%sASK_DIR=%s; ASK_SLUG=demo; ASK_POLL=%s; ask "${BOLD}%s${OFF}" said %s; '
+                  'echo "SAID[$said] RC[$?]"' % (LIB, LIB, fake, d, poll, prompt, form))
         pid, fd = pty.fork()
         if pid == 0:
             os.environ["LANG"] = "C.UTF-8"
@@ -175,6 +191,10 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
         text = out.decode(errors="replace")
         start = text.rfind("SAID[")
         said = text[start + 5:text.find("]", start)] if start >= 0 else None
+        # ask's exit code beside the answer, checked by the race's cases.
+        if rc:
+            rc_at = text.find("RC[", start)
+            return (said, text[rc_at + 3:text.find("]", rc_at)] if rc_at >= 0 else None), text
         return said, text
     finally:
         shutil.rmtree(d, ignore_errors=True)
@@ -188,10 +208,37 @@ check("free-text-cyrillic", typed(["ж".encode(), "ук".encode(), b"\r"])[0], "
 # The same letter with its two bytes on either side of the wait's end: read
 # reports the timeout with the first byte in hand, and the letter used to go.
 check("free-text-cyrillic-letter-cut-by-the-wait",
-      typed(["ж".encode()[:1], "ж".encode()[1:], "ук".encode(), b"\r"])[0], "жук")
+      typed(["ж".encode()[:1], "ж".encode()[1:], "ук".encode(), b"\r"], poll=0.3)[0], "жук")
+# Enter after a part the wait's end kept ends the answer: joined into the
+# line, readline took the part and the Enter was lost, the question waiting
+# for ever. A plain letter falls there too when the wait ends on its key, on
+# a busy machine.
+check("free-text-enter-after-a-kept-part-ends-the-answer",
+      typed(["ж".encode()[:1], b"\r"], poll=0.3)[0], "")
+# A plain letter the wait's end took is the answer an Enter after it gives;
+# Backspace erases it, an arrow leaves it.
+check("free-text-kept-letter-then-enter", typed([b"\r"], taken="a", rc=True)[0], ("a", "0"))
+check("free-text-kept-letter-then-backspace", typed([b"\x7f", b"ok", b"\r"], taken="a")[0], "ok")
+check("free-text-kept-letter-then-arrow", typed([b"\x1b[D", b"b", b"\r"], taken="a")[0], "ab")
+# A yes/no line the wait's end took whole is the answer; one it took the start
+# of is joined with its rest.
+check("yes-no-line-taken-whole",
+      typed([], prompt="Merge? [y/n] ", form="yn", taken="y", rc=True)[0], ("y", "0"))
+check("yes-no-line-taken-in-part",
+      typed([b"s\r"], prompt="Merge? [y/n] ", form="yn", taken="ye", rc=True)[0], ("yes", "0"))
+# A choice by number goes back to its caller with the exit code: a timeout's
+# there threw the choice away.
+check("pick-line-taken-whole",
+      typed([], prompt="Which one? ", form="pick:3", taken="2", rc=True)[0], ("2", "0"))
+check("pick-line-taken-in-part",
+      typed([b"2\r"], prompt="Which one? ", form="pick:12", taken="1", rc=True)[0], ("12", "0"))
+# A word taken in part that is neither yes nor no is asked again, not the
+# question's end.
+said, screen = typed([b"ybe\r", b"n\r"], prompt="Merge? [y/n] ", form="yn", taken="ma", rc=True)
+check("yes-no-line-taken-in-part-asked-again", (said, "Answer y or n." in screen), (("n", "0"), True))
 check("free-text-empty-enter", typed([b"\r"])[0], "")
 check("free-text-space-first-is-not-enter", typed([b" ", b"ok", b"\r"])[0], "ok")
-check("free-text-from-the-channel", typed([], channel="from the phone")[0], "from the phone")
+check("free-text-from-the-channel", typed([], channel="from the phone", poll=0.3)[0], "from the phone")
 # A prompt wider than the terminal: every row it took is erased before
 # readline prints it again, so its words are on the screen once.
 wide = "What is not working, said in as many words as it takes to wrap? "
@@ -200,7 +247,7 @@ check("free-text-wrapped-prompt-answer", said, "a")
 check("free-text-wrapped-prompt-erased-upwards", "\x1b[1A" in screen, True)
 # The feature ended from the bot while a line is half typed: the process says
 # so and goes, rather than waiting in readline for ever.
-said, screen = typed([b"half"], end_feature=True)
+said, screen = typed([b"half"], end_feature=True, poll=0.3)
 check("free-text-feature-ended-mid-line", (said, "has ended elsewhere" in screen), (None, True))
 
 if failures:

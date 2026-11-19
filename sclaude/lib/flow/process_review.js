@@ -221,6 +221,8 @@ const reviewMap = (() => {
     const r = rs[i];
     const n = String(r ? r.seq : i + 1);
     if (!r || !r.block) return short ? n : 'Round ' + n;
+    // The pass over the seams after the last block (SEAMS in review_report.py).
+    if (r.block === 'seams') return short ? 'seams.' + r.bseq : 'Seams · round ' + r.bseq;
     return short ? r.block + '.' + r.bseq : 'Block ' + r.block + ' · round ' + r.bseq;
   }
   // A round read in a block, its number across the whole review after its

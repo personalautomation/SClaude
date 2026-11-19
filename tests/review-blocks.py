@@ -435,6 +435,14 @@ try:
         check("a-stale-block-closing-says-it-was-not-read-whole",
               (out.count("not read whole"), "FEED say 🧱 Block 1/3 of PR #9 reviewed, its latest change not read whole" in out,
                json.load(fh)["blocks"]["current"]), (2, True, 2))
+    # The seams' close is told to the topic, as each block's is.
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 3, "pr": 9, "base": base}}, fh)
+    review_blocks.save(cut, good)
+    out = sh(stub + feed + 'project_get() { echo 1; }; blocks_next "%s" t; echo END' % wt)
+    check("the-seams-closing-tell-the-topic",
+          "FEED say 🧱 The seams of PR #9 reviewed: every block and the seams between them are read." in out, True)
+    review_blocks.save(cut, good)
     # A merge brings no change of the block's own.
     git(wt, "checkout", "-q", "-b", "side", base)
     commit(wt, "on main", take__a="m\n" * 50)
@@ -541,7 +549,7 @@ try:
                                    "ID=1a" in out),
           (True, 4, 1, True, True, True))
     check("a-split-block-is-labelled-by-its-id-and-place",
-          [sh('blocks_label "%s" %d' % (wt, k)).strip() for k in (1, 2, 3, 4)], ["1a (1/4)", "1b (2/4)", "2 (3/4)", "4/4"])
+          [sh('blocks_label "%s" %d' % (wt, k)).strip() for k in (1, 2, 3, 4)], ["block 1a (1/4)", "block 1b (2/4)", "block 2 (3/4)", "the seams (4/4)"])
     # The first session fails (a quota), the second answers: its answer is
     # read; a failed session is no fault to mend and marks nothing.
     review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))

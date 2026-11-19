@@ -172,7 +172,8 @@ terminal, and the review starts at once; the cut is kept in
 `.sclaude/local/feature/review-blocks.json`. Each block is read to a clean
 verdict before the next opens, its fixes going on top of the whole branch, and
 after the last a pass reads the seams between them — what changed in a block
-after it was read, the behaviours together. Meanwhile the review runs on this
+after it was read, the behaviours together; the topic is told as each block
+closes, and once more when the seams do. Meanwhile the review runs on this
 machine whatever the `review` setting; under a GitHub setting the project's
 CI there still counts. The menu says `4/7 review · block 2/5`.
 A block whose files change by more than a block's size after it was read
@@ -221,7 +222,8 @@ price); `fix` — the session that fixed those findings, its time and cost, and
 what it declined; and `result` — fixed, waiting. When the pull request is
 read in review blocks, a `block` column after the round's number says which
 block the run read and its round there — `3.7`, block 3's seventh round, as
-the review's map names it. A `w` is a value not known yet: a run
+the review's map names it; `seams.2` is the second round of the last pass,
+over the seams between the blocks. A `w` is a value not known yet: a run
 still going, findings no session has started on, a launch whose cost comes
 when it ends. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the

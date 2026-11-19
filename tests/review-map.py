@@ -328,6 +328,31 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the report's runs split where the block changes, as the map's rounds do",
           [r["block"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == [1, 2])
     check("each round carries the report's numbers", [(r["seq"], r["bseq"]) for r in rounds] == [(1, 1), (2, 1)])
+    # The seams after the last block: the journal names them by their place,
+    # the blocks' count plus one; the report and the map call them seams.
+    state_path = os.path.join(tree, ".sclaude", "local", "feature", "state.json")
+    state_before = open(state_path).read() if os.path.exists(state_path) else None
+    journal_before = open(os.path.join(tree, JOURNAL)).read()
+    with open(state_path, "w") as fh:
+        json.dump({"blocks": {"total": 3, "current": 3}}, fh)
+    with open(os.path.join(tree, JOURNAL), "w") as fh:
+        for row in ({"at": "2026-01-01T10:00:00+00:00", "head": first, "pr": "7", "block": "1"},
+                    {"at": "2026-01-01T10:05:00+00:00", "head": first, "pr": "7", "block": "2a"},
+                    {"at": "2026-01-01T10:10:00+00:00", "head": first, "pr": "7", "block": "3"}):
+            fh.write(json.dumps(row) + "\n")
+    check("the pass over the seams is named seams, in the report and on the map alike",
+          [r["block"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == ["1", "2a", "seams"]
+          and [(r["block"], r["bseq"]) for r in review_map.rounds_of(tree, "7")][-1] == ("seams", 1))
+    check("the map names the seams' rounds as the report does",
+          "r.block === '" + review_report.SEAMS + "'" in open(os.path.join(
+              ROOT, "sclaude", "lib", "flow", "process_review.js")).read())
+    if state_before is None:
+        os.remove(state_path)
+    else:
+        with open(state_path, "w") as fh:
+            fh.write(state_before)
+    with open(os.path.join(tree, JOURNAL), "w") as fh:
+        fh.write(journal_before)
     # A GitHub run on another head, written after the local passes but begun
     # between them: both sides put it in its place in time.
     with open(os.path.join(tree, JOURNAL), "a") as fh:

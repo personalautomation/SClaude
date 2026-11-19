@@ -1645,7 +1645,11 @@ passing failure does not leave the block unsplit for the head, at the price
 of a retry paying again. A part may not own only files no longer changed. Its files the pull request no longer changes are offered too, each
 to go with its behaviour. The prompt names a block by its id; the menu, the
 close question and the topic by its place of the total, with its id before
-it once a split moved the places (`blocks_label`: "2/5", "3 (4/5)"). The parts take its place, `blocks.total` grows, and
+it once a split moved the places (`blocks_label`: "block 2/5", "block 3 (4/5)",
+and the last place "the seams (5/5)"). The seams have no id: the journal
+names their pass by its place, `blocks.total`, and `journal_runs` in
+`review_report.py` — the one grouping the report and the review map read —
+calls it `seams` there ("seams.1", "Seams · round 1"). The parts take its place, `blocks.total` grows, and
 the read goes to the first part. A block keeps its `id` for good (its place
 until a split first moved the places), and the journal and the history name
 it by that, so old rounds stay the old block's: the parts of `1` are `1a`,

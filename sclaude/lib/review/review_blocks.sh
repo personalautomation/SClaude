@@ -37,14 +37,19 @@ blocks_id() {
   local k="${2:-$(blocks_now "$1")}"
   python3 "$LIB/review/review_blocks.py" id "$(blocks_file "$1")" "$k" 2>/dev/null || echo "$k"
 }
-# Block <k> as the person reads it: its place of the total — the progress —
-# and, once a split moved the places, its id before it: "2/5", "3 (4/5)",
-# the seams "5/5".
+# Block <k> as the person reads it, named: its place of the total — the
+# progress — and, once a split moved the places, its id before it:
+# "block 2/5", "block 3 (4/5)", and "the seams (5/5)" — called so, as the
+# review report and the review map call their rounds (SEAMS in
+# review_report.py), so that their place is not read as a block 5 after a
+# block 3. A line opening with it capitalises it ("${label^}").
 blocks_label() {
   local k="${2:-$(blocks_now "$1")}" total="${3:-}" id
   [[ -n "$total" ]] || total="$(blocks_total "$1")"
-  if [[ "$k" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( k < total )); then id="$(blocks_id "$1" "$k")"; else id="$k"; fi
-  if [[ "$id" == "$k" ]]; then echo "$k/$total"; else echo "$id ($k/$total)"; fi
+  if [[ "$k" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( k < total )); then id="$(blocks_id "$1" "$k")"
+  elif [[ "$k" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( k == total )); then echo "the seams ($k/$total)"; return
+  else id="$k"; fi
+  if [[ "$id" == "$k" ]]; then echo "block $k/$total"; else echo "block $id ($k/$total)"; fi
 }
 blocks_total() { state_get "$1/.sclaude/local/feature/state.json" blocks.total 2>/dev/null || true; }
 
@@ -261,7 +266,7 @@ blocks_split() {
       local said; said="$(python3 "$LIB/review/review_blocks.py" summary "$file" 2>/dev/null)"
       info "  Block $id is split in $parts; the blocks now:"
       printf '%s\n' "$said" | sed 's/^/    /' >&2
-      ask_feed say "🧱 Block $id had grown past $limit lines: it is split in $parts, each read whole (now $(blocks_label "$wt" "$k"))."$'\n'"$said" 2>/dev/null || true
+      ask_feed say "🧱 Block $id had grown past $limit lines: it is split in $parts, each read whole; now reading $(blocks_label "$wt" "$k")."$'\n'"$said" 2>/dev/null || true
       return 0
     fi
     if [[ -z "$faults" ]]; then
@@ -330,7 +335,8 @@ blocks_next() {
   local unread=""
   if blocks_stale "$wt" "$head"; then
     unread=", its latest change not read whole (the search was ended, or the head went unreviewed)"
-    warn_here "  Block $(blocks_label "$wt" "$k") closes$unread."
+    local label; label="$(blocks_label "$wt" "$k")"
+    warn_here "  Closing ${label}$unread."
   fi
   if (( k >= total )); then
     history_add "$state" blocks done
@@ -342,12 +348,16 @@ blocks_next() {
       (cd "$wt" && gh pr edit "$pr" --remove-label no-review >/dev/null 2>&1) || true
     fi
     info "  Every block of PR #${pr:-?} and the seams between them are read."
+    # The topic, told of each block's close, is told of the last one too.
+    # The seams are never stale (they own no file), so no "not read whole".
+    ask_feed say "🧱 The seams of PR #${pr:-?} reviewed: every block and the seams between them are read." 2>/dev/null || true
     return 1
   fi
   python3 "$LIB/review/review_blocks.py" close "$(blocks_file "$wt")" "$k" "$head" 2>/dev/null || true
   local id; id="$(blocks_id "$wt" "$k")"
   history_add "$state" blocks closed block="$id"
-  ask_feed say "🧱 Block $(blocks_label "$wt" "$k") of PR #${pr:-?} reviewed$unread." 2>/dev/null || true
+  local named; named="$(blocks_label "$wt" "$k")"
+  ask_feed say "🧱 ${named^} of PR #${pr:-?} reviewed$unread." 2>/dev/null || true
   # The step's record begun again, its conversations kept (the issue's
   # summary and the costs read `runs`), and what it held kept under the
   # block: a block's rounds, its "enough", counted apart.
@@ -369,9 +379,9 @@ PY
   state_set "$state" blocks.current $((k + 1))
   echo ""
   if (( k + 1 == total )); then
-    info "  Block $id of $total is reviewed. Last: the seams between the blocks."
+    info "  ${named^} is reviewed. Last: the seams between the blocks."
   else
-    info "  Block $id of $total is reviewed. Next: block $(blocks_id "$wt" $((k + 1)))."
+    info "  ${named^} is reviewed. Next: $(blocks_label "$wt" $((k + 1)) "$total")."
   fi
   return 0
 }

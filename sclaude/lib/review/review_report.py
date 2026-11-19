@@ -141,9 +141,10 @@ FIXED_COL, WAITING_COL = 10, 11
 # The review block a round read, and its number among that block's rounds,
 # when the pull request is read in review blocks (review_blocks.py): "3.7" is
 # block 3's seventh round, as the review's map names it ("Block 3 · round 7",
-# roundName in process_review.js). The column is left out when no round read
-# a block.
-BLOCK_FMT = "%-7s"
+# roundName in process_review.js); the pass over the seams after the last
+# block is "seams.1" (SEAMS). The column is left out when no round read a
+# block.
+BLOCK_FMT = "%-8s"
 
 
 def block_rounds(groups):
@@ -478,10 +479,36 @@ def journal_runs(path, since=None, pr=None):
                     # REFUSED, journaled by spent), one each.
                     "refused": [row["refused"]] if row.get("refused") else []})
         last = key
+    # The pass over the seams has no block id: the journal names it by its
+    # place, the blocks' count plus one, which no block of the cut is called.
+    seams = seams_place(path)
+    for r in out:
+        if seams and r["block"] == seams:
+            r["block"] = SEAMS
     # Grouped in the journal's order, where one review's passes follow one
     # another; then in order of time: a workflow's run is written when the
     # report learns of it (github_runs), after local passes that began later.
     return sorted(out, key=lambda r: r["start"])
+
+
+# What a round over the seams between review blocks is called, in the
+# report's block column ("seams.2") and on the review's map (roundName in
+# process_review.js, "Seams · round 2").
+SEAMS = "seams"
+
+
+def seams_place(journal):
+    """The block the journal beside <journal> names the seams by: the state's
+    `blocks.total` (blocks_id in review_blocks.sh falls back to the place,
+    and the seams' place is the last). A block's id is its first place or a
+    split's letter-and-digit name, never that number. None when the pull
+    request is not read in blocks."""
+    try:
+        with open(os.path.join(os.path.dirname(journal), "state.json")) as fh:
+            total = (json.load(fh).get("blocks") or {}).get("total")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return str(total) if isinstance(total, int) and total >= 2 else None
 
 
 def rounds(found, runs):

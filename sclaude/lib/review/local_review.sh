@@ -274,7 +274,7 @@ local_review_run() {
     printf '%s\n' "${BOLD}── Checking the fixes · PR #${pr:-?} · $LOCAL_REVIEW_MODEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
     info "  You ended the search for new findings: this only resolves what the commits fixed." >&2
   else
-    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · block $(blocks_label "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
+    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · $(blocks_label "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
   local earlier began new more cap pass=1 round retried=""

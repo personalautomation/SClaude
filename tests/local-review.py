@@ -158,10 +158,12 @@ try:
     world = os.path.join(tmp, "world.json")
     calls = os.path.join(tmp, "claude.calls")
     write(os.path.join(stubs, "gh"), GH, 0o755)
-    # claude: records its prompt, answers with whatever the answer file holds.
+    # claude: records its prompt (its argument, or stdin after -p), answers
+    # with whatever the answer file holds.
     # With answers queued in answers/, one per call, oldest first.
     write(os.path.join(stubs, "claude"),
-          '#!/bin/sh\nprintf "%%s\\n---\\n" "$2" >> "%s"\n'
+          '#!/bin/sh\ncase "$2" in -*) p="$(cat)" ;; *) p="$2" ;; esac\n'
+          'printf "%%s\\n---\\n" "$p" >> "%s"\n'
           '[ -f "%s/during" ] && . "%s/during"\n'
           'q="%s/answers"; f=$(ls "$q" 2>/dev/null | head -n 1)\n'
           'if [ -n "$f" ]; then cat "$q/$f"; rm "$q/$f"; else cat "%s/answer"; fi\n'
@@ -852,6 +854,13 @@ with tempfile.TemporaryDirectory() as tmp_since:
 # /sreview asks its reviewer for the same line, and records through `record`.
 with open(os.path.join(ROOT, "skills", "sreview", "SKILL.md"), encoding="utf-8") as fh:
     check_true("sreview-asks-the-end-line", "`%s`" % local_review.DONE in fh.read())
+
+# A stop kills the process the pass's $! names: claude itself, which a pipe
+# into it would not be (it outlived the subshell and went on spending).
+with open(os.path.join(LIB, "review", "local_review.sh"), encoding="utf-8") as fh:
+    src = fh.read()
+check_true("pass-claude-is-the-killed-process",
+           "exec claude -p --session-id" in src and "| exec claude" not in src)
 
 if failures:
     for name, want, got in failures:

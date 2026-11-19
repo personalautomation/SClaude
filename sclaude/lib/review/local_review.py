@@ -57,6 +57,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
+from pr_context import fits, pr_file, pr_folder, write_pr_file  # noqa: E402
 from pr_context import (LOCAL_SIGNATURE, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
                         decline_of, gh, headline, review_threads, signed_locally,
                         split_yours, thread_line, yours)
@@ -149,6 +150,9 @@ def open_count(cwd, found):
     return len(split_yours(cwd, still)[1])
 
 
+SETTLED_INLINE_MAX = 12000
+
+
 def prompt(cwd, pr, repo, journal):
     found = threads(cwd, pr, repo)
     if found is None:
@@ -178,13 +182,31 @@ def prompt(cwd, pr, repo, journal):
     declined += [(t, kept[t["url"]] or t["decision"] or "left as it is") for t in found
                  if t["review"] and not t["resolved"] and t["url"] in kept]
     left = [(t, t["decision"]) for t in found if t["resolved"] and t["review"]]
-    if declined:
+    # Settled findings pile up with a long review — hundreds, fixed — and
+    # the run reads its prompt at every turn: past their budget they go to
+    # settled.md beside the snapshot, by file, and the prompt says where.
+    folder = pr_folder(cwd)
+    # Written below only when something does not fit: one left from an
+    # earlier run would sit there, out of date.
+    if folder and os.path.exists(os.path.join(folder, "settled.md")):
+        os.remove(os.path.join(folder, "settled.md"))
+    fixed = [t for t, why in left if not why]
+    settled = {}
+    for t, why in declined:
+        settled.setdefault(t["path"], []).append(
+            "- :%s — %s (declined: %s)" % (t["line"], headline(t["bodies"][0]), why))
+    for t in fixed:
+        settled.setdefault(t["path"], []).append(
+            "- :%s — %s (fixed)" % (t["line"], headline(t["bodies"][0])))
+    lines = ["- %s:%s — %s (%s)" % (t["path"], t["line"], headline(t["bodies"][0]), why)
+             for t, why in declined]
+    spill = not fits(lines, SETTLED_INLINE_MAX, folder)
+    if declined and not spill:
         out.append("Findings the author decided to leave as they are, with the reason — do not "
                    "report one of them again, reworded or on another line, unless the code it "
                    "rests on changed so that the reason no longer holds; then say which change:")
         out.append("")
-        for t, why in declined:
-            out.append("- %s:%s — %s (%s)" % (t["path"], t["line"], headline(t["bodies"][0]), why))
+        out += lines
         out.append("")
     # This pull request's alone: another's waits for it (flush).
     waiting = [f for f in pending_of(journal) if not f.get("pr") or str(f["pr"]) == str(pr)]
@@ -193,12 +215,36 @@ def prompt(cwd, pr, repo, journal):
                    "report them again: %s." % "; ".join(
                        "%s:%s — %s" % (f["path"], f["line"], f["title"]) for f in waiting))
         out.append("")
-    fixed = [t for t, why in left if not why]
-    if fixed:
+    listed = "; ".join("%s:%s — %s" % (t["path"], t["line"], headline(t["bodies"][0]))
+                       for t in fixed)
+    if fixed and not spill and fits([listed], SETTLED_INLINE_MAX, folder):
         out.append("Findings reported and fixed earlier, not to be reported again unless the "
-                   "fix was undone: %s." % "; ".join(
-                       "%s:%s — %s" % (t["path"], t["line"], headline(t["bodies"][0]))
-                       for t in fixed))
+                   "fix was undone: %s. A change in this range that undoes one of these fixes "
+                   "is a finding: report it, naming the finding it undoes." % listed)
+        out.append("")
+    elif spill or fixed:
+        # Here only when something did not fit, which needs a folder to go to;
+        # the declined ones only when they are not inline above already.
+        if not spill:
+            settled = {}
+            for t in fixed:
+                settled.setdefault(t["path"], []).append(
+                    "- :%s — %s (fixed)" % (t["line"], headline(t["bodies"][0])))
+        md = ["# Findings settled on pull request #%s, by file" % pr, ""]
+        for path in sorted(settled):
+            md += ["## `%s`" % path, ""] + settled[path] + [""]
+        write_pr_file(folder, "settled.md", md)
+        what = ("%d the author decided to leave, with the reason, and %d fixed"
+                % (len(declined), len(fixed)) if spill else "%d fixed" % len(fixed))
+        out.append("Findings settled earlier on this pull request — %s — are in `%s`, under "
+                   "a heading per file. Before you report a finding, read its file's section "
+                   "there: one that repeats a settled finding, reworded or on another line, is "
+                   "not reported, unless the code it rests on changed so that the reason no "
+                   "longer holds (then say which change) or the fix was undone. A change in "
+                   "this range that undoes a settled fix is a finding: report it, naming the "
+                   "finding it undoes." % (what, pr_file("settled.md")))
+        out.append("")
+
     sys.stdout.write("\n".join(out))
     return 0
 

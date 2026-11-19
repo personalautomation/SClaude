@@ -122,6 +122,9 @@ claude_launch() {
     args+=("$arg")
   done
   set -- "${args[@]}"
+  local PROMPT_REST_FILE=""
+  prompt_overflow "$session" "$@"
+  set -- "${PROMPT_FITTED[@]}"
   resume_latest "$@"
   set -- "${CLAUDE_LATEST[@]}"
   # The session's id reaches its commands: `sclaude core-open` and
@@ -172,7 +175,76 @@ claude_launch() {
   # not a variable: the caller runs this in a subshell, and a code reload
   # replaces the process between the exit and that point.
   [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
+  [[ -n "$PROMPT_REST_FILE" ]] && rm -f -- "$PROMPT_REST_FILE"
   return "$status"
+}
+
+# The most of one argument claude is handed, in bytes. Linux refuses to start
+# a program any single argument of which is over 128 KiB (MAX_ARG_STRLEN):
+# exec fails with "Argument list too long" and the session never starts. A
+# review's prompt carries the pull request's threads and the issue's request
+# comment, both growing with the feature, and one went over. Kept well under
+# the limit, for the word a launch may append and for a margin.
+PROMPT_ARG_MAX=96000
+
+# The launch's arguments into PROMPT_FITTED, each one under PROMPT_ARG_MAX: a
+# longer one — the prompt — keeps its head, cut at a line, and the rest goes
+# into a file the head ends by sending the session to read. The head rather
+# than a pointer alone: the session starts on the same opening as before, and
+# what reads a launch's first message (the review map's brief) still finds it.
+# The file is beside the feature's state when there is one; elsewhere — the
+# main checkout, a workshop — in .sclaude/local/ of the session's directory
+# (kept out of git, scratch.sh). claude_launch removes it after the session
+# (PROMPT_REST_FILE), except beside the state of a session with an id, which
+# a later run resumes: there it goes with the tree. Inside the session's own
+# directory either way: a file elsewhere asks for a permission to read it, and
+# a directory handed over with --add-dir asks at every start whether to trust
+# it — with nobody there to answer at night or on the phone.
+#
+#   prompt_overflow <session id or empty> <the launch's arguments…>
+prompt_overflow() {
+  local session="$1" arg head rest file cut
+  # Bytes, not characters: the limit is the kernel's.
+  local LC_ALL=C
+  shift
+  # A launch without an id: this subshell's own pid, not sclaude's ($$),
+  # which every launch of the run shares.
+  local named="$session"
+  session="${session:-$BASHPID}"
+  PROMPT_FITTED=()
+  for arg in "$@"; do
+    if (( ${#arg} <= PROMPT_ARG_MAX )) || [[ "$arg" == -* ]]; then
+      PROMPT_FITTED+=("$arg")
+      continue
+    fi
+    head="${arg:0:PROMPT_ARG_MAX}"
+    cut="${head%$'\n'*}"
+    [[ "$cut" != "$head" && ${#cut} -gt $((PROMPT_ARG_MAX / 2)) ]] && head="$cut"$'\n'
+    rest="${arg:${#head}}"
+    # Named by its text too: a resumed launch with a long opening of its own
+    # must not rewrite the file an earlier opening of the conversation names.
+    local sum; sum="$(printf '%s' "$rest" | cksum | cut -d' ' -f1)"
+    if [[ -d "$PWD/.sclaude/local/feature" ]]; then
+      file="$PWD/.sclaude/local/feature/prompt-rest-$session-$sum.md"
+      # Kept with the tree for a session with an id: a later run resumes the
+      # conversation (run.sh), whose opening still points at the file — it
+      # may have closed before it read it, or read it again after a compaction.
+      [[ -n "$named" ]] || PROMPT_REST_FILE="$file"
+    else
+      declare -F scratch_hide >/dev/null && scratch_hide "$PWD"
+      file="$PWD/.sclaude/local/prompt-rest-$session-$sum.md"
+      mkdir -p "${file%/*}" 2>/dev/null
+      PROMPT_REST_FILE="$file"
+    fi
+    if ! printf '%s' "$rest" 2>/dev/null > "$file"; then
+      # Nowhere to put it: the whole argument goes, and claude's own error
+      # says why, as it did before.
+      PROMPT_FITTED+=("$arg")
+      continue
+    fi
+    PROMPT_FITTED+=("$(printf '%s\n\n---\n\n**These instructions go on in `%s`** — %s bytes more, too long for the command line. Read all of it now, before anything else (in parts with offset and limit if it does not come in one read): it is as much your instructions as the text above.\n' \
+      "$head" "$file" "${#rest}")")
+  done
 }
 
 # The launch's arguments into CLAUDE_LATEST, with a `--resume` taken to where

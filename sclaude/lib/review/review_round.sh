@@ -365,7 +365,15 @@ review_reopen() {
         # resumed this session (`kept`).
         info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
         REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
-        run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept
+        # resolved.md written again, alone: the carry-on sends the session
+        # there for a file new to it, and threads resolved since its launch —
+        # by the person, by a night check — are there only once it is. The
+        # other files of the snapshot stay as its prompt named them (its
+        # threads by number, the threads the person left). When GitHub cannot
+        # be read the file stays too, and the carry-on says it is old.
+        local fresh=""
+        python3 "$LIB/review/pr_context.py" --resolved "$wt" "$pr" "$repo" >/dev/null 2>&1 && fresh=1
+        run_step "$wt" "$slug" review "$(review_carry_on "$pct" "$fresh")" kept
         return 0
       fi
       info "  The new findings go to a fresh session, without this one's context: $why."
@@ -547,9 +555,15 @@ reversals_file() {
   echo "$1/.sclaude/local/feature/review-reversals"
 }
 
-# What the same review session is told when it takes the next round.
+# What the same review session is told when it takes the next round. It has
+# the plan, the request comment and its own rounds in view already, so it is
+# not sent through step 1's checklist again — only to the resolved threads of
+# a file it has not read them for, which earlier sessions settled.
+# review_reopen writes resolved.md again first (pr_context.py --resolved).
 #
-#   review_carry_on <pct>
+#   review_carry_on <pct> [fresh]   fresh: resolved.md was written again for it
 review_carry_on() {
-  printf '%s' "**The review read your last push, and this conversation takes what it found.** Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the findings still open are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
+  local as_of="sclaude wrote it again for this round; a file without a section has no resolved thread"
+  [[ -n "${2:-}" ]] || as_of="it is as of this session's start (GitHub could not be read for this round): for a file without a section, ask GitHub whether any of its threads were resolved since — \`gh api graphql\` on the pull request's reviewThreads, with isResolved and path"
+  printf '%s' "**The review read your last push, and this conversation takes what it found.** Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the findings still open are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. The plan, the request comment and what this conversation settled you have already; what you may not have is what earlier sessions settled on a file new to you: before you edit a file whose section of \`.sclaude/local/feature/pr/resolved.md\` you have not read, find it there by its heading and read it — $as_of — and a change that would undo one of those threads is put to me, not made. From here they are threads you are fixing, and the round ends by the same rules as before."
 }

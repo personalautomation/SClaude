@@ -395,6 +395,20 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-11-13 at the user's request, with the
   review's map under the review step. -->
 
+- Step 4's checklist before the first edit in `sclaude/prompts/review.md`
+  reads keys `render_prompt.py` derives from where the gathered text went
+  (`placed`): `<block>-shown`, `<block>-in-file` (the path `SPILL` writes,
+  which the prompt names for `user-request`) and `<block>-inline`, and
+  `PR_FILES`' `pr-threads-file`/`pr-resolved-file`, set when the snapshot
+  names `pr_context.py`'s `threads.md`/`resolved.md` (`PR_DIR`);
+  `tests/render.py` renders each case and checks the paths agree. A path
+  changed on one side alone leaves the session told to read a file that is
+  not where it looks, or not told at all.
+
+  <!-- Added by Claude on 2026-11-19 at the user's request: a fix session
+  edited a file without reading its resolved threads, which the snapshot
+  had pointed to only from among its data. -->
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/review/review_round.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

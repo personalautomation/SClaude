@@ -7,6 +7,7 @@
 # Run it with: python3 tests/render.py
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -145,9 +146,83 @@ def main():
                           dict(blocks, **{"issue-chain": "", "deploy-outcome": ""}))
         check("status-no-dangling-block", "<block:" in bare, False)
 
+        # A block too long for the prompt goes to a file in the feature's tree,
+        # and the prompt says where; a short one, or one with no tree to go
+        # to, stays inline.
+        root = os.path.join(tmp, "tree")
+        os.makedirs(os.path.join(root, ".sclaude", "local", "feature"))
+        big = "".join("a line of the block, %06d — ё\n" % i for i in range(3000))
+        got = render("before\n<block:user-request>\nafter", tmp, {}, {"user-request": big}, root)
+        rel = ".sclaude/local/feature/prompt-user-request.md"
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            spilt = fh.read()
+        check("long-block-spilled", (rel in got, len(got) < 1000, spilt), (True, True, big))
+        check("short-block-inline", render("<block:x>", tmp, {}, {"x": "short"}, root), "short\n")
+        check("no-tree-inline", render("<block:x>", tmp, {}, {"x": big}), big)
+
+        # The blocks reach render_prompt.py as files (SCLAUDE_BLOCKS_DIR): a
+        # variable over 128 KiB would not start it at all.
+        bdir = os.path.join(tmp, "blocks")
+        os.makedirs(bdir)
+        with open(os.path.join(bdir, "PR_CONTEXT"), "w", encoding="utf-8") as fh:
+            fh.write(big * 5)
+        with open(os.path.join(tmp, "step.md"), "w", encoding="utf-8") as fh:
+            fh.write("head\n<block:pr-context>\ntail\n")
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude",
+                              "lib", "cycle", "render_prompt.py")
+        res = subprocess.run([sys.executable, script, os.path.join(tmp, "step.md"), tmp],
+                             env=dict(os.environ, SCLAUDE_BLOCKS_DIR=bdir, SCLAUDE_SPILL_ROOT=root),
+                             capture_output=True, text=True)
+        # A stray byte in gathered text (a test's raw output) does not stop
+        # the step from starting.
+        with open(os.path.join(bdir, "REGRESSION"), "wb") as fh:
+            fh.write(b"failed \xff here")
+        with open(os.path.join(tmp, "fix.md"), "w", encoding="utf-8") as fh:
+            fh.write("<block:regression>\n")
+        bad = subprocess.run([sys.executable, script, os.path.join(tmp, "fix.md"), tmp],
+                             env=dict(os.environ, SCLAUDE_BLOCKS_DIR=bdir),
+                             capture_output=True, text=True)
+        check("stray-byte", (bad.returncode, "failed" in bad.stdout), (0, True))
+        check("blocks-from-files", (res.returncode, ".sclaude/local/feature/prompt-pr-context.md"
+                                    in res.stdout, res.stdout.startswith("head\n")), (0, True, True))
+
+        # Step 4's checklist before the first edit follows where the gathered
+        # text is: the threads and resolved threads in files only when the
+        # snapshot points there, the request comment in its file or below.
+        with open(os.path.join(prompts, "review.md"), encoding="utf-8") as fh:
+            review = fh.read()
+        import pr_context
+        import render_prompt
+        threads_md = pr_context.pr_file("threads.md")
+        resolved_md = pr_context.pr_file("resolved.md")
+        gate = "Before your first edit"
+
+        def review_with(pr_ctx, request, root=""):
+            out = render(review, prompts, values, dict(blocks, **{"pr-context": pr_ctx,
+                                                                  "user-request": request}), root)
+            return out[out.find(gate):out.find("1. Handle each comment")]
+        small = review_with("the checks", "the request")
+        # The inline request comment is where the checklist says: after it.
+        whole = render(review, prompts, values, dict(blocks, **{"user-request": "THE REQUEST"}))
+        check("request-quoted-below", whole.find(gate) < whole.find("THE REQUEST"), True)
+        check("gate-inline", (gate in small, "threads.md" in small, "resolved.md" in small,
+                              "quoted below where recording" in small, "prompt-user-request" in small,
+                              "read the threads already resolved on it" in small),
+              (True, False, False, True, False, True))
+        files = review_with("see `%s` and `%s`" % (threads_md, resolved_md), big, root)
+        check("gate-files", (threads_md in files, resolved_md in files,
+                             render_prompt.SPILL.format("user-request") in files,
+                             "quoted below where recording" in files), (True, True, True, False))
+        bare = review_with("", "")
+        check("gate-bare", (gate in bare, "open thread" in bare, "User request" in bare,
+                            "plan.md" in bare), (True, False, False, True))
+        # The paths render_prompt.py looks for are the ones pr_context.py writes.
+        check("pr-files-agree", sorted(render_prompt.PR_FILES.values()),
+              sorted([resolved_md, threads_md]))
+
         # Five assemblies with the blocks filled, five with them empty, and the
         # rest are the checks above.
-        total = 27
+        total = 37
         for name, want, got in failures:
             print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
         print("%d/%d passed" % (total - len(failures), total))

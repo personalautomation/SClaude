@@ -26,6 +26,16 @@
 #
 # The values arrive as environment variables rather than argv: an issue's body
 # and a PR's list of comments run to kilobytes, and ARG_MAX does not stretch.
+# The blocks arrive as files in SCLAUDE_BLOCKS_DIR, one per block named as its
+# variable would be: a variable is held to 128 KiB too (MAX_ARG_STRLEN), and
+# a long feature's blocks outgrow it.
+#
+# A block over BLOCK_INLINE_MAX does not go into the prompt: it is written to
+# .sclaude/local/feature/prompt-<name>.md under SCLAUDE_SPILL_ROOT (the
+# feature's tree) and the prompt says where, with its size. The prompt goes to
+# claude as one argument, held to the same limit, and what it carries is read
+# at every turn: instructions stay in it whole, gathered text is read from a
+# file once, as much of it as the session needs.
 import os
 import re
 import sys
@@ -37,6 +47,59 @@ BLOCK = re.compile(r"^[ \t]*<block:([a-z0-9-]+)>[ \t]*\n?", re.M)
 CONDITIONAL = re.compile(r"<if:([a-z0-9-]+)>(.*?)</if:\1>(\n*)", re.S)
 # Any remaining tag of the form <something> from our vocabulary.
 LEFTOVER = re.compile(r"<(include|if|block):[a-z0-9-]*>")
+
+
+BLOCK_INLINE_MAX = 32000
+SPILL = ".sclaude/local/feature/prompt-{}.md"
+
+
+# The parts of the pull request's snapshot that pr_context.py writes to files
+# when they are too long for the prompt, by the key that tells the prompt so.
+PR_FILES = {"pr-threads-file": ".sclaude/local/feature/pr/threads.md",
+            "pr-resolved-file": ".sclaude/local/feature/pr/resolved.md"}
+
+
+def spills(body, root):
+    return bool(root) and len(body.encode("utf-8")) > BLOCK_INLINE_MAX
+
+
+def placed(text, blocks, spill_root):
+    """Each block the template names, as it goes into the prompt — itself, or
+    where it was written (spilled) — and the keys the prompt's conditionals
+    read about it: `<block>-shown` for one not empty, then `<block>-in-file`
+    for one in a file or `<block>-inline` for one in the prompt, and
+    PR_FILES' keys for the parts of the pull request's snapshot that it
+    points to files for. Decided before the conditionals, which read them."""
+    bodies, keys = {}, {}
+    for name in set(BLOCK.findall(text)):
+        body = (blocks.get(name) or "").strip("\n")
+        if not body:
+            continue
+        bodies[name] = spilled(name, body, spill_root)
+        keys[name + "-shown"] = "1"
+        keys[name + ("-inline" if bodies[name] == body else "-in-file")] = "1"
+    snapshot = blocks.get("pr-context") or ""
+    for key, path in PR_FILES.items():
+        if path in snapshot:
+            keys[key] = "1"
+    return bodies, keys
+
+
+def spilled(name, body, root):
+    """The block, or where it was written when it is too long to be inlined."""
+    size = len(body.encode("utf-8"))
+    if not spills(body, root):
+        return body
+    rel = SPILL.format(name)
+    try:
+        with open(os.path.join(root, rel), "w", encoding="utf-8") as fh:
+            fh.write(body + "\n")
+    except OSError:
+        return body
+    return ("**This part is in `%s`** — %d KB, %d lines, too long to sit in this "
+            "prompt. Read it whole before you act on it, in parts with offset and "
+            "limit if it does not come in one read."
+            % (rel, (size + 1023) // 1024, body.count("\n") + 1))
 
 
 class RenderError(Exception):
@@ -52,8 +115,9 @@ def read_include(prompts_dir, name):
         raise RenderError("no include file: %s" % path)
 
 
-def render(text, prompts_dir, values, blocks):
-    """Assemble the prompt. values are substitutions, blocks embedded pieces."""
+def render(text, prompts_dir, values, blocks, spill_root=""):
+    """Assemble the prompt. values are substitutions, blocks embedded pieces;
+    a block too long for the prompt goes to a file under spill_root."""
     # The includes first: they contain both conditionals and substitutions. One
     # level, without nesting — an include inside an include would mean the
     # prompts had acquired a structure that a template is not the thing to fix.
@@ -61,6 +125,8 @@ def render(text, prompts_dir, values, blocks):
         return read_include(prompts_dir, match.group(1)).rstrip("\n")
 
     text = INCLUDE.sub(splice, text)
+    bodies, keys = placed(text, blocks, spill_root)
+    values = dict(keys, **values)
 
     # The conditionals go by whether a key is non-empty. An empty key takes the
     # whole block away along with the trailing newlines, otherwise a hole of
@@ -97,8 +163,7 @@ def render(text, prompts_dir, values, blocks):
     held = []
 
     def inject(match):
-        body = blocks.get(match.group(1)) or ""
-        body = body.strip("\n")
+        body = bodies.get(match.group(1)) or ""
         if not body:
             return ""
         held.append(body + "\n")
@@ -137,9 +202,17 @@ def main():
             values[name[len("SCLAUDE_V_"):].lower().replace("_", "-")] = value
         elif name.startswith("SCLAUDE_B_"):
             blocks[name[len("SCLAUDE_B_"):].lower().replace("_", "-")] = value
+    folder = os.environ.get("SCLAUDE_BLOCKS_DIR") or ""
+    for name in (os.listdir(folder) if folder and os.path.isdir(folder) else []):
+        # Not strict: a block is gathered text — a failing test's raw output
+        # may hold a stray byte — and the environment it replaced decoded
+        # such a byte rather than refuse the whole prompt.
+        with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as fh:
+            blocks[name.lower().replace("_", "-")] = fh.read()
 
     try:
-        sys.stdout.write(render(text, prompts_dir, values, blocks))
+        sys.stdout.write(render(text, prompts_dir, values, blocks,
+                                os.environ.get("SCLAUDE_SPILL_ROOT") or ""))
     except RenderError as exc:
         sys.stderr.write("%s\n" % exc)
         return 1

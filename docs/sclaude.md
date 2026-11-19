@@ -892,6 +892,28 @@ leaving the commands for re-reading: changing the PR's state is exactly what ste
 4 is busy with. If the gathering did not work, the block is empty and the prompt
 keeps its previous instruction inside itself.
 
+The prompt goes to claude as one argument, which Linux holds to 128 KiB, and
+it is read at every turn; a long feature's gathered text outgrows both. So the
+instructions stay in the prompt and the bulk goes to files in the feature's
+tree. The blocks reach `render_prompt.py` as files, and a block over 32 KB
+(`BLOCK_INLINE_MAX`) is written to `.sclaude/local/feature/prompt-<block>.md`
+with only its place and size in the prompt. The pull request's snapshot lays
+itself out: every open thread whole in `pr/threads.md`, every resolved one by
+file in `pr/resolved.md`, the conversation in `pr/discussion.md`, and the
+threads the person left as they are in `pr/left.md` when they are many; the
+prompt shows each part inline while it stays under its budget, then an index
+(the discussion's latest entries), then a count per file — with the lines of a
+file's section in `resolved.md`, which the session reads before it changes
+that file. The threads a night left for the person to confirm come first, in
+whatever layout, since they are asked about before anything else. What the session must read
+before its first edit — the plan, every open thread whole, the resolved
+threads of each file it changes, the request comment — is a checklist at the
+head of step 1 in `review.md`, whose lines name the files only where the
+snapshot put something there (keys `render_prompt.py` derives in `placed`). The local review's prompt puts
+its settled findings in `pr/settled.md` the same way. Should the prompt still
+be over the limit, `claude_launch` (`prompt_overflow`) sends its tail to a
+file the head points at.
+
 **Context is not carried between steps.** Every step is a new session, and
 `.sclaude/local/feature/plan.md` serves as the bridge, written at step 1 specifically to be
 handed over: compacting a long session costs more and preserves worse than a plan

@@ -30,6 +30,9 @@ FILES = [
     ("closing", "the worktree's removal has begun: no lazy start, the menu offers it no more"),
     ("terminal", "the terminal recordings that touched the feature, one path a line"),
     ("terminal.txt", "those recordings played back into text"),
+    ("prompt-<block>.md", "a block of a step's prompt too long to sit in it (an issue's request comment, …), which the prompt names instead (spilled in render_prompt.py)"),
+    ("pr", "the pull request's snapshot for a review session, in parts too long for the prompt: threads.md every open thread whole, resolved.md every resolved one by file, discussion.md, unposted.md, left.md the threads the person left when many, and settled.md the local review's settled findings (PR_DIR in pr_context.py)"),
+    ("prompt-rest-<session>.md", "the end of a launch's prompt too long for the command line, which the prompt's head sends the session to read; named by the session and the text's checksum, and kept for a later resume (prompt_overflow in pane.sh)"),
     ("main-config.json", "the project config as this machine reads it (the main checkout's, its local choices over it), copied where the retrospective reads it"),
 
     # --- friction --------------------------------------------------------------

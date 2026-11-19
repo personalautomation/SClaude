@@ -514,6 +514,73 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# A prompt over the kernel's limit for one argument (128 KiB) once stopped a
+# review's session from starting ("Argument list too long"): its head goes as
+# the argument, cut at a line, and the rest into a file the head sends the
+# session to; the two together are the prompt. A short one goes as it is.
+tmp = tempfile.mkdtemp()
+try:
+    wt = os.path.join(tmp, "wt")
+    os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+    prompt = "".join("line %06d — ünïcode ; 'quoted' \"too\"\n" % i for i in range(4000))
+    assert len(prompt.encode()) > 131072
+    with open(os.path.join(tmp, "prompt"), "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+    script = ('source "%s/core/pane.sh"; cd "%s"; BIG="$(cat ../prompt; echo .)"; BIG="${BIG%%.}"\n'
+              'prompt_overflow sid --session-id sid -n name "$BIG"\n'
+              'printf "%%s\\0" "${PROMPT_FITTED[@]}" > args.bin\n'
+              '/bin/true "${PROMPT_FITTED[@]}" && echo started\n'
+              'prompt_overflow "" -n name short; printf "%%s\\n" "${PROMPT_FITTED[@]}"\n') % (LIB, wt)
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    lines = res.stdout.splitlines()
+    check("long-prompt-starts", lines[:1], ["started"])
+    check("short-prompt-as-it-is", lines[1:], ["-n", "name", "short"])
+    with open(os.path.join(wt, "args.bin"), "rb") as fh:
+        args = fh.read().decode().split("\0")[:-1]
+    check("long-prompt-other-args", args[:4], ["--session-id", "sid", "-n", "name"])
+    fdir = os.path.join(wt, ".sclaude", "local", "feature")
+    rests = [n for n in os.listdir(fdir) if n.startswith("prompt-rest-sid-")]
+    rest_file = os.path.join(fdir, rests[0]) if rests else "missing"
+    head = args[4]
+    check("long-prompt-head-fits", len(head.encode()) < 100000, True)
+    check("long-prompt-names-its-rest", rest_file in head, True)
+    with open(rest_file, encoding="utf-8") as fh:
+        rest = fh.read()
+    marker = "\n\n---\n\n**These instructions go on in"
+    check("long-prompt-whole", head.split(marker)[0] + rest, prompt)
+    check("long-prompt-cut-at-a-line", rest.startswith("line "), True)
+    # Outside a feature's tree: in .sclaude/local/ of the session's own
+    # directory, which asks nothing to read (a path elsewhere does, and a
+    # directory given with --add-dir asks for trust), gone after the session.
+    plain = os.path.join(tmp, "plain")
+    os.makedirs(plain)
+    script = ('source "%s/core/pane.sh"; cd "%s"; BIG="$(cat ../prompt; echo .)"; BIG="${BIG%%.}"\n'
+              'PROMPT_REST_FILE=""; prompt_overflow sid -n name "$BIG"\n'
+              'echo "${PROMPT_FITTED[0]} ${PROMPT_REST_FILE#$PWD/}"; cp "$PROMPT_REST_FILE" ../rest.txt\n'
+              'claude_launch_once() { :; }; resume_latest() { CLAUDE_LATEST=("$@"); }; pane_mark() { :; }\n'
+              'session_ctl_file() { echo /nonexistent; }\n'
+              'claude_launch --session-id sid -n name "$BIG"\n'
+              'ls .sclaude/local | wc -l\n') % (LIB, plain)
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    with open(os.path.join(tmp, "rest.txt"), encoding="utf-8") as fh:
+        check("outside-a-tree-rest-in-its-dir", fh.read() == rest, True)
+    got = res.stdout.split()
+    check("outside-a-tree-in-its-own-dir-and-removed",
+          (got[0], got[1].startswith(".sclaude/local/prompt-rest-sid-"), got[2]), ("-n", True, "0"))
+    # In a feature's tree, a session with an id keeps the file for a later
+    # resume of the conversation; one without an id does not; a resumed
+    # launch with another long opening gets a file of its own.
+    script = ('source "%s/core/pane.sh"; cd "%s"; BIG="$(cat ../prompt; echo .)"; BIG="${BIG%%.}"\n'
+              'claude_launch_once() { :; }; resume_latest() { CLAUDE_LATEST=("$@"); }; pane_mark() { :; }\n'
+              'session_ctl_file() { echo /nonexistent; }; rm -f .sclaude/local/feature/prompt-rest-*\n'
+              'claude_launch --session-id sid -n name "$BIG"; ls .sclaude/local/feature | grep -c prompt-rest\n'
+              'claude_launch --resume sid -n name "${BIG}another tail"; ls .sclaude/local/feature | grep -c prompt-rest\n'
+              'claude_launch -n name "$BIG"; ls .sclaude/local/feature | grep -c prompt-rest\n') % (LIB, wt)
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    check("in-a-tree-kept-for-a-resume", res.stdout.split(), ["1", "2", "2"])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 # SCLAUDE_FROM_PHONE is sclaude's: a session it starts in place does not see
 # it, and sclaude has it back after.
 got = subprocess.run(["bash", "-c", 'source "%s/core/pane.sh"; claude() { echo "[${SCLAUDE_FROM_PHONE-}]"; }; '

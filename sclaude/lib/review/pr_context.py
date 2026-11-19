@@ -909,6 +909,133 @@ def thread_counts(cwd, pr, repo, since=""):
         after = info.get("endCursor")
 
 
+# The snapshot's parts that may outgrow the prompt, in .sclaude/local/feature/pr/
+# of the feature's tree: threads.md every open thread in full, resolved.md
+# every resolved one by file, discussion.md the conversation, left.md the
+# threads the person left as they are when they are many. Written at every
+# snapshot; the prompt shows a part inline while it stays under its budget, and
+# otherwise an index — or, past that, a count per file — and where to read it.
+PR_DIR = ".sclaude/local/feature/pr"
+THREADS_INLINE_MAX = 16000
+INDEX_INLINE_MAX = 8000
+RESOLVED_INLINE_MAX = 4000
+DISCUSSION_INLINE_MAX = 6000
+LEFT_INLINE_MAX = 4000
+
+
+def pr_file(name):
+    return "%s/%s" % (PR_DIR, name)
+
+
+def pr_folder(cwd):
+    """The snapshot's folder in a feature's tree, made; None elsewhere."""
+    if not os.path.isdir(os.path.join(cwd, os.path.dirname(PR_DIR))):
+        return None
+    folder = os.path.join(cwd, PR_DIR)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError:
+        return None
+    return folder
+
+
+def fits(lines, budget, folder):
+    """Whether these lines go into the prompt: always where there is no folder
+    to put them in instead."""
+    return not folder or len("\n".join(lines).encode("utf-8")) <= budget
+
+
+def write_pr_file(folder, name, lines):
+    try:
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines).rstrip("\n") + "\n")
+    except OSError:
+        pass
+
+
+def thread_text(t, proposed):
+    """An open thread's whole text, for threads.md."""
+    first, replies = t["comments"][0], t["comments"][1:]
+    lines = ["%s — %s%s" % (first["author"], t.get("url") or "",
+                            " (outdated position)" if t["outdated"] else ""), "",
+             first["body"], ""]
+    for r in replies:
+        if r["body"]:
+            lines += ["> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")), ""]
+    if t.get("url") in proposed:
+        lines += ["> **Left at night for the person to confirm** — a night session "
+                  "proposed: %s. Ask them about it first, as review.md says for the "
+                  "threads left at night." % proposed[t["url"]], ""]
+    return lines
+
+
+def thread_layout(numbered, proposed, folder, what, spent=0):
+    """Open threads for the prompt, numbered as in threads.md: whole while they
+    fit, then an index, then a count per file. `spent`: bytes of the threads'
+    budgets already taken by an earlier call (the night's threads), so that
+    the two together keep to the budgets one call has."""
+    full, index, per = [], [], {}
+    for k, t in numbered:
+        first, replies = t["comments"][0], t["comments"][1:]
+        where = "`%s:%s`%s" % (t["path"], t["line"],
+                               " (outdated position)" if t["outdated"] else "")
+        full += ["**%s — %s:** %s" % (where, first["author"], t.get("url") or ""), "",
+                 first["body"], ""]
+        for r in replies:
+            if r["body"]:
+                full += ["> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")), ""]
+        if t.get("url") in proposed:
+            full += ["> **Left at night for the person to confirm** — a night session "
+                     "proposed: %s. Ask them about it first, as review.md says for the "
+                     "threads left at night." % proposed[t["url"]], ""]
+        index.append("- %d. %s — %s %s" % (k, where, headline(first["body"]), t.get("url") or ""))
+        per[t["path"]] = per.get(t["path"], 0) + 1
+    if fits(full, THREADS_INLINE_MAX - spent, folder):
+        return full
+    # The index keeps to its own budget and to what the night's threads left
+    # of the threads' one: the two groups together stay within that one.
+    if fits(index, min(INDEX_INLINE_MAX, THREADS_INLINE_MAX - spent), folder):
+        return (["%d %s, too many to show in full here. Each one's whole text, replies "
+                 "included, is under its number in `%s`: read a thread there before you "
+                 "act on it." % (len(numbered), what, pr_file("threads.md")), ""]
+                + index + [""])
+    return (["%d %s on %d files, too many to list here. Each one's whole text, replies "
+             "included, is in `%s`, under a heading of its number, file and line "
+             "(`## 12. path:line`, the file and line in backticks): take the files one by "
+             "one, and read each thread there before you act on it."
+             % (len(numbered), what, len(per), pr_file("threads.md")), ""]
+            + ["- `%s` — %d" % (path, n) for path, n in sorted(per.items())] + [""])
+
+
+def resolved_lines(pr, resolved):
+    """resolved.md's lines, every resolved thread by file, and the line each
+    file's heading is on."""
+    by_path = {}
+    for r in resolved:
+        by_path.setdefault(r["path"], []).append(r)
+    lines, at = ["# Resolved review threads of pull request #%s, by file" % pr, ""], {}
+    for path in sorted(by_path):
+        at[path] = len(lines) + 1
+        lines += ["## `%s`" % path, ""]
+        lines += ["- `:%s` %s → %s" % (r["line"], r["finding"], r["resolution"]
+                                       or "closed with no reply") for r in by_path[path]]
+        lines.append("")
+    return lines, at
+
+
+def refresh_resolved(cwd, pr, repo):
+    """resolved.md written again from GitHub, alone — for a review session
+    carried on to the next round, whose prompt and other files still stand.
+    False, the file untouched, when the threads cannot be read or there is
+    no feature's tree."""
+    folder = pr_folder(cwd)
+    threads, resolved = open_threads(cwd, pr, repo)
+    if not folder or threads is None:
+        return False
+    write_pr_file(folder, "resolved.md", resolved_lines(pr, resolved)[0])
+    return True
+
+
 def render(cwd, pr, repo):
     if not pr:
         return ""
@@ -920,6 +1047,9 @@ def render(cwd, pr, repo):
     rows = checks_table(view.get("statusCheckRollup") or [])
     issue_comments = view.get("comments") or []
     threads, resolved = open_threads(cwd, pr, repo)
+    # The threads could not be read: no file is written over the last good
+    # one with nothing in it.
+    unread = threads is None
     mine, threads = split_yours(cwd, threads or [])
     decided = yours(cwd)
     proposed = night(cwd)
@@ -956,6 +1086,17 @@ def render(cwd, pr, repo):
     if not threads and not issue_comments:
         out.append("No open review threads and no discussion as of this snapshot.")
         out.append("")
+    lead_at = len(out)
+    # Where the parts too long for the prompt go: a pull request's threads
+    # have no ceiling — hundreds of resolved ones on a long review — and
+    # the prompt goes to claude as one argument, held to 128 KiB, and is read
+    # at every turn. None outside a feature's tree: everything inline.
+    folder = pr_folder(cwd)
+    # The parts written only when they do not fit: one left from an earlier
+    # snapshot would sit there, out of date, beside the current ones.
+    for name in ("left.md", "unposted.md"):
+        if folder and os.path.exists(os.path.join(folder, name)):
+            os.remove(os.path.join(folder, name))
     # A resolved thread is shown only where a thread is still open on the same
     # file: there a new finding can undo an earlier fix. Once that happened
     # three times in one chain (sweep, guard, action, guard again), each round
@@ -964,24 +1105,63 @@ def render(cwd, pr, repo):
     nearby = [r for r in resolved if r["path"] in open_paths]
     if resolved:
         out.append("%d review thread%s already resolved: what they asked for is "
-                   "done." % (len(resolved), "" if len(resolved) == 1 else "s"))
+                   "done.%s" % (len(resolved), "" if len(resolved) == 1 else "s",
+                                " All of them, by file (a heading with its path), are in "
+                                "`%s`." % pr_file("resolved.md") if folder else ""))
         out.append("")
-    if nearby:
+    by_path = {}
+    for r in resolved:
+        by_path.setdefault(r["path"], []).append(r)
+    resolved_md, at = resolved_lines(pr, resolved)
+    nearby_full = ["- `%s:%s` %s → %s" % (r["path"], r["line"], r["finding"],
+                                         r["resolution"] or "closed with no reply")
+                   for r in nearby]
+    if nearby and fits(nearby_full, RESOLVED_INLINE_MAX, folder):
         out.append("Resolved on the files that still have open threads. A fix "
                    "that would undo one of these is a reversal, not a fix:")
         out.append("")
-        for r in nearby:
-            out.append("- `%s:%s` %s → %s" % (r["path"], r["line"], r["finding"],
-                                              r["resolution"] or "closed with no reply"))
+        out += nearby_full
         out.append("")
+    elif nearby:
+        out.append("%d resolved threads on the files that still have open threads. A fix "
+                   "that would undo one of these is a reversal, not a fix: before you "
+                   "change one of these files, read its section of `%s` (the lines "
+                   "given, with offset and limit):" % (len(nearby), pr_file("resolved.md")))
+        out.append("")
+        out += ["- `%s` — %d, lines %d–%d" % (path, len(by_path[path]), at[path],
+                                             at[path] + len(by_path[path]) + 1)
+                for path in sorted({r["path"] for r in nearby})]
+        out.append("")
+    discussion = []
     for c in issue_comments:
         author = ((c.get("author") or {}).get("login")) or "?"
         body = (c.get("body") or "").strip()
-        if not body:
-            continue
-        out.append("**Discussion — %s:**" % author)
+        if body:
+            discussion.append((author, body))
+    full = []
+    for author, body in discussion:
+        full += ["**Discussion — %s:**" % author, "", body, ""]
+    if fits(full, DISCUSSION_INLINE_MAX, folder):
+        out += full
+    else:
+        out.append("**The pull request's discussion** — %d comments, too long to show "
+                   "here: each in full under its number in `%s`. Read the ones you act on."
+                   % (len(discussion), pr_file("discussion.md")))
         out.append("")
-        out.append(body)
+        # The latest ones while they fit: a recent word from the person is
+        # what a session must not miss.
+        topics = []
+        for k in range(len(discussion), 0, -1):
+            author, body = discussion[k - 1]
+            line = "- %d. %s — %s" % (k, author, headline(body))
+            if not fits(topics + [line], INDEX_INLINE_MAX, folder):
+                break
+            topics.insert(0, line)
+        if len(topics) < len(discussion):
+            out.append("The latest %d; the %d before them are in the file only."
+                       % (len(topics), len(discussion) - len(topics)))
+            out.append("")
+        out += topics
         out.append("")
     # A night session's proposals are not the person's decisions: listed
     # apart, left alone at night, asked about first by day (review.md).
@@ -997,35 +1177,57 @@ def render(cwd, pr, repo):
             out.append("- `%s:%s` %s — %s" % (t["path"], t["line"], t["url"],
                                               decided.get(t["url"]) or ""))
         out.append("")
-    if mine:
+    left = ["- `%s:%s` %s — %s" % (t["path"], t["line"], t["url"],
+                                   decided.get(t["url"]) or "leave as it is") for t in mine]
+    if mine and fits(left, LEFT_INLINE_MAX, folder):
         out.append("**Left as they are by the person — theirs to resolve on GitHub.** "
                    "They decided these in an earlier session. Don't fix them and "
                    "don't ask about them again; list them, with their links, under "
                    "\"Resolve on GitHub yourself\" in your report:")
         out.append("")
-        for t in mine:
-            out.append("- `%s:%s` %s — %s" % (t["path"], t["line"], t["url"],
-                                              decided.get(t["url"]) or "leave as it is"))
+        out += left
         out.append("")
-    for t in threads:
-        first, replies = (t["comments"] or [{"author": "?", "body": ""}])[0], t["comments"][1:]
-        if not first["body"]:
-            continue
-        out.append("**`%s:%s`%s — %s:** %s" % (t["path"], t["line"],
-                                               " (outdated position)" if t["outdated"] else "",
-                                               first["author"], t.get("url") or ""))
+    elif mine:
+        write_pr_file(folder, "left.md", ["# Review threads the person left as they are "
+                                          "on pull request #%s — not to be fixed, theirs "
+                                          "to resolve on GitHub" % pr, ""] + left)
+        out.append("**%d threads left as they are by the person — theirs to resolve on "
+                   "GitHub**, listed with their links in `%s`. They decided these in an "
+                   "earlier session. Don't fix them and don't ask about them again; list "
+                   "them, with their links, under \"Resolve on GitHub yourself\" in your "
+                   "report." % (len(mine), pr_file("left.md")))
         out.append("")
-        out.append(first["body"])
-        out.append("")
-        for r in replies:
-            if r["body"]:
-                out.append("> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")))
-                out.append("")
-        if t.get("url") in proposed:
-            out.append("> **Left at night for the person to confirm** — a night session "
-                       "proposed: %s. Ask them about it first, as review.md says for the "
-                       "threads left at night." % proposed[t["url"]])
-            out.append("")
+    shown = [t for t in threads if (t["comments"] or [{"body": ""}])[0]["body"]]
+    threads_md = ["# Open review threads of pull request #%s" % pr, ""]
+    for k, t in enumerate(shown, 1):
+        threads_md.append("## %d. `%s:%s`" % (k, t["path"], t["line"]))
+        threads_md.append("")
+        threads_md += thread_text(t, proposed)
+    numbered = list(enumerate(shown, 1))
+    # The threads a night left for the person come first, in any layout:
+    # review.md has them asked about before anything else.
+    asked = [(k, t) for k, t in numbered if t.get("url") in proposed]
+    rest = [(k, t) for k, t in numbered if t.get("url") not in proposed]
+    lead = []
+    if asked:
+        lead += ["**Left at night for the person to confirm — ask about each of these "
+                 "first, before anything else, as review.md says for the threads left at "
+                 "night.**", ""]
+        lead += thread_layout(asked, proposed, folder, "of these threads")
+    if rest:
+        out += thread_layout(rest, proposed, folder,
+                             "open review threads" if not asked else "other open review threads",
+                             len("\n".join(lead).encode("utf-8")))
+    out[lead_at:lead_at] = lead
+    if folder and not unread:
+        write_pr_file(folder, "threads.md", threads_md)
+        write_pr_file(folder, "resolved.md", resolved_md)
+    if folder:
+        # From the pull request's view, read whether or not the threads were.
+        disc_md = ["# The discussion of pull request #%s" % pr, ""]
+        for k, (author, body) in enumerate(discussion, 1):
+            disc_md += ["## %d. %s" % (k, author), "", body, ""]
+        write_pr_file(folder, "discussion.md", disc_md)
 
     lost = unposted_findings(cwd, repo, view.get("headRefOid") or "",
                              view.get("statusCheckRollup") or [], issue_comments)
@@ -1041,8 +1243,15 @@ def render(cwd, pr, repo):
                    "to reply in or resolve; the next review run reads the same range "
                    "again." % run_id)
         out.append("")
+        body = []
         for text in reports:
-            out.append(text)
+            body += [text, ""]
+        if fits(body, DISCUSSION_INLINE_MAX, folder):
+            out += body
+        else:
+            write_pr_file(folder, "unposted.md", body)
+            out.append("The report is too long to show here: it is in `%s`; read it whole."
+                       % pr_file("unposted.md"))
             out.append("")
 
     return "\n".join(out).rstrip("\n")
@@ -1866,6 +2075,13 @@ def main():
             sys.stdout.write("%s %d %s\n" % got)
         return 0
     # `--yours <cwd> <pr> <repo>`: the person's open threads, see yours_open.
+    # `--resolved <cwd> <pr> <repo>`: resolved.md written again (refresh_resolved);
+    # exit 0 when it was, 1 when it was left as it was.
+    if len(sys.argv) >= 5 and sys.argv[1] == "--resolved":
+        try:
+            return 0 if refresh_resolved(sys.argv[2], sys.argv[3], sys.argv[4]) else 1
+        except Exception:
+            return 1
     if len(sys.argv) >= 5 and sys.argv[1] == "--yours":
         try:
             for line in yours_open(sys.argv[2], sys.argv[3], sys.argv[4]):

@@ -4,7 +4,7 @@ Feature context is in `.sclaude/local/feature/plan.md`: what we promised and why
 <if:in-blocks>
 **This pull request is read in blocks, one after another, and this round is block <block> of <blocks>: <block-title>.** The cut is `.sclaude/local/feature/review-blocks.json`: each block is a group of the plan's criteria with the files that carry them, read end to end, and the last block is the seams between them. The findings open now are this block's. Fix them on top of the whole branch; a fix that changes what another block's code relies on brings that code in step in the same commit — every later round reads the new commits across the whole pull request, the blocks already read included. When this block's review closes the next one opens; the last is the seams.
 </if:in-blocks>
-The orchestrator captured the PR state as of the start of this step — checks and all comments:
+The orchestrator captured the PR state as of the start of this step — checks and all comments; a part too long to sit here is in a file it names, and is read there:
 
 <block:pr-context>
 
@@ -14,7 +14,14 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
 <if:actions-off>**GitHub Actions is out of this feature's verdict.** It is reviewed here: the project reviews here, or the Actions minutes ran out — with none left every workflow still starts and fails at once — or a GitHub runner lost the network while a review was setting up, this feature's or another's on this machine shortly before, and sclaude no longer counts Actions for this feature. So a red check GitHub Actions ran (`gh pr checks` lists them: the review, the build and lint checks, @claude) is not this step's to act on: do not fix, rerun or report it. `sclaude checks` leaves them out and waits only for the others, such as a deployment. What those workflows checked you check here: before each push, run the checks the change calls for (step 2 below); sclaude runs the project's whole local regression itself before it closes this step.
 </if:actions-off>
-</if:review-local>1. Handle each comment individually. Where you agree, fix it. Where you don't, explain why to me and leave the decision to me; don't argue with the reviewer in comments under your own name.
+</if:review-local>**Before your first edit, in this order** — a fix made before them can undo what an earlier round settled, or miss what I asked for:
+
+- Read `.sclaude/local/feature/plan.md`, the acceptance criteria and its `## Agreed during review` at least.
+<if:pr-context-shown>- Read every open thread whole<if:pr-threads-file>: the snapshot above lists them only by number or by file, and their text, replies included, is in `.sclaude/local/feature/pr/threads.md`</if:pr-threads-file>.
+- For each file you are going to change, read the threads already resolved on it<if:pr-resolved-file>: its section of `.sclaude/local/feature/pr/resolved.md` — the lines of the files that still have open threads are given above; any other file's section you find by its heading there, and a file without one has none</if:pr-resolved-file>. A change that would undo one of them is a reversal, not a fix: put it to me instead of making it.
+</if:pr-context-shown><if:user-request-shown>- Read the issue's `User request` comment<if:user-request-in-file>, in `.sclaude/local/feature/prompt-user-request.md`</if:user-request-in-file><if:user-request-inline>, quoted below where recording a decision in it is described</if:user-request-inline>: what I asked for, in development and review so far.
+</if:user-request-shown>
+1. Handle each comment individually. Where you agree, fix it. Where you don't, explain why to me and leave the decision to me; don't argue with the reviewer in comments under your own name.
 
    **A thread you would leave as it is, you propose to resolve, and resolve it yourself once I say yes.** Don't change the code for it. Ask me through `AskUserQuestion`, one question per thread, in so many words: "I want to resolve this comment on GitHub: <link> — <the finding in a line>. Leaving it because <why>." The options are to resolve it (first, `(Recommended)` when it is your advice), to fix it after all, and to leave it open for me to resolve by hand. When the why does not fit in a question — a trade-off, more than one way to go — write it out in your message before the question: each option and what it means for the business and for the people who use the product (what they would see, what it costs, what risk stays), not only for the code. The question then stays short and points at that text.
 

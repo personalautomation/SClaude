@@ -334,13 +334,18 @@ local_review_run() {
     # the forked code-review skill takes the StructuredOutput tool itself and
     # hands the session back nothing but "Skill execution completed" — the
     # findings stay in the fork (seen live, 2026-11-18: 3 of 4 and 5 of 5 lost).
-    ( cd "$wt" && exec claude -p "$text" --session-id "$pass_session" \
+    # The prompt on stdin rather than as an argument: it carries the plan's
+    # criteria and the block's files, grows with the feature, and Linux will
+    # not start a program with one argument over 128 KiB. A here-string, not
+    # a pipe: exec'ed alone, claude is the process $! names, which a stop
+    # kills; at the end of a pipe it outlived the subshell and went on.
+    ( cd "$wt" && exec claude -p --session-id "$pass_session" \
              --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
                "Bash(git push:*)" "Bash(git commit:*)" \
-             >"$answer.part" 2>>"$(local_review_file "$wt" .log)" </dev/null ) &
+             >"$answer.part" 2>>"$(local_review_file "$wt" .log)" <<<"$text" ) &
     local pid=$!
     # The end told here too, the pass stopped first.
     trap 'kill -TERM "$pid" 2>/dev/null; local_review_mark "$wt" null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130' INT TERM HUP

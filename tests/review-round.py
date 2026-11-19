@@ -799,7 +799,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("review-session-goes-to-the-review",
           'cycle_edge "$wt" review review_run "$SESSION_BY" "$SESSION_HOW"' in RUN, True)
     check("gate-keeps-a-light-session",
-          'run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept' in RUN, True)
+          'run_step "$wt" "$slug" review "$(review_carry_on "$pct" "$fresh")" kept' in RUN, True)
     check("no-round-marker-left", "round_marker" in RUN or "review-round" in RUN, False)
     check("fresh-review-is-round-one", '&& run_rounds "$wt" "$session" 1' in RUN, True)
     # A round carried on in the same session resumes it through run_step, and
@@ -912,7 +912,7 @@ echo "watcher=[$SESSION_WATCHER]"
     script += functions(["review_context", "review_context_log", "review_carry_on", "reversals_file"])
     script += '\nexport HOME="%s"\nheld="$(review_context "%s" "%s")"\necho "$held"\n' % (home, ctx_wt, sid)
     script += 'review_context_log "%s" feat "%s" "carried on" "$held" 2\n' % (ctx_wt, sid)
-    script += 'review_carry_on 12\n'
+    script += 'review_carry_on 12 1; echo; echo "OLD: $(review_carry_on 12)"\n'
     reversals = os.path.join(ctx_wt, ".sclaude/local/feature/review-reversals")
     with open(reversals, "w") as fh:
         fh.write("https://x/pull/1#discussion_r1\tundoes abc\nhttps://x/pull/1#discussion_r2\tundoes def\n")
@@ -924,6 +924,16 @@ echo "watcher=[$SESSION_WATCHER]"
           ["r1", "r2", "# counted "])
     check("context-joined", out.split("\n")[0], "120003 50010 13 1000000")
     check("carry-on-names-the-share", "Your context is at 12% — under the 40%" in out, True)
+    # A round carried on never reaches "before your first edit": what it
+    # lacks is the resolved threads of a file new to it, and the message
+    # sends it there — not through the whole checklist again.
+    sys.path.insert(0, os.path.join(LIB, "review"))
+    import pr_context
+    check("carry-on-sends-to-the-checklist",
+          ("you have already" in out, "`%s`" % pr_context.pr_file("resolved.md") in out,
+           "wrote it again for this round" in out.split("OLD:")[0],
+           "as of this session's start" in out.split("OLD:")[1], "\\`" in out),
+          (True, True, True, True, False))
     try:
         with open(os.path.join(repo, ".sclaude/local/review-context.log")) as fh:
             row = fh.read().rstrip("\n").split("\t")
@@ -942,7 +952,11 @@ echo "watcher=[$SESSION_WATCHER]"
     rot = RUN[RUN.index("review_reopen() {"):]
     rot = rot[:rot.index("\n}\n")]
     check("threshold-decides", 'if why="$(review_keep "$wt" "$session" "$held")"; then' in rot, True)
-    check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept' in rot, True)
+    check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" review "$(review_carry_on "$pct" "$fresh")" kept' in rot, True)
+    # resolved.md is written again before the carried-on round it is named to.
+    refresh = 'pr_context.py" --resolved "$wt" "$pr" "$repo"'
+    check("carry-on-refreshes-resolved",
+          refresh in rot and rot.find(refresh) < rot.find('"$(review_carry_on "$pct" "$fresh")" kept'), True)
     carry = rot[rot.index('review_keep "$wt" "$session" "$held")"; then'):rot.index("      fi\n")]
     check("carry-on-keeps-the-session", "steps.review.session null" in carry, False)
     # One row a session end (session_ended): a round ends with its session.

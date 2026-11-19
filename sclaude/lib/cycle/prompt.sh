@@ -234,8 +234,24 @@ sys.stdout.write(feature_in_history(sys.argv[2], sys.argv[3]))' "$LIB" "$wt" "$S
     retro|retro-again) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt")" ;;
   esac
 
-  python3 "$LIB/cycle/render_prompt.py" "$file" "$PROMPTS" \
+  # The blocks reach render_prompt.py as files, not in its environment: a
+  # variable is held to the same 128 KiB as an argument, and a pull request's
+  # threads or an issue's comments outgrow it — exec then fails and the step
+  # does not start. A block too long to sit in the prompt is spilled by
+  # render_prompt.py into the feature's directory (SCLAUDE_SPILL_ROOT).
+  local blocks name rc=0
+  blocks="$(mktemp -d "${TMPDIR:-/tmp}/sclaude-blocks.XXXXXX")" \
     || die "could not assemble the prompt for step $step"
+  for name in $(compgen -e SCLAUDE_B_); do
+    printf '%s' "${!name}" > "$blocks/${name#SCLAUDE_B_}"
+  done
+  local spill=""
+  [[ -n "$wt" && -d "$wt/.sclaude/local/feature" ]] && spill="$wt"
+  ( for name in $(compgen -e SCLAUDE_B_); do unset "$name"; done
+    SCLAUDE_BLOCKS_DIR="$blocks" SCLAUDE_SPILL_ROOT="$spill" \
+      exec python3 "$LIB/cycle/render_prompt.py" "$file" "$PROMPTS" ) || rc=$?
+  rm -rf -- "$blocks"
+  (( rc == 0 )) || die "could not assemble the prompt for step $step"
   prompt_additions "$step" "${wt:-${REPO:-}}"
 }
 

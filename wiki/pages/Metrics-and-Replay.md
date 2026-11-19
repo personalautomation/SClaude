@@ -59,9 +59,11 @@ with a ✕; a pattern marks a migration among changed code,
 and a place where neither code nor a migration changed is hollow, its
 patterns saying what was touched instead: tests, docs and config, comments. A green line under a file in a round's row says that
 round read it and found nothing (blue and thin: only the last fixes;
-yellow and dashed: a part), so a run of rounds that each found nothing anywhere shows. Beside the round names one icicle sums them all: left of its axis the development's code a round touched, right the code review itself had written — leaning right, review is polishing its own work — and a line for how much the round grew or shrank the code. Threads pile up as dots where review found many, all one size, with +n for those past the row. ✋ marks each time a person stepped in, ringed red where
-they took the recommended answer within seconds. Played back, the map grows
-round by round.
+yellow and dashed: a part), so a run of rounds that each found nothing anywhere shows. Beside the round names one icicle sums them all: left of its axis the development's code a round touched, right the code review itself had written — leaning right, review is polishing its own work — and a line for how much the round grew or shrank the code. Threads pile up as dots where review found many, all one size, with +n for those past the row. ✋ marks each time a person stepped in, ringed where
+they took the recommended answer. A round of a pull request read in review
+blocks is named by its block — "Block 3 · round 7 (131)" — with, in brackets,
+its row in the terminal's review report, and every mark on the map says on
+hover what it means. Played back, the map grows round by round.
 
 It is a diagnosis, not a cure: it shows which parts of the code have had
 enough review and which are still worth it, and leaves the decision with

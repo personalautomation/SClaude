@@ -20,13 +20,12 @@ background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;al
 .rv-m::before{display:none}.rv-m b{font-weight:700;color:var(--ink)}
 .rv-legend .rv-steps::before{display:none}.rv-legend .rv-k:has(svg)::before{display:none}
 .rv-k::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--c);border:1px solid var(--line)}
-.rv-fast{color:var(--human)}
 .rv-body{flex:1;overflow:auto;padding:0 4px 0 0}
 .rv-wait{padding:12px 16px}
 .rv-svg{display:block;font-family:var(--body)}
 .rv-head{position:sticky;top:0;z-index:3}
 .rv-pin{position:sticky;left:0;z-index:2;height:0;overflow:visible;visibility:hidden}.rv-sx .rv-pin{visibility:visible}.rv-pinedge{stroke:var(--line);stroke-width:1}
-.rv-pin .rv-dur,.rv-pin .rv-rs{display:none}.rv-headbg{fill:var(--surface)}
+.rv-pin .rv-dur,.rv-pin .rv-rs,.rv-pin .rv-seq{display:none}.rv-headbg{fill:var(--surface)}
 .rv-col{fill:var(--lane-a,var(--paper));stroke:var(--line);stroke-width:.8}
 .rv-col.odd{fill:var(--lane-b,var(--paper))}
 .rv-file text{font-size:10.5px;fill:var(--muted)}
@@ -53,10 +52,10 @@ background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;al
 .rv-th.missed{stroke:var(--missed);stroke-width:2;stroke-opacity:1}
 .rv-missed line{stroke:var(--missed);stroke-width:3;stroke-linecap:round}
 .rv-hand text{font-size:12px;text-anchor:middle}
-.rv-hand text.rv-hn{font:700 11px var(--body);text-anchor:start;fill:var(--ink)}
+.rv-hand text.rv-hn{font:700 11px var(--body);text-anchor:start;fill:var(--ink);paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round}
 .rv-rl{cursor:help}
-.rv-hand circle{fill:none;stroke:var(--signal);stroke-width:1.5}
-.rv-hand.fast circle{stroke:var(--human);stroke-width:2.5}
+.rv-hand circle{fill:none;stroke:var(--signal);stroke-width:1.5;pointer-events:all}
+.rv-hand .rv-handbg.rv-handbg{fill:var(--surface);stroke:none}
 #rv-chip{position:fixed;right:16px;bottom:16px;z-index:22;font:600 13px var(--body);padding:6px 12px;border-radius:10px;
 border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.15)}
 #rv-chip[hidden]{display:none}

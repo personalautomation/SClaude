@@ -138,9 +138,33 @@ COLUMNS = (
 FIXED_COL, WAITING_COL = 10, 11
 
 
-def heading():
+# The review block a round read, and its number among that block's rounds,
+# when the pull request is read in review blocks (review_blocks.py): "3.7" is
+# block 3's seventh round, as the review's map names it ("Block 3 · round 7",
+# roundName in process_review.js). The column is left out when no round read
+# a block.
+BLOCK_FMT = "%-7s"
+
+
+def block_rounds(groups):
+    """Each round's "<block>.<n>", "" for a round that read no block; None
+    when none did."""
+    if not any(g.get("block") for g in groups):
+        return None
+    seen, out = {}, []
+    for g in groups:
+        b = g.get("block")
+        if b:
+            seen[b] = seen.get(b, 0) + 1
+            out.append("%s.%d" % (b, seen[b]))
+        else:
+            out.append("")
+    return out
+
+
+def heading(blocks=False):
     """The table's two heading lines: the groups over their columns, then the
-    columns."""
+    columns; <blocks> adds the block column after the round's number."""
     spans, widths = [], {}
     for name, fmt, group in COLUMNS:
         width = int(re.sub(r"\D", "", fmt))
@@ -148,16 +172,20 @@ def heading():
     for group in ("find", "fix", "result"):
         spans.append(("── %s " % group).ljust(widths[group], "─"))
     names = " ".join(fmt % name for name, fmt, _ in COLUMNS)
-    return (paint("  %-5s %s" % ("", " ".join(spans)), DIM),
-            paint("  %-5s %s" % ("round", names), DIM))
+    lead = ("%-5s " + BLOCK_FMT) % ("", "") if blocks else "%-5s" % ""
+    first = ("%-5s " + BLOCK_FMT) % ("round", "block") if blocks else "%-5s" % "round"
+    return (paint("  %s %s" % (lead, " ".join(spans)), DIM),
+            paint("  %s %s" % (first, names), DIM))
 
 
-def row(cells, base="", rnd=""):
+def row(cells, base="", rnd="", blk=None):
     """A table row, its waiting findings red and its fixes green once padded:
     the colour codes would otherwise count in the widths. <base> colours the
     rest of the row, cell by cell, so that red and green keep theirs; WAIT is
-    dim."""
+    dim. <blk>, when not None, is the block column's cell."""
     out = [paint("%-5s" % rnd, base) if base and rnd else "%-5s" % rnd]
+    if blk is not None:
+        out.append(paint(BLOCK_FMT % blk, base) if base and blk else BLOCK_FMT % blk)
     for i, ((_, f, _), c) in enumerate(zip(COLUMNS, cells)):
         text = f % c
         if i == WAITING_COL and isinstance(c, int) and c:
@@ -387,37 +415,61 @@ def pass_cost(cwd, session, root=None):
     return summary.get("cost") if summary else None
 
 
-def local_runs(cwd, since=None, root=None):
+def local_runs(cwd, since=None, root=None, pr=None):
     """The review's runs since <since> from the journal, wherever they ran
     (the workflow's, `source: github`, carry no cost here), oldest first,
-    shaped as review_runs gives them; None when the feature has no journal.
-    Read by the journal's own reader (local_review.rows), so both agree on
-    what a run is. Each carries the cost of its passes (pass_cost), None when
-    none of them has one to read."""
+    shaped as review_runs gives them (journal_runs); None when the feature has
+    no journal. Each carries the cost of its passes (pass_cost), None when none of them
+    has one to read."""
     path = os.path.join(cwd, JOURNAL)
     if not os.path.exists(path):
         return None
+    out = journal_runs(path, since, pr)
+    for r in out:
+        # A pass that ran and was not recorded (spent) is priced too: on the
+        # run of its range, or as a run of its own, with nothing found.
+        costs = [c for c in (pass_cost(cwd, s, root) for s in r.pop("sessions")) if c is not None]
+        r["cost"] = sum(costs) if costs else None
+        del r["rows"]
+    return out
+
+
+def journal_runs(path, since=None, pr=None):
+    """The journal's runs since <since> (and of pull request <pr>), oldest
+    first, unpriced, each with the journal rows of its passes (`rows`).
+    Read by the journal's own reader (local_review.rows), so both agree on
+    what a pass is. The one grouping of the journal: the report's rows are
+    these, and so are the review map's rounds (rounds_of in review_map.py),
+    so a round there and a row here carry one number."""
+    rows = [r for r in journal_rows(path, with_spent=True, pr=pr)
+            if parse(r.get("at")) is not None and after(parse(r.get("at")), since)]
     # The passes over one range — a capped pass and the ones that follow it
     # for the rest — are one review, as the workflow's run is one however
-    # many findings it brings: one run, from the first pass's start.
+    # many findings it brings: one run, from the first pass's start. Unless
+    # the review block changed: every block's first read starts from the
+    # same base, and a block read on the head the last one left is a run of
+    # its own (a pass with no block changes none).
     out, last = [], None
-    # A pass that ran and was not recorded (spent) is priced too: on the run
-    # of its range, or as a run of its own, with nothing found.
-    for row in journal_rows(path, with_spent=True):
-        if not after(parse(row.get("at")), since):
-            continue
+    for row in rows:
         key = (row.get("base"), row.get("head"), row.get("run"))
-        cost = pass_cost(cwd, row.get("session"), root) if row.get("session") else None
-        if out and key == last:
+        block = row.get("block")
+        sessions = [row["session"]] if row.get("session") else []
+        if out and key == last and (out[-1]["block"] == block or None in (out[-1]["block"], block)):
             out[-1]["seconds"] += float(row.get("seconds") or 0)
             out[-1]["stopped"] = out[-1]["stopped"] and bool(row.get("spent"))
             out[-1]["refused"] += [row["refused"]] if row.get("refused") else []
-            if cost is not None:
-                out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
+            out[-1]["sessions"] += sessions
+            out[-1]["rows"].append(row)
+            # From its earliest pass, whichever the journal wrote first.
+            out[-1]["start"] = min(out[-1]["start"], parse(row["at"]))
+            out[-1]["block"] = out[-1]["block"] or block
             continue
         out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
-                    "running": False, "cost": cost, "head": row.get("head"),
+                    "running": False, "sessions": sessions, "rows": [row], "head": row.get("head"),
                     "source": row.get("source") or "local",
+                    # The review block the run read (SCLAUDE_REVIEW_BLOCK),
+                    # None when the pull request is read whole.
+                    "block": block,
                     # No pass of it left a recorded answer — stopped, or its
                     # answer not recorded: no round that found nothing, and
                     # no word for the trend.
@@ -426,7 +478,10 @@ def local_runs(cwd, since=None, root=None):
                     # REFUSED, journaled by spent), one each.
                     "refused": [row["refused"]] if row.get("refused") else []})
         last = key
-    return out
+    # Grouped in the journal's order, where one review's passes follow one
+    # another; then in order of time: a workflow's run is written when the
+    # report learns of it (github_runs), after local passes that began later.
+    return sorted(out, key=lambda r: r["start"])
 
 
 def rounds(found, runs):
@@ -436,7 +491,7 @@ def rounds(found, runs):
     if runs:
         out = [{"at": r["start"], "seconds": r.get("seconds"), "running": r["running"],
                 "cost": r.get("cost"), "head": r.get("head"), "threads": [],
-                "stopped": bool(r.get("stopped"))}
+                "stopped": bool(r.get("stopped")), "block": r.get("block")}
                for r in runs]
         for t in found:
             i = 0
@@ -748,7 +803,10 @@ def main():
         on_github = review_runs(cwd, branch, since) or []
         github_runs(os.path.join(cwd, JOURNAL), on_github, pr)
         running = [r for r in on_github if r["running"]]
-    bot = (local_runs(cwd, since) or []) + running
+    # The pull request's rows, from its opening on (a row from before the
+    # journal named its pull request carries none): the review map reads the
+    # same (rounds_of), so a round there and a row here carry one number.
+    bot = (local_runs(cwd, since, pr=pr) or []) + running
     sources = {r.get("source") or "local" for r in bot}
     moved = sources == {"github", "local"}
     groups = rounds(found, bot)
@@ -796,7 +854,8 @@ def main():
 
     if groups:
         print("")
-        for line in heading():
+        blocks = block_rounds(groups)
+        for line in heading(blocks is not None):
             print(line)
         who = fixers(groups, people)
         # The fixing cost of each run, summed over the sessions that answered
@@ -869,8 +928,9 @@ def main():
         # review stands, and review_close_gate says no more of it.
         last = len(table) - 1 if opened else None
         for i, cells in enumerate(table):
-            print(row(cells, base=YELLOW + ";" + BOLD, rnd=str(i + 1)) if i == last
-                  else row(cells, rnd=str(i + 1)))
+            blk = blocks[i] if blocks else None
+            print(row(cells, base=YELLOW + ";" + BOLD, rnd=str(i + 1), blk=blk) if i == last
+                  else row(cells, rnd=str(i + 1), blk=blk))
         stopped = [str(i + 1) for i, g in enumerate(groups) if g.get("stopped") and not g["threads"]]
         if stopped:
             print("  Round%s %s left no recorded answer (stopped, or its answer not recorded): "
@@ -896,7 +956,7 @@ def main():
             return show(sum(known)) if known else ""
         print(row(("", column("ftook", hours), column("fcost", dollars), len(found), near_all,
                    len(repeats), "", column("xtook", hours), column("xcost", dollars),
-                   nofix, fixed, opened), rnd="total"))
+                   nofix, fixed, opened), rnd="total", blk="" if blocks else None))
         print("")
     else:
         print("  No review threads on the pull request.")

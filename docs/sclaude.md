@@ -429,9 +429,10 @@ conversation still going at most once a minute.
 
 **The review's map** (`sclaude/lib/review/review_map.py`, drawn by
 `process_review.js` under a review step, served at `/__sclaude/flow/review`)
-logs nothing of its own: the rounds are the journal's passes on the pull
-request (a head read again is one round, unless the review block changed;
-a stopped pass on a head of its own one too),
+logs nothing of its own: the rounds are the review report's rows
+(`journal_runs`, the one grouping of the journal's passes on the pull
+request, in order of time; a round on a head the tree no longer has is not
+drawn and keeps its number),
 the fixes the hunks of `git diff` from one round's head to the next one's
 (the last to the tree's HEAD) in the files the branch's own commits changed
 — a merge of main between rounds is no fix —, placed by their line in the
@@ -2333,7 +2334,17 @@ the report is one review run, read in the cycle's order: `find` (when the
 run started, how long it took, what it cost, what it found and how much of
 that sat on earlier fixes or repeated a decline), `fix` (the session that
 answered those findings, its time and cost, and what it declined — the
-fix is where that is decided) and `result` (fixed, waiting). The session that answered a run is the one with a launch after
+fix is where that is decided) and `result` (fixed, waiting). A pull request
+read in review blocks adds `block` after the round's number: the block the
+run read (the journal's `block`) and its count among that block's runs,
+`<block>.<n>` — what the map calls "Block <block> · round <n>"
+(`block_rounds`); the column is left out when no run read a block. The
+runs are grouped once, by `journal_runs` — the pull request's rows from its
+opening on; the passes over one range, one after another in the journal, are
+one run, a block's first read on the head the last block left is a run of
+its own, and the runs go in order of time — and the
+map's rounds are these runs (`rounds_of` in `review_map.py`), so "Block 3 ·
+round 7 (131)" there is row 131, `3.7`, here. The session that answered a run is the one with a launch after
 the run began and before the next one did — its start, each launch that gave
 its cost and the launch taken up again (`resumed`) — every round begins a
 launch, since the session ends on its marker and the gate brings it back —
@@ -2392,9 +2403,11 @@ session.
 **A second pull request starts its own report.** A feature reopened after
 its merge — a retrospective's fixes, a rollback — goes on under a new pull
 request, in the same state and journal. The report counts only the review
-sessions still going when that pull request opened, and the review runs after
-it (`pr_created` in `review_report.py`, less two minutes for this machine's
-clock); when that time cannot be read, no verdict is written. The verdict and
+sessions still going when that pull request opened, and the review runs of
+that pull request after it (`pr_created` in `review_report.py`, less two
+minutes for this machine's clock; a journal row names its pull request, one
+written before rows did is told by the time alone); when that time cannot be
+read, no verdict is written. The review's map reads the runs the same way. The verdict and
 its warning are kept per pull request (`steps.review.stuck_pr`, `stuck_said`).
 A rollback or QA's hand-back reopens the feature at step 4, whose session
 opens the new pull request, so step 4 records it on its way in and before it

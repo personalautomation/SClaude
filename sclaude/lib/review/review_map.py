@@ -149,45 +149,41 @@ def repo_of(tree, state):
 # --- the rounds ----------------------------------------------------------------
 
 def rounds_of(tree, pr):
-    """The journal's passes on this pull request that reviewed a head the
-    tree has, in order of time; a head read again (a retry, a rerun) is one
-    round, unless the review block changed — the next block's first pass on
-    a head the last one left clean is that block's round (a pass with no
-    block, a GitHub run, changes none). A pass stopped or not taken
-    (`spent`, spent() in local_review.py) on a head of its own is a round
-    too, `stopped`, as the report counts it: it found and read nothing that
-    counts, and the commits after it are its fixes."""
-    rows = [r for r in jsonl(os.path.join(tree, JOURNAL))
-            if r.get("head") and ts(r.get("at")) is not None and (not pr or str(r.get("pr") or pr) == str(pr))]
-    rows.sort(key=lambda r: ts(r["at"]))
-    out = []
-    for r in rows:
-        if out and out[-1]["head"] == r["head"] and (out[-1]["block"] == r.get("block")
-                                                     or None in (out[-1]["block"], r.get("block"))):
-            out[-1]["block"] = out[-1]["block"] or r.get("block")
-            out[-1]["seconds"] += int(r.get("seconds") or 0)
-            if r.get("session"):
-                (out[-1]["spent"] if r.get("spent") else out[-1]["sessions"]).append(r["session"])
-            if r.get("spent"):
-                continue
-            out[-1]["stopped"] = False
-            # The head's last pass says whether the round said all it found:
-            # `more` is a pass that stopped at its cap.
-            out[-1]["more"] = bool(r.get("more"))
-            if r.get("new") is not None:
-                out[-1]["new"] = (out[-1].get("new") or 0) + r["new"]
+    """The review's rounds on this pull request: the review report's rows
+    (journal_runs in review_report.py — the one grouping of the journal),
+    in order of time, each with its row's number (`seq`) and its count among
+    its block's rows (`bseq`, the report's block column, "3.7"). A round on
+    a head the tree no longer has is not drawn, and keeps its numbers. A
+    run whose passes were all stopped or not taken (`spent`, spent() in
+    local_review.py) is a round too, `stopped`, as the report counts it: it
+    found and read nothing that counts, and the commits after it are its
+    fixes."""
+    # As the report reads them: the pull request's rows, from its opening on.
+    since = review_report.pr_created(tree, pr) if pr else None
+    runs = review_report.journal_runs(os.path.join(tree, JOURNAL), since, pr or None)
+    out, count = [], {}
+    for j, run in enumerate(runs):
+        block = run["block"]
+        if block is not None:
+            count[block] = count.get(block, 0) + 1
+        if git(tree, "cat-file", "-e", run["head"] + "^{commit}") is None:
             continue
-        if git(tree, "cat-file", "-e", r["head"] + "^{commit}") is None:
-            continue
-        out.append({"at": r["at"], "t": ts(r["at"]), "head": r["head"], "seconds": int(r.get("seconds") or 0),
-                    "source": r.get("source") or "local", "new": None if r.get("spent") else r.get("new"),
-                    "resolved": r.get("resolved"), "block": r.get("block"), "read": r.get("read"),
-                    "more": False if r.get("spent") else bool(r.get("more")), "stopped": bool(r.get("spent")),
-                    "sessions": [r["session"]] if r.get("session") and not r.get("spent") else [],
-                    "spent": [r["session"]] if r.get("session") and r.get("spent") else []})
+        rows = run["rows"]
+        first = min(rows, key=lambda r: ts(r["at"]))
+        done = [r for r in rows if not r.get("spent")]
+        news = [r["new"] for r in done if r.get("new") is not None]
+        out.append({"at": first["at"], "t": ts(first["at"]), "head": run["head"], "seconds": int(run["seconds"]),
+                    "source": run["source"], "new": sum(news) if news else None,
+                    "resolved": rows[0].get("resolved"), "block": block, "read": rows[0].get("read"),
+                    # The last pass says whether the round said all it found:
+                    # `more` is a pass that stopped at its cap.
+                    "more": bool(done[-1].get("more")) if done else False, "stopped": not done,
+                    "sessions": [r["session"] for r in done if r.get("session")],
+                    "spent": [r["session"] for r in rows if r.get("spent") and r.get("session")],
+                    "seq": j + 1, "bseq": count[block] if block is not None else None})
     # A GitHub run on a head read the whole pull request: every round on
     # that head is GitHub's, whatever a local pass beside it opened.
-    github = {r["head"] for r in rows if r.get("source") == "github" and not r.get("spent")}
+    github = {r["head"] for run in runs for r in run["rows"] if r.get("source") == "github" and not r.get("spent")}
     for r in out:
         if r["head"] in github:
             r["source"] = "github"

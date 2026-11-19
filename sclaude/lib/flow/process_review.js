@@ -19,8 +19,8 @@
 //     rounds rewrote those lines, weighted by how many; its pattern: the
 //     kind of file (tests, schema, docs and config), dots for comments;
 //   rows where nothing happened to it: a thin stem; a removed file: a ✕;
-//   dots: the threads, where they were posted; ✋ the person, ringed red
-//     where the answer was the recommended one given within seconds;
+//   dots: the threads, where they were posted; ✋ the person, ringed amber
+//     where the answer was the recommended one;
 //   behind the rows' names, and in a folded block: one icicle summing the
 //     files, the development's code left of an axis and the review's own
 //     right, and a line for how much each round grew or shrank the code.
@@ -31,7 +31,6 @@ const reviewMap = (() => {
     reversal: [6, 'would undo a fix'], open: [222, 'open'],
     side: [210, 'no thread'], moved: [190, 'moved'], asked: [75, 'asked for by the person'],
   };
-  const FAST = 20;  // seconds: an answer quicker than this is a reflex
   const panel = document.getElementById('rv');
   const chip = document.getElementById('rv-chip');
   const body = panel.querySelector('.rv-body');
@@ -194,7 +193,8 @@ const reviewMap = (() => {
     const over = b.lines != null && b.lines > data.blockSize;
     // The block it was cut from: 1a from 1, 1a2 from 1a.
     const fromParent = /[a-z]\d+$/.test(b.id) ? b.id.replace(/\d+$/, '') : /[a-z]$/.test(b.id) ? b.id.slice(0, -1) : '';
-    return '<div class="t-f">Block ' + h(b.id) + ': ' + h(b.title) + '</div>'
+    return '<div class="t-r muted">' + (folded.has(b.id) ? '▸ — folded: every file of it in one icicle; click to unfold' : '▾ — open: each file of it in its own column; click to fold') + '</div>'
+      + '<div class="t-f">Block ' + h(b.id) + ': ' + h(b.title) + '</div>'
       + (say ? '<div class="t-r"><b class="rv-st-' + st + '">' + say + '</b> <span class="muted">— the colour of its name</span></div>' : '')
       + '<div class="t-r">' + (b.lines != null ? '<b' + (over ? ' class="rv-over"' : '') + '>' + b.lines + ' changed lines</b>' + (over ? ' — over the ' + data.blockSize + ' one pass reads whole' : ' of the ' + data.blockSize + ' one pass reads whole')
         + (b.generated ? ' (+' + b.generated + ' generated)' : '') + ' · ' : '') + b.files.length + ' file' + (b.files.length === 1 ? '' : 's')
@@ -209,20 +209,26 @@ const reviewMap = (() => {
         + (per.length > 1 ? '<div class="t-r">threads in its last rounds: ' + per.join(' → ') + '</div>' : '')
         + (asks.length ? '<div class="t-r">rounds that mostly added what you asked for: ' + asks.join(', ')
           + ' <span class="muted">— threads after them are partly about that new code</span></div>' : '')
-        : '<div class="t-r muted">No round of its own yet' + (fromParent && fromParent !== b.id ? ' — block ' + h(fromParent) + '\'s rounds read it before the split' : '') + '</div>')
-      + '<div class="t-r muted">Click to ' + (folded.has(b.id) ? 'unfold' : 'fold') + ' it.</div>';
+        : '<div class="t-r muted">No round of its own yet' + (fromParent && fromParent !== b.id ? ' — block ' + h(fromParent) + '\'s rounds read it before the split' : '') + '</div>');
   }
   // A round's name: a pull request read in review blocks counts its rounds
   // afresh in each block, so the block comes first — "Block 2 · round 3";
-  // read whole, "Round 3". `short` is the number alone, for small labels.
+  // read whole, "Round 3" — both numbered as the review report numbers its
+  // rows and its block column (`seq`, `bseq`, rounds_of in review_map.py).
+  // `short` is the number alone, for small labels.
   function roundName(i, short) {
     const rs = (data && data.rounds) || [];
     const r = rs[i];
-    if (!r) return short ? String(i + 1) : 'Round ' + (i + 1);
-    if (!r.block) return short ? String(i + 1) : 'Round ' + (i + 1);
-    let k = 0;
-    for (let j = 0; j <= i; j++) if (rs[j].block === r.block) k++;
-    return short ? r.block + '.' + k : 'Block ' + r.block + ' · round ' + k;
+    const n = String(r ? r.seq : i + 1);
+    if (!r || !r.block) return short ? n : 'Round ' + n;
+    return short ? r.block + '.' + r.bseq : 'Block ' + r.block + ' · round ' + r.bseq;
+  }
+  // A round read in a block, its number across the whole review after its
+  // name — "Block 3 · round 7 (131)" — the number the review report gives it
+  // in the terminal (`seq`). Read whole, the name is that number already.
+  function roundSeq(i) {
+    const r = ((data && data.rounds) || [])[i];
+    return r && r.block ? ' (' + r.seq + ')' : '';
   }
   function dur(s) {
     if (s == null) return '';
@@ -320,7 +326,6 @@ const reviewMap = (() => {
       + 'hover the title, The review, for them.\n\nExactly: +' + rAdd + ' −' + rDel
       + (aAdd || aDel ? '; asked for +' + aAdd + ' −' + aDel : '') + (mAdd || mDel ? '; moved +' + mAdd + ' −' + mDel : '');
     const cost = rounds.reduce((a, r) => a + (r.cost || 0), 0);
-    const fast = hands.filter((x) => x.rec && x.waited != null && x.waited <= FAST).length;
     const rec = hands.filter((x) => x.rec).length;
     return '<b>PR #' + h(d.pr) + '</b> · ' + rounds.length + ' round' + (rounds.length === 1 ? '' : 's')
       + (cost ? ' · $' + cost.toFixed(2) : '')
@@ -328,7 +333,7 @@ const reviewMap = (() => {
       // The person's asks and moved code are in the title's note, beside
       // the blocks' table: the header stays one line (the user's word).
       + ' · <span class="rv-lines" title="' + h(linesSay) + '">' + pm(rAdd, rDel) + ' in review fixes</span>'
-      + ' · ✋ ' + hands.length + (rec ? ' (' + rec + ' recommended' + (fast ? ', <b class="rv-fast">' + fast + ' within ' + FAST + ' s</b>' : '') + ')' : '');
+      + ' · ✋ ' + hands.length + (rec ? ' (' + rec + ' recommended)' : '');
   }
   function draw() {
     if (!shown || !data) return;
@@ -493,6 +498,16 @@ const reviewMap = (() => {
     files.forEach((f) => { if (isFold(f)) foldN[blockOf[f]] = (foldN[blockOf[f]] || 0) + 1; });
     const weight = files.map((f) => touched.has(f) && !isFold(f)
       ? Math.max(...stackOf(f).map((g) => Math.sqrt(Math.max(1, (devf[g] || {}).add || reviewed[g] || 1)))) : 0);
+    // Each round's time, to the next one or to now.
+    const now = until != null ? until / 1000 : Date.now() / 1000;
+    rounds.forEach((r, i) => {
+      const next = i + 1 < d.rounds.length ? d.rounds[i + 1].t : now;
+      r._len = Math.max(r.seconds || 0, Math.min(next, now) - r.t);
+    });
+    // The margin keeps its width: a long name runs under the ✋ of the
+    // round's answers, which is drawn over it (the user's word, 2026-11-19).
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = '700 11.5px ' + getComputedStyle(body).fontFamily;
     const GUT = 176, HEAD = hasBlocks ? 92 : 74, GAP = 2, BGAP = 8, MINW = 14, width = Math.max(320, body.clientWidth - 8);
     const total = weight.reduce((a, w) => a + w, 0) || 1;
     const groupsN = hasBlocks ? new Set(files.map((f) => blockOf[f] || 999)).size : 1;
@@ -536,13 +551,8 @@ const reviewMap = (() => {
     d.threads.forEach((t) => { if (t.rid) byRid[t.rid] = t; });
     // Heights: the development as tall as the log of its time, each round
     // the same way, to the next one.
-    const now = until != null ? until / 1000 : Date.now() / 1000;
     const tall = (s) => 34 + 24 * Math.log2(1 + Math.max(0, s) / 300);
     const devLen = d.dev && d.dev.t ? rounds[0].t - d.dev.t : 0;
-    rounds.forEach((r, i) => {
-      const next = i + 1 < d.rounds.length ? d.rounds[i + 1].t : now;
-      r._len = Math.max(r.seconds || 0, Math.min(next, now) - r.t);
-    });
     // All of it fits the panel's height while it can: the height left under
     // the files' names (less a horizontal scroll bar, when the columns are
     // wider than the panel) is shared by the rows in proportion, a row
@@ -596,7 +606,7 @@ const reviewMap = (() => {
       lane = (lane + 1) % 2;
       svg.push('<rect class="rv-col' + (lane ? ' odd' : '') + '" x="' + c[0].toFixed(1) + '" y="' + top + '" width="' + c[1].toFixed(1) + '" height="' + (H - top - 6) + '"/>');
       // A file the development did not write: nothing above it.
-      if (dv.add) svg.push('<g class="rv-dev"><title>' + h(f) + ' — +' + dv.add + ' lines written before the review (' + dv.code + ' code, ' + dv.comment + ' comment)\n\nBeige: the development\'s code; the stronger stripes, where in the file its lines are</title>'
+      if (dv.add) svg.push('<g class="rv-dev" data-tip-mark="' + devColour(1) + '"><title>▬ — the development\'s code, written before the review; the stronger stripes, where in the file its lines are\n' + h(f) + ' — +' + dv.add + ' lines (' + dv.code + ' code, ' + dv.comment + ' comment)</title>'
         + '<rect x="' + c[0].toFixed(1) + '" y="' + top + '" width="' + c[1].toFixed(1) + '" height="' + bandH.toFixed(1) + '" fill="' + devColour(0.45) + '"/>'
         + (dv.proj && axisOf[f] ? dv.proj.map(([a, b]) => [a, b, true]) : dv.regions).map(([x, n, onAxis]) => {
           const x0 = onAxis ? ax(f, x) : at(0, f, x);
@@ -613,7 +623,7 @@ const reviewMap = (() => {
       });
       const lift = (lines.length - 1) * LH / 2;
       const tx = c[0] + c[1] / 2 + 3 - lift * 0.819, ty = HEAD - 6 - lift * 0.574;
-      head.push('<g class="rv-file' + (touched.has(f) ? '' : ' rv-quiet') + '"><title>' + h(stack.join('\n↓ ')) + (stack.length > 1 ? '\n\nThe fixes moved on from one file to the next: each goes on under the one before, in this column.' : '')
+      head.push('<g class="rv-file' + (touched.has(f) ? '' : ' rv-quiet') + '"><title>' + h(stack.join('\n↓ ')) + (stack.length > 1 ? '\n\n↓ — the fixes moved on from one file to the next: each goes on under the one before, in this column.' : '')
         + (touched.has(f) ? '' : '\n\nThe review fixed nothing here and posted no thread.')
         + '</title><text transform="translate(' + tx.toFixed(1) + ',' + ty.toFixed(1) + ') rotate(-55)">'
         + lines.map((l, k) => '<tspan x="0"' + (k ? ' dy="' + LH + '"' : '') + '>' + h(l) + '</tspan>').join('') + '</text></g>');
@@ -623,7 +633,7 @@ const reviewMap = (() => {
         const y = ys[split[g]];
         if (y == null) return;
         const nm = g.split('/').pop();
-        nexts.push('<g class="rv-next"><title>From here this column is ' + h(g) + ': the fixes of ' + h(before[g]) + ' went on there</title>'
+        nexts.push('<g class="rv-next"><title>↓ — the column goes on in the next file: from here it is ' + h(g) + ': the fixes of ' + h(before[g]) + ' went on there</title>'
           + '<line x1="' + c[0].toFixed(1) + '" x2="' + (c[0] + c[1]).toFixed(1) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>'
           + '<text x="' + (c[0] + 2).toFixed(1) + '" y="' + (y - 2).toFixed(1) + '">↓ ' + h(nm.length > Math.max(4, c[1] / 5.5) ? nm.slice(0, Math.max(3, Math.floor(c[1] / 5.5))) + '…' : nm) + '</text></g>');
       });
@@ -655,7 +665,7 @@ const reviewMap = (() => {
       // Round n of the review, the block of the pull request it read when
       // it was read in blocks, how long until the next round, where it ran,
       // what it found and what the conversations in it cost.
-      svg.push('<g class="rv-rl"><title>' + roundName(i) + (r.block ? ' — the pull request is read in review blocks; this round read block ' + h(r.block) + ', whose rounds are counted from 1' : '')
+      svg.push('<g class="rv-rl"><title>' + roundName(i) + roundSeq(i) + (r.block ? '\nThe pull request is read in review blocks: each block counts its rounds from 1; in brackets, the round\'s number across the whole review, as the review report numbers it' : '')
         + '\n' + dur(r._len) + ' until ' + (i + 1 < d.rounds.length ? 'the next round' : 'now')
         + '\nThe review ran ' + (r.source === 'github' ? 'on GitHub, in the project\'s workflow' : 'on this machine')
         + (r.stopped ? '\nStopped: the pass left no recorded answer, so it found and read nothing that counts; the commits after it are its fixes' : '')
@@ -663,7 +673,7 @@ const reviewMap = (() => {
         + (r.cost ? '\n$' + r.cost.toFixed(2) + ': its passes and the fixes of what it found, as the review report prices them' : '')
         + (r.seen ? '\nOpened ' + r.seen.length + ' of the ' + files.length + ' files on the map (pale icicles: code it never opened)' : r.source === 'github' ? '\nWhat a GitHub run read is not known here' : '')
         + '\n\nBehind the name, every file summed in one icicle: left of its axis the development\'s code this round touched, right the review\'s own, coloured by how their threads ended; the line leans right where the round grew the code, left where it shrank it, ' + (dark() ? 'lighter' : 'darker') + ' the more threads it posted' + '</title>'
-        + '<text class="rv-rt" x="6" y="' + (ys[i] + 15) + '">' + roundName(i) + '<tspan class="rv-dur"> · ' + dur(r._len) + '</tspan></text>'
+        + '<text class="rv-rt" x="6" y="' + (ys[i] + 15) + '">' + roundName(i) + (r.block ? '<tspan class="rv-seq">' + roundSeq(i) + '</tspan>' : '') + '<tspan class="rv-dur"> · ' + dur(r._len) + '</tspan></text>'
         + (two(i + 1) ? '<text class="rv-rs" x="6" y="' + (ys[i] + 29) + '">' + (r.stopped ? 'stopped, no answer' : r.source === 'github' ? 'on GitHub' : 'on this machine')
           + (r.new != null ? ' · ' + r.new + ' found' : '') + (r.cost ? ' · $' + r.cost.toFixed(2) : '') + '</text>' : '') + '</g>');
     });
@@ -679,7 +689,7 @@ const reviewMap = (() => {
       // no part of block 1.
       const tail = /\d$/.test(e.split) ? /^[a-z]$/ : /^\d+$/;
       const parts = next.filter((b) => b.id.startsWith(e.split) && tail.test(b.id.slice(e.split.length))).map((b) => b.id);
-      svg.push('<g class="rv-cut" data-cut="' + j + '" data-r="' + i + '"><title>Block ' + h(e.split) + ' split into ' + h(parts.join(', '))
+      svg.push('<g class="rv-cut" data-cut="' + j + '" data-r="' + i + '"><title>✂ — a block split: block ' + h(e.split) + ' split into ' + h(parts.join(', '))
         + ' before this round: click for what happened</title>'
         + '<line x1="0" x2="' + W + '" y1="' + ys[i] + '" y2="' + ys[i] + '"/>'
         + '<rect x="0" y="' + (ys[i] - 13) + '" width="' + W + '" height="17"/>'
@@ -969,8 +979,6 @@ const reviewMap = (() => {
     // (the user's word, 2026-11-17): as wide as the longest name, so the
     // durations after it stay on the map and scroll away; the summed
     // icicle drawn again to that width behind them.
-    const measure = document.createElement('canvas').getContext('2d');
-    measure.font = '700 11.5px ' + getComputedStyle(body).fontFamily;
     const pinW = Math.min(GUT, Math.ceil(Math.max(measure.measureText('Development').width, ...rounds.map((r, i) => measure.measureText(roundName(i)).width))) + 12);
     const [pinBody, pinNet] = summed((x) => fi[x.path] != null, (t) => fi[t.path] != null, devAdd, 0, pinW - 4, 'rv-sumi', '');
     const pin = '<rect class="rv-headbg" x="0" y="' + top + '" width="' + pinW + '" height="' + (H - top) + '"/>' + pinBody + svg.slice(sumAt, rowsEnd).join('') + pinNet
@@ -1252,7 +1260,7 @@ const reviewMap = (() => {
       // a line across it and a ✕, where the code went said on hover.
       let end = '';
       if (isGone) {
-        const why = 'File removed by the fixes of ' + roundName(p.goneAt - 1).toLowerCase() + ': ' + p.files.join(', ')
+        const why = '✕ — file removed by the fixes of ' + roundName(p.goneAt - 1).toLowerCase() + ': ' + p.files.join(', ')
           + (p.movedTo.length ? '\nIts code was moved to ' + p.movedTo.join(', ') : '');
         end = '<g class="rv-gone"><title>' + h(why) + '</title><line x1="' + f1(p.l - 1) + '" x2="' + f1(p.r + 1) + '" y1="' + f1(y1 - 0.75) + '" y2="' + f1(y1 - 0.75) + '"/>'
           + '<text x="' + f1(p.cx) + '" y="' + f1(y1 + 8) + '">✕</text></g>';
@@ -1306,6 +1314,7 @@ const reviewMap = (() => {
     const CLEAN = {whole: 3, all: 3, delta: 2, part: 1.4};
     const SAY = {whole: 'read the whole file', all: 'read all its change (a whole read of the block)',
       delta: 'read the last fixes\' change in it', part: 'looked at a part of it'};
+    const GLYPH = {whole: '━', all: '━', delta: '─', part: '┄'};
     const LINE = {whole: 'a thick green line', all: 'a thick green line', delta: 'a thin blue line', part: 'a dashed yellow line'};
     // Where an icicle goes on through a row — its fix's row, the pale rows
     // under it — the column was plainly opened: no strip. The row it closes
@@ -1329,8 +1338,8 @@ const reviewMap = (() => {
       Object.entries(best).forEach(([c, b]) => {
         const col = cols[c], w = CLEAN[b.k], y = ys[ri + 1] - w / 2 - 1;
         svg.push('<line class="rv-clean rv-clean-' + b.k + '" x1="' + f1(col[0] + 1) + '" x2="' + f1(col[0] + col[1] - 1)
-          + '" y1="' + f1(y) + '" y2="' + f1(y) + '" style="stroke-width:' + w + '"><title>' + h(roundName(ri)) + ' ' + SAY[b.k]
-          + ' and found nothing there:\n' + h(b.f.join('\n')) + '\n\nDrawn as ' + LINE[b.k] + ' under the file, in that round\'s row</title></line>');
+          + '" y1="' + f1(y) + '" y2="' + f1(y) + '" style="stroke-width:' + w + '" data-tip-mark="stroke"><title>' + GLYPH[b.k] + ' — nothing found: ' + LINE[b.k] + ' under the file, in the row of the round that read it\n' + h(roundName(ri)) + ' ' + SAY[b.k]
+          + ':\n' + h(b.f.join('\n')) + '</title></line>');
       });
     });
     // A folded block: one icicle of all its files, drawn as the one behind
@@ -1364,13 +1373,13 @@ const reviewMap = (() => {
       const shut = q.files.every(isFold) && idOfN[blockOf[q.files[0]]];
       const moved = src.joutMoved && src.joutMoved.has(q);
       const out = mark(id + '-out', id + '-in', src.cx, y, '↗',
-        'Goes on in ' + there + ' (' + roundName(q.ri).toLowerCase() + '): ' + (moved ? 'its code was moved there' : 'a reply says its thread was fixed there') + '.\nClick to go there'
+        '↗ — goes on in another file: ' + there + ' (' + roundName(q.ri).toLowerCase() + '): ' + (moved ? 'its code was moved there' : 'a reply says its thread was fixed there') + '.\nClick to go there'
         + (shut ? ', opening block ' + shut : '') + '.', 1);
       const t = src.joutBy && src.joutBy.get(q);
       svg.push(shut ? out.replace('<a class="rv-jump"', '<a class="rv-jump" data-unfold="' + h(shut) + '" data-r="' + q.ri + '" data-file="' + h((t && t.fixedIn && q.files.find((f) => t.fixedIn.files.includes(f))) || q.files[0]) + '" data-rid="' + h(t ? t.rid : '') + '"') : out);
       if (shut) return;
       svg.push(mark(id + '-in', id + '-out', q.l - 9, y, '↘',
-        'Came from ' + here + ' (' + roundName(src.ri).toLowerCase() + '): ' + (moved ? 'its code was moved here' : 'a reply says its thread was fixed here') + '.\nClick to see where it left.', -1));
+        '↘ — came from another file: ' + here + ' (' + roundName(src.ri).toLowerCase() + '): ' + (moved ? 'its code was moved here' : 'a reply says its thread was fixed here') + '.\nClick to see where it left.', -1));
     }));
     // A check that missed: a round read a fixed problem's chain whole,
     // found nothing and closed it, and a later round found a problem on the
@@ -1383,7 +1392,7 @@ const reviewMap = (() => {
       const q = placeOf.get(d.hunks[t.of]);
       if (!q || q.files.every(isFold)) return;
       const y = (ys[t.missed] + ys[t.missed + 1]) / 2;
-      svg.push('<g class="rv-missed"><title>' + h(roundName(t.missed)) + ' read this fix and passed it; '
+      svg.push('<g class="rv-missed" data-tip-mark="stroke"><title>━ — the purple bar: a check that missed\n' + h(roundName(t.missed)) + ' read this fix and passed it; '
         + h(roundName(t.r).toLowerCase()) + ' then found a problem on the lines it wrote:\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title)
         + '</title><line x1="' + f1(q.l - 3) + '" x2="' + f1(q.r + 3) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/></g>');
     });
@@ -1426,24 +1435,22 @@ const reviewMap = (() => {
       shown.forEach((t, k) => {
         const y = ys[p.r] + TOP + k * STEP;
         svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + (t.missed != null ? ' missed' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
-          + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '"><title>' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
-          + (t.by === 'person' ? '\nyour thread' : '')
+          + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '" data-tip-mark="fill"><title>● — a review thread, its colour how it ended\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
+          + (t.by === 'person' ? '\nThe thick ring: your own thread' : '')
           + (t.missed != null ? '\nThe purple ring: on lines a fix wrote that ' + roundName(t.missed).toLowerCase() + ' read and passed — the check missed it' : '')
-          + '\nThe dot\'s colour: how the thread ended' + (t.by === 'person' ? '; the thick ring: your own thread' : '')
           + (p.all.length > 1 ? '\n' + p.all.length + ' threads here' : '') + '</title></circle></a>');
       });
       if (over) {
         const rest = p.all.slice(shown.length);
         const y = ys[p.r] + TOP + shown.length * STEP;
-        svg.push('<text class="rv-more" x="' + x.toFixed(1) + '" y="' + (y + 2.5).toFixed(1) + '">' + more + '<title>'
+        svg.push('<text class="rv-more" x="' + x.toFixed(1) + '" y="' + (y + 2.5).toFixed(1) + '">' + more + '<title>' + more + ' — the threads past what the row has room for:\n'
           + h(rest.map((t) => t.path + ':' + t.line + ' — ' + t.title + ' (' + howEnded(t) + ')').join('\n'))
-          + '\n\n' + more + ': the threads past what the row has room for' + '</title></text>');
+          + '</title></text>');
       }
     });
     // The person, gathered: one ✋ for each round's answers in the margin,
     // and one for the answers and threads at one place of a file, with how
-    // many — ringed red when any was the recommended answer given within
-    // FAST seconds, amber when any took the recommended one.
+    // many — ringed amber when any took the recommended answer.
     if (!panel.classList.contains('rv-nohands')) {
       const groups = {};
       d.hands.forEach((p) => {
@@ -1456,7 +1463,6 @@ const reviewMap = (() => {
       Object.values(groups).forEach((g) => {
         const all = g.all, n = all.length;
         const rec = all.filter((p) => p.rec).length, other = all.filter((p) => p.rec === false).length;
-        const fast = all.filter((p) => p.rec && p.waited != null && p.waited <= FAST).length;
         const mine = all.filter((p) => p.kind === 'thread').length, said = all.filter((p) => p.kind === 'sclaude').length;
         const waits = all.map((p) => p.waited).filter((w) => w != null).sort((a, b) => a - b);
         // Clear of the threads' dots: past a dot (R) and the ring (8, its
@@ -1465,7 +1471,7 @@ const reviewMap = (() => {
         // and hands placed before it, inside the map and right of the
         // rounds' names and their ✋; in a row crowded with piles, the
         // first off the other hands at least, else to the right.
-        const tw = n > 1 ? 10 + String(n + (fast ? ' · ' + fast : '')).length * 6.5 + (fast ? 12 : 0) : 10;
+        const tw = n > 1 ? 10 + String(n).length * 6.5 : 10;
         const span = (v) => [g.x + v - (v < 0 ? tw : 9), g.x + v + (v < 0 ? 9 : tw)];
         const free = (v, piles) => {
           const [a, b] = span(v);
@@ -1478,17 +1484,24 @@ const reviewMap = (() => {
         const left = dx < 0;
         const x = g.x == null ? GUT - 34 : g.x + dx;
         const y = ys[g.r] + (g.x != null ? 14 : Math.min(two(g.r + 1) ? 52 : 30, Math.max(14, ys[g.r + 1] - ys[g.r] - 4)));
-        const head = n + (n === 1 ? ' time' : ' times') + ' you stepped in'
-          + (rec ? '\n' + rec + ' took the recommended answer' + (fast ? ', ' + fast + ' within ' + FAST + ' s' : '') : '')
+        const head = '✋ — you stepped in: ' + n + (n === 1 ? ' time' : ' times') + (n > 1 ? ' (the number beside the hand)' : '')
+          + (rec ? '\n' + rec + ' took the recommended answer (the amber ring)' : '')
           + (other ? '\n' + other + ' chose otherwise' : '') + (mine ? '\n' + mine + ' your own thread' + (mine > 1 ? 's' : '') : '')
           + (said ? '\n' + said + ' answered sclaude' : '')
-          + (waits.length ? '\nhalf answered within ' + dur(waits[Math.floor((waits.length - 1) / 2)]) : '')
-          + (fast ? '\nThe thick red ring: a recommended answer given within ' + FAST + ' s' : rec ? '\nThe thin ring: the recommended answer taken' : '');
+          + (waits.length ? '\nhalf answered within ' + dur(waits[Math.floor((waits.length - 1) / 2)]) : '');
         const list = all.filter((p) => p.q).slice(0, 8).map((p) => '\n• ' + h(p.q.slice(0, 140)) + (p.a ? ' → ' + h(p.a.slice(0, 60)) : '')).join('');
-        svg.push('<g class="rv-hand' + (fast ? ' fast' : rec ? ' rec' : '') + '"><title>' + h(head) + list + (all.filter((p) => p.q).length > 8 ? '\n…' : '') + '</title>'
-          + (fast || rec ? '<circle cx="' + x.toFixed(1) + '" cy="' + (y - 4).toFixed(1) + '" r="8"/>' : '')
+        // Over a round's name in the margin the hand and its count are
+        // drawn on the panel's own colour, so the name runs under them and
+        // neither is read through the other (the user's word, 2026-11-19).
+        measure.font = '700 11px ' + getComputedStyle(body).fontFamily;
+        const cw = n > 1 ? measure.measureText(String(n)).width + 6 : 0;
+        const cx0 = left ? x - 10 - cw + 3 : x + 10 - 3;
+        svg.push('<g class="rv-hand' + (rec ? ' rec' : '') + '"><title>' + h(head) + list + (all.filter((p) => p.q).length > 8 ? '\n…' : '') + '</title>'
+          + (g.x == null ? '<circle class="rv-handbg" cx="' + x.toFixed(1) + '" cy="' + (y - 4).toFixed(1) + '" r="8"/>'
+            + (cw ? '<rect class="rv-handbg" x="' + cx0.toFixed(1) + '" y="' + (y - 11).toFixed(1) + '" width="' + cw.toFixed(1) + '" height="14" rx="3"/>' : '') : '')
+          + (rec ? '<circle cx="' + x.toFixed(1) + '" cy="' + (y - 4).toFixed(1) + '" r="8"/>' : '')
           + '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '">✋</text>'
-          + (n > 1 ? '<text class="rv-hn" x="' + (left ? x - 10 : x + 10).toFixed(1) + '"' + (left ? ' style="text-anchor:end"' : '') + ' y="' + y.toFixed(1) + '">' + n + (fast ? ' · ' + fast + '⚡' : '') + '</text>' : '') + '</g>');
+          + (n > 1 ? '<text class="rv-hn" x="' + (left ? x - 10 : x + 10).toFixed(1) + '"' + (left ? ' style="text-anchor:end"' : '') + ' y="' + y.toFixed(1) + '">' + n + '</text>' : '') + '</g>');
       });
     }
     svg.push('</svg>');
@@ -1593,7 +1606,7 @@ const reviewMap = (() => {
       + (p.th.length > 4 ? '<div class="muted">… and ' + (p.th.length - 4) + ' more</div>' : '');
     whyOf(p);
     const laterThreads = (p.orph || []).map((t) => '<div class="t-th"><i style="background:' + colour(t.outcome, 1) + '"></i>' + roundName(t.r) + ': ' + h(t.title || t.rid) + ' <span class="muted">· ' + h(howEnded(t)) + '</span></div>').join('');
-    const rec = p.hd.filter((x) => x.rec).length, fast = p.hd.filter((x) => x.rec && x.waited != null && x.waited <= FAST).length;
+    const rec = p.hd.filter((x) => x.rec).length;
     return where
       + (p.why ? '<div class="t-r muted">Files joined as ' + h(p.why) + '</div>' : '')
       + (p.slid ? '<div class="t-r muted">Slid here from ' + h([...new Set(p.slid)].join(', ')) + ': the reply to its thread names the commit and this file</div>' : '')
@@ -1606,9 +1619,11 @@ const reviewMap = (() => {
       + (p.net >= 3 ? ' · <b>+' + p.net + ' lines grown</b>' : '') + '</div>'
       + (threads ? '<div class="t-h">Threads posted here</div>' + threads : '<div class="muted">No thread here: these fixes came along with others.</div>')
       + (laterThreads ? '<div class="t-h">Posted here later, with no fix here</div>' + laterThreads : '')
-      + (p.hd.length ? '<div class="t-r">✋ ' + p.hd.length + ' answer' + (p.hd.length > 1 ? 's' : '') + ' about them' + (rec ? ', ' + rec + ' the recommended one' + (fast ? ' (<b class="rv-fast">' + fast + ' within ' + FAST + ' s</b>)' : '') : '') + '</div>' : '')
+      + (p.hd.length ? '<div class="t-r">✋ ' + p.hd.length + ' answer' + (p.hd.length > 1 ? 's' : '') + ' about them' + (rec ? ', ' + rec + ' the recommended one' : '') + '</div>' : '')
       + '<div class="t-h">This icicle, round by round (lines changed)</div>' + bars
-      + '<div class="t-r muted">' + churn + ' lines changed here over ' + series.filter(([, v]) => v).length + ' round' + (series.filter(([, v]) => v).length > 1 ? 's' : '')
+      // How many rounds came back here is said once: by the reading
+      // ('long') when it is there, else here.
+      + '<div class="t-r muted">' + churn + ' lines changed here' + (series.length >= 3 ? '' : ' over ' + series.filter(([, v]) => v).length + ' round' + (series.filter(([, v]) => v).length > 1 ? 's' : ''))
       + (devLines ? ' — ' + Math.round(100 * churn / devLines) + '% of the ' + devLines + ' lines the development wrote in ' + (p.files.length > 1 ? 'these files' : 'this file') : ' — in code the development did not write') + '</div>'
       + says.map(([k, t]) => '<div class="t-say t-' + k + '">' + h(t) + '</div>').join('')
       + drawnAs(p);

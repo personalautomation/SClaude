@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
 import _path  # noqa: E402,F401
 import claude_usage  # noqa: E402
 import pr_context  # noqa: E402
+import review_report  # noqa: E402
 from local_review import JOURNAL  # noqa: E402
 
 failures = []
@@ -164,8 +165,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the cut before a split is kept, by its time",
           [(e["split"], [b["id"] for b in e["blocks"]]) for e in cut["earlier"]] == [("1", ["1"])]
           and cut["earlier"][0]["until"] == 1767262200.0)
-    check("two rounds: a head read twice is one; a missing commit, another PR and a pass stopped on a read head left out",
-          [r["head"] for r in d["rounds"]] == [first, second] and not any(r["stopped"] for r in d["rounds"]))
+    check("the rounds are the report's rows: a head read twice in one range is one; a missing commit undrawn, its number kept; another PR left out; a pass stopped on a read head a round of its own",
+          [(r["head"], r["seq"], r["stopped"]) for r in d["rounds"]] == [(first, 2, False), (second, 3, False), (second, 4, True)])
     check("a round read twice adds its time", d["rounds"][0]["seconds"] == 90)
     check("the files are what the PR changed and what its fixes touched",
           [f["path"] for f in d["files"]] == ["app.py", "notes.md"])
@@ -196,7 +197,8 @@ with tempfile.TemporaryDirectory() as tmp:
     six = next(t for t in d["threads"] if t["rid"] == "r6")
     check("a reply naming the commit and the file says where the thread was fixed",
           six.get("fixedIn") == {"r": 0, "files": ["notes.md"]} and "_replies" not in six)
-    check("a round with no transcript here does not say what it read", all(r["seen"] is None for r in d["rounds"]))
+    check("a round with no transcript here does not say what it read, and a stopped one read nothing",
+          [r["seen"] for r in d["rounds"]] == [None, None, []])
     out_by = {t["rid"]: t["outcome"] for t in d["threads"] if t["rid"] != "r6"}
     check("thread outcomes: fixed, declined, left to the person (a night's too), reversal, open",
           out_by == {"r1": "fixed", "r2": "declined", "r3": "yours", "r4": "reversal", "r5": "open", "r7": "reversal", "r8": "reversal"})
@@ -206,7 +208,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a reversal's reply naming a commit takes no fix of it",
           not any(h["thread"] == "r8" for h in d["hunks"]))
     by = {t["rid"]: t for t in d["threads"]}
-    check("a thread with no commit falls in the round of its time", by["r5"]["r"] == 1
+    check("a thread with no commit falls in the round of its time", by["r5"]["r"] == 2
           and by["r5"]["by"] == "person")
     asks = [h for h in d["hands"] if h["kind"] == "question"]
     check("the question answered: recommended, its wait and its thread",
@@ -321,6 +323,41 @@ with tempfile.TemporaryDirectory() as tmp:
             fh.write(json.dumps(row) + "\n")
     check("a block's first pass on the head the last block left is a round of its own",
           [r["block"] for r in review_map.rounds_of(tree, "7")] == [1, 2])
+    rounds = review_map.rounds_of(tree, "7")
+    # The map's rounds are the report's rows, numbered alike.
+    check("the report's runs split where the block changes, as the map's rounds do",
+          [r["block"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == [1, 2])
+    check("each round carries the report's numbers", [(r["seq"], r["bseq"]) for r in rounds] == [(1, 1), (2, 1)])
+    # A GitHub run on another head, written after the local passes but begun
+    # between them: both sides put it in its place in time.
+    with open(os.path.join(tree, JOURNAL), "a") as fh:
+        fh.write(json.dumps({"at": "2026-01-01T10:02:00+00:00", "head": second, "pr": "7", "source": "github", "run": 5}) + "\n")
+    check("a run written late takes its place in time, in the report and on the map alike",
+          [(r["head"], r["seq"]) for r in review_map.rounds_of(tree, "7")] == [(first, 1), (second, 2), (first, 3)]
+          and [r["head"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == [first, second, first])
+    # A capped pass and the one that goes on with its range are one run,
+    # though a GitHub run written later began between them.
+    with open(os.path.join(tree, JOURNAL), "w") as fh:
+        for row in ({"at": "2026-01-01T10:00:00+00:00", "base": "b", "head": first, "pr": "7", "more": True},
+                    {"at": "2026-01-01T10:06:00+00:00", "base": "b", "head": first, "pr": "7"},
+                    {"at": "2026-01-01T10:03:00+00:00", "head": second, "pr": "7", "source": "github", "run": 5}):
+            fh.write(json.dumps(row) + "\n")
+    check("one review's passes stay one run, a run written late between them in time",
+          [r["head"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == [first, second])
+    with open(os.path.join(tree, JOURNAL), "w") as fh:
+        for row in ({"at": "2026-01-01T10:00:00+00:00", "head": first, "pr": "7", "block": 1},
+                    {"at": "2026-01-01T10:05:00+00:00", "head": first, "pr": "7", "block": 2},
+                    {"at": "2026-01-01T10:02:00+00:00", "head": second, "pr": "7", "source": "github", "run": 5}):
+            fh.write(json.dumps(row) + "\n")
+    # A round on a head gone from the tree is not drawn and keeps its number.
+    with open(os.path.join(tree, JOURNAL), "a") as fh:
+        fh.write(json.dumps({"at": "2026-01-01T10:01:00+00:00", "head": "0" * 40, "pr": "7", "block": 1}) + "\n")
+    check("a head gone from the tree keeps its number taken",
+          [(r["block"], r["seq"], r["bseq"]) for r in review_map.rounds_of(tree, "7")] == [(1, 1, 1), (None, 3, None), (2, 4, 1)])
+    with open(os.path.join(tree, JOURNAL), "w") as fh:
+        for row in ({"at": "2026-01-01T10:00:00+00:00", "head": first, "pr": "7", "block": 1},
+                    {"at": "2026-01-01T10:05:00+00:00", "head": first, "pr": "7", "block": 2}):
+            fh.write(json.dumps(row) + "\n")
     rounds = review_map.rounds_of(tree, "7")
     got = review_map.threads_of(tree, [thread(9, "app.py", 3, first, "2026-01-01T10:02:00Z"),
                                        thread(10, "app.py", 3, first, "2026-01-01T10:07:00Z")], rounds)

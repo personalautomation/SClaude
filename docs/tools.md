@@ -394,14 +394,21 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   shows what fits, open threads and reversals first, the rest as +n
   at its foot, its hover listing them; ✋ with a number how many times you
   stepped in during a round or at one place (answers and your own threads),
-  ringed red where you took the recommended answer within seconds — the
+  ringed where you took the recommended answer — the
   questions are in its tooltip. Hovering an icicle tells where it is, what
   that round changed there, the threads posted at it and your answers about
   them, the icicle round by round as a small bar chart, how much of the
   code written there it has changed, and a reading: converging, growing
-  again, only comments lately, mostly declined, or ended. Each round is named by its block first when the
-  pull request is read in review blocks — "Block 2 · round 3", the rounds
-  counted afresh in each block, a heavier line where a block opens — and
+  again, only comments lately, mostly declined, or ended. Every mark on the
+  map — a thread's dot, a nothing-found line, the purple bar, the
+  development's band, ✋ with its ring, ↗, ↘, ✂, ✕, ↓, ▸, ▾ — says
+  on hover what it means, the mark itself first, a dot or a line in its own
+  colour; the icicles explain their colours in their own hover. Each round is named by its block first when the
+  pull request is read in review blocks — "Block 2 · round 3 (41)", the
+  rounds counted afresh in each block and, in brackets, the round's number
+  across the whole review, the review report's; a heavier line where a block
+  opens; only the name stays pinned at the left while the map scrolls
+  sideways — and
   says how long it lasted, whether it ran on this machine or on
   GitHub or was stopped with no answer (a round of its own, as the review's
   report numbers it, the commits after it its fixes), what it found and what

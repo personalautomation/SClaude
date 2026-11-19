@@ -218,7 +218,10 @@ report after each round has a row per review run, in the order of the cycle:
 `find` — what the run found and what it cost, the pass on this machine as
 Claude Code accounts for it (`—` for GitHub's review, which sclaude cannot
 price); `fix` — the session that fixed those findings, its time and cost, and
-what it declined; and `result` — fixed, waiting. A `w` is a value not known yet: a run
+what it declined; and `result` — fixed, waiting. When the pull request is
+read in review blocks, a `block` column after the round's number says which
+block the run read and its round there — `3.7`, block 3's seventh round, as
+the review's map names it. A `w` is a value not known yet: a run
 still going, findings no session has started on, a launch whose cost comes
 when it ends. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the

@@ -104,6 +104,19 @@ function titled(el) {
   }
   return null;
 }
+// A note whose first character repeats a mark of the map — a line, a dot —
+// draws that character in the mark's own colour, so that it is plainly the
+// one hovered: data-tip-mark names which paint, `stroke` or `fill`, of the
+// element itself or of its first line, circle or text — or is the colour.
+function tipHtml(el) {
+  const text = el.dataset.tip, paint = el.dataset.tipMark;
+  if (!paint) return esc(text);
+  const src = el.matches('line,circle,rect,path,text') ? el : el.querySelector('line,circle,rect,path,text');
+  const colour = paint !== 'fill' && paint !== 'stroke' ? paint : src ? getComputedStyle(src)[paint] : '';
+  const first = [...text][0] || '';
+  if (!colour || colour === 'none') return esc(text);
+  return '<b style="color:' + esc(colour) + '">' + esc(first) + '</b>' + esc(text.slice(first.length));
+}
 const titleEl = Object.assign(document.createElement('div'), {id: 'tip-t', hidden: true});
 document.body.append(titleEl);
 const titleTip = holdTip(titleEl);
@@ -112,7 +125,7 @@ document.addEventListener('mouseover', (ev) => {
   const el = titled(ev.target);
   if (!el) { titleTip.leave(); return; }
   if (!el.tipId) el.tipId = 't' + Math.random();
-  titleTip.show(el.tipId + el.dataset.tip, esc(el.dataset.tip), ev, el);
+  titleTip.show(el.tipId + el.dataset.tip, tipHtml(el), ev, el);
 });
 
 const M = /*MODEL*/;

@@ -240,7 +240,7 @@ def summary(cwd, pr, state_path, done, numbers):
     # Reviewed on this machine: its findings are threads like the workflow's,
     # counted above, but its runs are in its journal, not on the commits.
     local = review_mode(cwd) == "local"
-    runs = (local_runs(cwd, pr_created(cwd, pr)) or []) if local else None
+    runs = (local_runs(cwd, pr_created(cwd, pr), pr=pr) or []) if local else None
     if local:
         rows.append(("Last review", "on this machine, %d run%s, the last at %s"
                      % (len(runs), "" if len(runs) == 1 else "s",

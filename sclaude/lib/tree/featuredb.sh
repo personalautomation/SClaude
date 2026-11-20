@@ -69,25 +69,58 @@ db_wanted() {
   [[ "$(db_env_name "$wt")" == "$want" ]]
 }
 
+# The TCP port ranges Windows keeps from everybody, as "start-end" words: on
+# WSL, Docker Desktop cannot publish a port in one ("ports are not available
+# … /forwards/expose returned unexpected status: 500"), though nothing listens
+# there. WinNAT reserves such ranges at boot, wherever the dynamic range is,
+# and they can cover most of the blocks below. Nothing where netsh.exe is not
+# on the PATH — Linux, macOS, WSL without interop. A `netsh.exe` that is a
+# shell function — the tests' stand-in — is called as it is.
+windows_excluded_ports() {
+  command -v netsh.exe >/dev/null 2>&1 || return 0
+  if [[ "$(type -t netsh.exe)" == "function" ]]; then
+    netsh.exe int ipv4 show excludedportrange protocol=tcp
+  else
+    timeout 10 netsh.exe int ipv4 show excludedportrange protocol=tcp 2>/dev/null
+  fi | tr -d '\r' | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { printf "%s-%s ", $1, $2 }'
+}
+
+# Whether the block starting at $1 has a port in one of the ranges $2 names.
+block_excluded() {
+  local base="$1" range
+  for range in $2; do
+    (( ${range%-*} <= base + 9 && ${range#*-} >= base )) && return 0
+  done
+  return 1
+}
+
 # This tree's block of ports: recorded once in its state as db.base, under the
 # same lock the dev ports are claimed with. A block is free when no other
-# registered tree has recorded it and nothing listens on any port in it.
+# registered tree has recorded it, nothing listens on any port in it and
+# Windows does not keep any of it (windows_excluded_ports). A recorded block
+# that Windows has come to keep since is given up for another: every start on
+# it fails the same way, step after step.
 db_base() {
-  local wt="$1" state="$1/.sclaude/local/feature/state.json" base listening
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" base listening excluded
   base="$(state_get "$state" db.base 2>/dev/null)"
-  [[ "$base" =~ ^[0-9]+$ ]] && { echo "$base"; return 0; }
+  excluded="$(windows_excluded_ports)"
+  if [[ "$base" =~ ^[0-9]+$ ]]; then
+    block_excluded "$base" "$excluded" || { echo "$base"; return 0; }
+    info "  database: Windows now reserves ports in $base-$((base + 9)) — moving this feature's database to another block" >&2
+  fi
   mkdir -p "$DEV_REGISTRY" || return 1
   (
     flock -w 10 9 || exit 1
     listening="$(ports_listening | tr '\n' ' ')"
     PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt" "$state" "$DEV_REGISTRY" "$DB_BLOCK_FIRST" "$DB_BLOCK_LAST" \
-      "$listening" <<'PY'
+      "$listening" "$excluded" <<'PY'
 import json, os, sys
 import state_file
 
-wt, state, registry, first, last, listening = sys.argv[1:7]
+wt, state, registry, first, last, listening, excluded = sys.argv[1:8]
 first, last = int(first), int(last)
 listening = {int(p) for p in listening.split() if p.isdigit()}
+excluded = [tuple(int(n) for n in r.split("-")) for r in excluded.split()]
 real = os.path.realpath(wt)
 
 taken = set()
@@ -105,6 +138,8 @@ for name in os.listdir(registry):
 
 for base in range(first, last + 1, 10):
     if base in taken or any(p in listening for p in range(base, base + 10)):
+        continue
+    if any(lo <= base + 9 and hi >= base for lo, hi in excluded):
         continue
     with state_file.update(state) as data:
         data.setdefault("db", {})["base"] = base
@@ -347,6 +382,7 @@ ensure_db() {
       info "  database: starting this feature's own Supabase (a new one takes about a minute)…"
     fi
     exclude="$(project_get database.local.exclude "$wt" 2>/dev/null | paste -sd, -)"
+    local logged; logged="$(stat -c %s "$log" 2>/dev/null || echo 0)"
     # No lock around the start: a double start was seen once and the stack
     # survived it, while each lock tried brought a new failure of its own (a
     # descriptor kept by Docker Desktop, a wait against the proxy's limit).
@@ -354,6 +390,11 @@ ensure_db() {
        && ! db_wait_up "$wt" "$cli" "$dir"; then
       rm -f "$envf"
       warn "  database: supabase start failed — see .sclaude/local/feature/db.log; sharing the main local database"
+      # Docker refusing to publish a port nothing listens on is, on Windows, a
+      # range the system keeps; the warning alone sent nobody there.
+      if tail -c +"$((logged + 1))" "$log" 2>/dev/null | grep -q "ports are not available"; then
+        warn "  database: Docker could not publish ports $base-$((base + 9)); on Windows, \`netsh int ipv4 show excludedportrange protocol=tcp\` lists the ranges it keeps, and restarting the winnat service as an administrator frees them"
+      fi
       return 0
     fi
   fi

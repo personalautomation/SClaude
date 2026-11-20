@@ -258,6 +258,17 @@ try:
     # names no workflow, only itself.
     check("local-drops-findings-run", pr_context.without_actions(
         [{"name": pr_context.FINDINGS_CHECK, "workflowName": "", "conclusion": "FAILURE"}]), [])
+    # The findings check comes as a check run and a status: a red one is
+    # named once, as red_checks names it.
+    real_explained = pr_context.findings_red_explained
+    pr_context.findings_red_explained = lambda *a, **k: False
+    twice = {"statusCheckRollup": [
+        {"name": pr_context.FINDINGS_CHECK, "conclusion": "FAILURE"},
+        {"name": "Checks", "conclusion": "FAILURE"},
+        {"context": pr_context.FINDINGS_CHECK, "state": "FAILURE"}]}
+    check("red-rows-findings-once", [r[0] for r in pr_context.red_rows(None, 7, None, twice)],
+          [pr_context.FINDINGS_CHECK, "Checks"])
+    pr_context.findings_red_explained = real_explained
     got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
     check("raw-read-untouched", len(got["statusCheckRollup"]), 3)
     pr_context.review_mode = lambda cwd: "github"

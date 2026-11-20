@@ -183,6 +183,9 @@ GREEN=""; OFF=""
 LIB="%s"
 REPO="%s/repo"
 docker() { return 0; }
+# No ranges Windows keeps, unless a case says so: on WSL the real netsh.exe
+# would answer with this machine's.
+netsh.exe() { :; }
 source "$LIB/core/state.sh"
 source "$LIB/core/project.sh"
 source "$LIB/core/environment.sh"
@@ -348,6 +351,48 @@ def ensure_cases():
         if shutil.which("ss") and taken is not None:
             check("a block in use is skipped", state(c)["db"]["base"] != taken, True)
         held.close()
+
+        # Blocks Windows keeps are skipped, though nothing listens in them:
+        # Docker Desktop cannot publish a port there.
+        kept = ('netsh.exe() { printf "Start Port    End Port\\r\\n----------\\r\\n'
+                '     55000       55299\\r\\n     55406       55505     *\\r\\n"; }; ')
+        f = feature_tree(root, "f")
+        write_config(f, cli, "")
+        os.symlink(f, os.path.join(root, "registry", "f"))
+        bash(root, kept + 'db_base "%s" >/dev/null' % f)
+        fbase = state(f).get("db", {}).get("base")
+        check("a block Windows keeps is not given",
+              isinstance(fbase, int) and not (fbase + 9 >= 55000 and fbase <= 55299)
+              and not (fbase + 9 >= 55406 and fbase <= 55505), True)
+        # A block recorded before Windows came to keep it is moved, rather
+        # than every start failing on it the same way.
+        f_state = os.path.join(f, ".sclaude/local/feature", "state.json")
+        bash(root, 'state_set "%s" db.base 55100' % f_state)
+        out = bash(root, kept + 'db_base "%s" 2>&1' % f)
+        moved = state(f).get("db", {}).get("base")
+        check("a recorded block Windows now keeps is moved",
+              (moved != 55100 and str(moved) in out, "Windows now reserves ports in 55100-55109" in out),
+              (True, True))
+        bash(root, 'state_set "%s" db.base 55100' % f_state)
+        check("without netsh.exe a recorded block stays",
+              bash(root, 'db_base "%s" 2>&1' % f).strip(), "55100")
+
+        # A start Docker refuses for its ports says where to look.
+        refused = os.path.join(root, "refuses-ports")
+        with open(refused, "w") as fh:
+            fh.write('#!/usr/bin/env bash\necho "$*" >> "$STUB_LOG"\n'
+                     '[[ "$1" == start ]] && { echo "Error response from daemon: ports are not '
+                     'available: exposing port TCP 0.0.0.0:55002"; exit 1; }\nexit 1\n')
+        os.chmod(refused, 0o755)
+        write_config(f, refused, "")
+        out = bash(root, 'ensure_db "%s"' % f)
+        check("a refused port names the ranges Windows keeps",
+              ("supabase start failed" in out, "Docker could not publish ports 55100-55109" in out,
+               "excludedportrange" in out), (True, True, True))
+        write_config(f, cli, "")
+        out = bash(root, 'ensure_db "%s"' % f, {"STUB_START": "dead"})
+        check("another failure does not blame the ports",
+              ("supabase start failed" in out, "Docker could not publish" in out), (True, False))
 
         # Switched to the cloud project: the local address must go.
         on_env(a, "dev")

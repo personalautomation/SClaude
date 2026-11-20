@@ -1347,7 +1347,12 @@ stack for it alone: its own `project_id` (Docker names containers and volumes
 after it — the project's id and the feature's label, kept to the 40
 characters the Supabase CLI keeps, a longer one cut short and ending in a hash,
 and recorded in the state as `db.project_id`), its own block of ten ports from 55000, only the containers the
-project needs. For a typical web app that is a handful of containers and a
+project needs. On WSL a block is also clear of the ranges Windows keeps
+(`netsh int ipv4 show excludedportrange protocol=tcp`): Docker Desktop cannot
+publish a port there, though nothing listens on it, and WinNAT can reserve most
+of 55000-55990 at boot. A recorded block that Windows has come to keep since is
+given up for another, and a start Docker refuses for its ports says so, rather
+than failing the same way at every step. For a typical web app that is a handful of containers and a
 few hundred MB, up in under a minute the first time. It is filled once: with a copy of the main local
 database's data when the project sets `copyFromMain` and the main stack is up —
 the same rows under the same ids, so whatever the project keeps outside the

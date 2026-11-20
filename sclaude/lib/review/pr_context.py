@@ -453,7 +453,10 @@ def red_rows(cwd, pr, repo, view, nodes=None):
     # review of a pull request only to comment `/review` and turn it green.
     if any(r[0] == FINDINGS_CHECK for r in red) and findings_red_explained(cwd, pr, repo, view, nodes):
         red = [r for r in red if r[0] != FINDINGS_CHECK]
-    return red
+    # The findings verdict comes as a check run and a status: it is one check,
+    # as in red_checks. Kept twice, the brief line named it twice.
+    return [r for i, r in enumerate(red)
+            if r[0] != FINDINGS_CHECK or all(o[0] != FINDINGS_CHECK for o in red[:i])]
 
 
 def merge_red(cwd, pr, repo):

@@ -210,6 +210,71 @@ try:
           state(world(findings=[], rollup=[dict(green[0], conclusion="FAILURE"),
                                            labelled[1]])), "dirty")
 
+    # --- a review that did not finish ----------------------------------------
+    # Red and marked "not-reviewed", its title saying so (UNFINISHED_TITLE),
+    # with no thread open: nothing for a session — the gate runs it again. An
+    # open thread or a person's word is still something to answer, and a red
+    # check without the phrase stays what it was.
+    unfinished = [{"name": pr_context.FINDINGS_CHECK, "status": "completed",
+                   "conclusion": "failure", "external_id": "not-reviewed",
+                   "output": {"title": "The %s; this commit is not marked reviewed"
+                              % pr_context.UNFINISHED_TITLE, "summary": ""}}]
+    red_rollup = green[:2] + [dict(green[2], conclusion="FAILURE")]
+    saved_threads = pr_context.open_threads
+    thread = {"url": "https://example.test/thread#discussion_r1"}
+    pr_context.open_threads = lambda cwd, pr, repo, nodes=None: ([], None)
+    check("unfinished", state(world(findings=unfinished, rollup=red_rollup)), "unfinished")
+    check("unfinished-person-spoke",
+          state(world(findings=unfinished, rollup=red_rollup,
+                      comments=[{"user": person, "body": "why?"}])), "dirty")
+    check("unfinished-other-red", state(world(
+        findings=unfinished, rollup=[dict(green[0], conclusion="FAILURE")] + red_rollup[1:])), "dirty")
+    check("red-without-the-phrase", state(world(
+        findings=[dict(unfinished[0], output={"title": "something else"})], rollup=red_rollup)), "dirty")
+    check("unfinished-but-reviewed-is-not", pr_context.review_unfinished(
+        dict(unfinished[0], external_id="reviewed")), False)
+    pr_context.open_threads = lambda cwd, pr, repo, nodes=None: ([thread], None)
+    check("unfinished-thread-open", state(world(findings=unfinished, rollup=red_rollup)), "dirty")
+    # Only a thread the person kept: no session either — it would find
+    # nothing to fix; the way in treats it as a clean one does.
+    saved_split = pr_context.split_yours
+    pr_context.split_yours = lambda cwd, ts: (list(ts), [])
+    check("unfinished-only-yours", state(world(findings=unfinished, rollup=red_rollup)), "unfinished")
+    pr_context.split_yours = saved_split
+    pr_context.open_threads = lambda cwd, pr, repo, nodes=None: (None, None)
+    check("unfinished-threads-unread", state(world(findings=unfinished, rollup=red_rollup)), "dirty")
+
+    # The way out asks the same: close_state, with what it reads stubbed.
+    def close(rollup, findings, threads=(), mine=()):
+        saved = {k: getattr(pr_context, k) for k in (
+            "pr_view", "unpushed", "behind_head", "review_finished", "findings_run", "review_mode",
+            "split_yours")}
+        pr_context.split_yours = lambda cwd, ts: (list(mine), list(ts))
+        pr_context.pr_view = lambda cwd, pr, fields: {
+            "headRefOid": head, "statusCheckRollup": rollup, "state": "OPEN", "createdAt": ""}
+        pr_context.unpushed = lambda cwd, view: 0
+        pr_context.behind_head = lambda cwd, h: False
+        pr_context.review_finished = lambda *a: True
+        pr_context.findings_run = lambda cwd, repo, h: findings[0] if findings else {}
+        pr_context.review_mode = lambda cwd: "github"
+        pr_context.open_threads = lambda cwd, pr, repo, nodes=None: (list(threads), None)
+        try:
+            return pr_context.close_state(repo, "7", "o/r")
+        finally:
+            for k, v in saved.items():
+                setattr(pr_context, k, v)
+
+    check("close-unfinished", close(red_rollup, unfinished), "unfinished")
+    check("close-unfinished-thread-open", close(red_rollup, unfinished, [thread]).startswith("open:"), True)
+    check("close-unfinished-other-red", close(
+        [dict(green[0], conclusion="FAILURE")] + red_rollup[1:], unfinished).startswith("open:"), True)
+    check("close-red-without-the-phrase", close(
+        red_rollup, [dict(unfinished[0], output={"title": "x"})]).startswith("open:"), True)
+    # A thread the person kept waits for their hand first: not hidden behind
+    # the question about going on unreviewed.
+    check("close-unfinished-yours-first", close(red_rollup, unfinished, mine=[thread]), "yours: 1")
+    pr_context.open_threads = saved_threads
+
     # --- which check is the review --------------------------------------------
     # The job says "Review" and its workflow says "Claude"; the findings check
     # says "review" too, and is written by the review rather than being it — a

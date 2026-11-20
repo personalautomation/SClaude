@@ -44,6 +44,7 @@ FILES = [
     ("review-yours", "review threads the person decided to leave (YOURS_FILE in pr_context.py)"),
     ("review-night", "the night's decisions on threads, to be confirmed in the morning (NIGHT_FILE)"),
     ("review-reversals", "threads a review session reversed (reversals_file in review_round.sh)"),
+    ("review-unfinished.head", "the head the review on GitHub was run again on once by itself after it did not finish; a second unfinished run on it asks the person, and `<head> go-on` once they chose on the way in to go on with it unreviewed, so the close right after does not ask again (taken once) (review_close_gate)"),
     ("review-fallback", "GitHub's review could not run (Claude's limit, no Actions minutes, a runner without network): the feature is reviewed on this machine (review_fallback_set, FALLBACK_FILE)"),
     ("review-blocks.json", "the cut of a pull request too big for one review into review blocks (blocks_file, FEATURE_BLOCKS in review_blocks.py, BLOCKS_FILE in pr_context.py)"),
     ("review-rounds.jsonl", "the review's journal, one line per run wherever it ran (review_journal, JOURNAL in local_review.py)"),

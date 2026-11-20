@@ -273,6 +273,8 @@ run_step() {
   #
   # A review the workflow skipped on purpose ("unreviewed") closes the step too:
   # a session could only say the review did not run. It is said here instead.
+  # So does one that did not finish ("unfinished") once the person chose to go
+  # on with the head unreviewed (review_close_gate); it is said here too.
   #
   # A project whose review is not GitHub's (project_review_mode) has its pull
   # request labelled so the workflow skips itself; one that reviews on this
@@ -309,15 +311,18 @@ run_step() {
     REVIEW_KNOWN_COUNT="$known" review_close_gate "$wt" "$slug" "${pr:-}" \
       "$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)" && review_word="$REVIEW_ENTRY_WORD"
     local_count="$REVIEW_ENTRY_COUNT"
-    # `review: github` and GitHub's review could not run: the gate said why.
+    # The gate stopped the step and said why: `review: github` and GitHub's
+    # review could not run, or a review that did not finish left open.
     [[ "$REVIEW_ENTRY_WORD" == stopped ]] && return 0
     # The gate may have moved the review here (review_fallback_switch).
     review_mode="$(project_review_mode "$wt")"
   fi
-  if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
+  if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" || "$review_word" == "unfinished" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
     if [[ "$review_word" == "clean" ]]; then
       say "${GREEN}✓ The automatic review of PR #$pr passed with no findings, no comments and every check green.${OFF}"
+    elif [[ "$review_word" == "unfinished" ]]; then
+      warn "  PR #$pr was NOT reviewed: the automatic review did not finish on this head, and you chose to go on."
     elif [[ "$review_mode" == "local" ]]; then
       say "${GREEN}✓ The review on this machine found nothing in PR #$pr; every check is green and nobody commented.${OFF}"
     elif [[ "$review_mode" == "off" ]]; then

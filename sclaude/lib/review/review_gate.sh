@@ -85,7 +85,7 @@ review_entry_place() {
 # session run_step opens.
 review_close_gate() {
   local wt="$1" slug="$2" pr="$3" entry="${4:-}" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
-  local gate_reported=0 question=--close skippable=1 edges=1
+  local gate_reported=0 question=--close skippable=1 edges=1 unfinished=0
   if [[ -n "$entry" ]]; then
     question=--state
     [[ "$entry" == quiet ]] && edges=0
@@ -179,6 +179,73 @@ review_close_gate() {
             fi ;;
         esac
       fi
+    fi
+    # The review in Actions handed back before it finished, and nothing else
+    # is open: a session would find nothing to fix. It runs again, once by
+    # itself on a head; when that does not finish either, the head is
+    # unreviewed, and going on so is the person's word ([g] runs it again).
+    if [[ "$word" == unfinished ]]; then
+      local unf_head unf_mark="$wt/.sclaude/local/feature/review-unfinished.head" unf_run=0
+      unf_head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+      # The person chose on the way in to go on with this head unreviewed: the
+      # close right after it is not asked again. Taken once — the mark goes
+      # back to the bare head, so a later step 4 on it asks afresh.
+      if [[ -z "$entry" && -f "$unf_mark" && "$(cat "$unf_mark" 2>/dev/null)" == "$unf_head go-on" ]]; then
+        printf '%s\n' "$unf_head" > "$unf_mark" 2>/dev/null
+        REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="" \
+          REVIEW_CLOSE_NOTE="the head unreviewed: the review in Actions did not finish"
+        [[ -n "$entry" ]] && REVIEW_ENTRY_WORD=unfinished
+        return 0
+      fi
+      if [[ ! -f "$unf_mark" || "$(cat "$unf_mark" 2>/dev/null)" != "$unf_head" ]]; then
+        printf '%s\n' "$unf_head" > "$unf_mark" 2>/dev/null
+        review_unfinished_rerun "$wt" "$pr" && unf_run=1
+      fi
+      if [[ "$unf_run" -eq 0 ]]; then
+        unfinished=$((unfinished + 1))
+        warn ""
+        warn "  The automatic review of PR #$pr did not finish on ${unf_head:0:8}, run again as well: this head is unreviewed."
+        if review_go_on "$wt" && [[ "$unfinished" -le "$REVIEW_GO_ON_RETRIES" ]]; then
+          info "  [g] go on by itself is ticked: running it again in $((unfinished * REVIEW_GO_ON_PAUSE))s ($unfinished of $REVIEW_GO_ON_RETRIES)."
+          review_go_on_pause "$wt" $((unfinished * REVIEW_GO_ON_PAUSE)) \
+            && review_unfinished_rerun "$wt" "$pr" && unf_run=1
+        fi
+      fi
+      local unf_left=""
+      if [[ "$unf_run" -eq 0 ]]; then
+        if ! ask "${BOLD}Go on with this head unreviewed? n runs the review again [y/n] ${OFF}" answer yn; then
+          unf_left="Left open. Come back with: $SELF $slug"; ASKED_HOW=""
+        elif ! is_yes "$answer"; then
+          review_unfinished_rerun "$wt" "$pr" && unf_run=1 \
+            || unf_left="It could not be started again. Left open; come back with: $SELF $slug"
+        fi
+      fi
+      if [[ "$unf_run" -eq 1 ]]; then
+        # The rerun is a new review to wait for, with a wait of its own.
+        waited=0 announced=0
+        [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_close review_run sclaude "the review did not finish" note="it runs again"
+        continue
+      fi
+      if [[ -n "$unf_left" ]]; then
+        info "  $unf_left"
+        [[ "$edges" -eq 0 ]] || review_back_edge "$wt" review_close \
+          "$( [[ -n "$ASKED_HOW" ]] && echo person || echo none)" "$ASKED_HOW" note="the review in Actions did not finish"
+        # On the way in a 1 opens a session, which would find nothing to fix:
+        # the step stops here instead, as it does when GitHub's review cannot
+        # run, and the feature's topic hears it too.
+        if [[ -n "$entry" ]]; then
+          REVIEW_ENTRY_WORD=stopped
+          notify_feature "$slug" --wt "$wt" --quiet \
+            "The automatic review of PR #$pr did not finish on ${unf_head:0:8}; step 4 is stopped. Come back with: $SELF $slug" \
+            >/dev/null 2>&1 || true
+        fi
+        return 1
+      fi
+      [[ -n "$entry" ]] && printf '%s go-on\n' "$unf_head" > "$unf_mark" 2>/dev/null
+      REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" \
+        REVIEW_CLOSE_NOTE="the head unreviewed: the review in Actions did not finish"
+      [[ -n "$entry" ]] && REVIEW_ENTRY_WORD=unfinished
+      return 0
     fi
     # On the way in the local pass comes first, whatever is still running:
     # what it finds is the session's; a wait is only for a close.

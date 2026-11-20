@@ -1267,7 +1267,8 @@ echo "watcher=[$SESSION_WATCHER]"
     # count and says it ran, and `ask` answers from a list (no once it runs
     # out) and says what it was asked.
     def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
-                    auto=False, exited=False, entry=False, skippable=True, open_count=3, known=""):
+                    auto=False, exited=False, entry=False, skippable=True, open_count=3, known="",
+                    stubs=""):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -1293,11 +1294,11 @@ echo "watcher=[$SESSION_WATCHER]"
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
                  'run_step() { echo "RUN_STEP $3"; }\nreview_reopen() { echo REOPEN; }\n'
                  'SESSION_AUTO_CLOSED=%s; SESSION_EXITED=%s\n'
-                 'review_skippable() { %s; }\ncycle_edge() { echo "EDGE $2 $3 $5 $6"; }\n'
-                 'REVIEW_KNOWN_COUNT=%s review_close_gate %s x 143 %s; echo "RC=$?"\n') % (
+                 'review_skippable() { %s; }\ncycle_edge() { echo "EDGE $2 $3 $5 $6"; }\n%s\n'
+                 'REVIEW_KNOWN_COUNT=%s review_close_gate %s x 143 %s; echo "RC=$?; WORD=$REVIEW_ENTRY_WORD"\n') % (
                      fake, mode, count, count, open_count, "true" if done else "false",
                      " ".join(answers), "1" if auto else "", "1" if exited else "",
-                     "true" if skippable else "false", "'%s'" % known, wt,
+                     "true" if skippable else "false", stubs, "'%s'" % known, wt,
                      (entry if isinstance(entry, str) else "entry") if entry else "")
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
                              env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
@@ -1365,6 +1366,61 @@ echo "watcher=[$SESSION_WATCHER]"
     check("entry-place-later", [place_of(["review_run review_close", "review_close preview"]),
                                 place_of(["review_run review_close", "review_close preview", "preview in_qa",
                                           "hold_ways rollback"])], ["later"] * 2)
+    # The review in Actions handed back before it finished, nothing else open
+    # (UNFINISHED_TITLE): no session. It runs again once by itself on a head;
+    # when that does not finish either, going on unreviewed is the person's
+    # word, and a "no" runs it again. The fake answers "unfinished" for ever.
+    mark = os.path.join(tmp, "enough-wt", ".sclaude", "local", "feature", "review-unfinished.head")
+    rerun = 'review_unfinished_rerun() { echo RERUN; return 0; }'
+    for entry in (True, False):
+        if os.path.exists(mark):
+            os.remove(mark)
+        out, left = enough_gate("", "unfinished", 0, mode="github", entry=entry, answers=("y",), stubs=rerun)
+        tag = "entry" if entry else "close"
+        check("unfinished-reruns-once-%s" % tag, out.count("RERUN"), 1)
+        check("unfinished-then-asks-%s" % tag, "ASKED: Go on with this head unreviewed?" in out
+              and "this head is unreviewed" in out, True)
+        check("unfinished-yes-closes-%s" % tag, "RC=0" in out and "RUN_STEP" not in out, True)
+        check("unfinished-no-session-%s" % tag, "EDGE review_close review " not in out, True)
+        check("unfinished-rerun-edge-%s" % tag, "EDGE review_close review_run the review did not finish" in out, True)
+    os.remove(mark)
+    out, left = enough_gate("", "unfinished", 0, mode="github", entry=True, answers=("y",), stubs=rerun)
+    check("unfinished-entry-word-set", "WORD=unfinished" in out, True)
+    # Gone on with unreviewed on the way in: the close that follows does not
+    # ask again on that head.
+    out, left = enough_gate("", "unfinished", 0, mode="github", stubs=rerun)
+    check("unfinished-go-on-not-asked-twice", "ASKED" not in out and "RERUN" not in out and "RC=0" in out, True)
+    # Taken once: a later close on the same head asks again.
+    with open(mark) as fh:
+        check("unfinished-go-on-taken-once", fh.read().strip().endswith("go-on"), False)
+    out, left = enough_gate("", "unfinished", 0, mode="github", answers=("y",), stubs=rerun)
+    check("unfinished-later-close-asks", "ASKED: Go on with this head unreviewed?" in out, True)
+    # A yes on the way out leaves no go-on behind.
+    with open(mark) as fh:
+        check("unfinished-close-yes-no-go-on", fh.read().strip().endswith("go-on"), False)
+    # Already run again on this head: asked at once, and "n" runs it again —
+    # here once, the second rerun failing to start, which leaves it open.
+    once = os.path.join(tmp, "unfinished-once")
+    out, left = enough_gate("", "unfinished", 0, mode="github", answers=("n", "n"), stubs=(
+        'review_unfinished_rerun() { echo RERUN; [[ -f %s ]] && return 1; : > %s; }' % (once, once)))
+    check("unfinished-no-reruns", out.count("RERUN") == 2 and out.count("ASKED") == 2, True)
+    check("unfinished-rerun-unstarted-left-open", "RC=1" in out and "could not be started again" in out, True)
+    # Left open on the way in: the step stops rather than open a session that
+    # would find nothing to fix, and a quiet entry writes no way back.
+    for quiet in (False, True):
+        if os.path.exists(once):
+            os.remove(once)
+        out, left = enough_gate("", "unfinished", 0, mode="github", entry="quiet" if quiet else True,
+                                answers=("n", "n"), stubs=(
+            'review_unfinished_rerun() { echo RERUN; [[ -f %s ]] && return 1; : > %s; }' % (once, once)))
+        tag = "quiet" if quiet else "entry"
+        check("unfinished-left-open-stops-%s" % tag, "RC=1" in out and "WORD=stopped" in out, True)
+        check("unfinished-left-open-edges-%s" % tag, ("EDGE review_close review " in out), not quiet)
+    # Nothing to run again (no review run named): asked straight away.
+    os.remove(mark)
+    out, left = enough_gate("", "unfinished", 0, mode="github", answers=("y",),
+                            stubs='review_unfinished_rerun() { return 1; }')
+    check("unfinished-no-run-asks", "ASKED: Go on with this head unreviewed?" in out and "RC=0" in out, True)
     out, left = enough_gate("", "clean", "failed", entry=True)
     check("entry-failed-pass-to-session", "RC=1" in out and "ASKED" not in out, True)
     # Locally, once the search ended, the session's fixes are checked only on

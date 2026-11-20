@@ -1298,6 +1298,10 @@ def feature_in_history(cwd, base="main"):
 #
 # Coupled with `FINDINGS_CHECK` in the project's claude-code-review.yml, which
 # writes it and looks its own marks up by it: change both or neither.
+# Every string a product's review workflow must write is listed for products
+# in docs/setup.md ("What sclaude reads from your review workflow") and shown
+# in sclaude/templates/claude-code-review.yml; tests/review-contract.py checks
+# both carry them.
 FINDINGS_CHECK = "Counts Green/Red sign based on open review comments — whole PR (no AI)"
 
 
@@ -1390,6 +1394,9 @@ def review_state(cwd, pr, repo):
     unreviewed  as clean, except that the workflow skipped the review on
              purpose (marked "not-reviewed"): nothing to answer, and nothing a
              session could do to have it run.
+    unfinished  the review started on the pushed head and handed back before
+             it finished (UNFINISHED_TITLE), with nothing else open: no
+             session could answer it; the review is run again (the gate).
     dirty    something to answer — a red check, an open finding, a comment.
     pending  checks are still running, or not registered yet: ask again later.
     unknown  this cannot be decided: the head is not pushed, the project has
@@ -1444,6 +1451,7 @@ def review_state(cwd, pr, repo):
     if latest is None:
         return "unknown"
     reviews = [c for c in rollup if names_review(c.get("name"))]
+    unfinished = False
     if local:
         mark = "not-reviewed"
     elif not latest and reviews and all(
@@ -1462,10 +1470,16 @@ def review_state(cwd, pr, repo):
         return "pending"
     elif (latest.get("conclusion") or "") != "success":
         # Red only for threads the person kept or resolved by hand is nothing
-        # for a session: close_state answers for those (see YOURS_FILE).
+        # for a session: close_state answers for those (see YOURS_FILE). Nor
+        # is red for a review that did not finish, with no thread open but the
+        # person's: a session would find nothing to fix, and the review is
+        # what has to run again. Their kept threads go as they do on a clean
+        # way in — reported as the step closes; the way out waits for them.
         threads, _ = open_threads(cwd, pr, repo)
         rest = split_yours(cwd, threads or [])[1]
-        if threads is None or rest or not findings_explained(
+        if threads is not None and not rest and review_unfinished(latest):
+            unfinished = True
+        elif threads is None or rest or not findings_explained(
                 cwd, repo, head, {t["url"] for t in rest}, latest):
             return "dirty"
     # Marked "not-reviewed": the workflow skipped the review on purpose (its own
@@ -1499,6 +1513,8 @@ def review_state(cwd, pr, repo):
     for r in human(reviews):
         if (r.get("state") or "") == "CHANGES_REQUESTED" or (r.get("body") or "").strip():
             return "dirty"
+    if unfinished:
+        return "unfinished"
     return "clean" if mark == "reviewed" else "unreviewed"
 
 
@@ -1710,6 +1726,14 @@ def close_state(cwd, pr, repo):
     red = red_checks(rollup)
     threads, _ = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
+    # The findings check alone red, for a review that did not finish, and no
+    # thread open: nothing for a session — the gate runs the review again,
+    # once the person's own threads (`yours`) and any other red are dealt with.
+    if (FINDINGS_CHECK in red and not threads and review_mode(cwd) != "local"
+            and review_unfinished(findings_run(cwd, repo, head))):
+        if red == [FINDINGS_CHECK] and not mine:
+            return "unfinished"
+        red.remove(FINDINGS_CHECK)
     if FINDINGS_CHECK in red and findings_explained(
             cwd, repo, view.get("headRefOid") or "", {t["url"] for t in threads}):
         red.remove(FINDINGS_CHECK)
@@ -1953,6 +1977,37 @@ def findings_explained(cwd, repo, head, open_urls, run=None):
 # The findings check's title when the review could not post some findings as
 # threads. Coupled with the project's claude-code-review.yml, like FINDINGS_CHECK.
 UNTHREADED_TITLE = "posted as a comment, not as threads"
+# In the findings check's title when the review handed back before the
+# code-review skill and every agent it started had finished: the check is red,
+# marked "not-reviewed", and the head is not reviewed. Coupled the same way.
+UNFINISHED_TITLE = "review did not finish"
+
+
+def review_unfinished(run):
+    """Whether a findings run is the review that did not finish: completed,
+    red, not marked "reviewed", and saying so in its title. Not when the title
+    also says findings went unthreaded: those are work for a session."""
+    if not run:
+        return False
+    title = (run.get("output") or {}).get("title") or ""
+    return (UNTHREADED_TITLE not in title
+            and (run.get("status") or "") == "completed"
+            and (run.get("conclusion") or "") != "success"
+            and (run.get("external_id") or "") != "reviewed"
+            and UNFINISHED_TITLE in title)
+
+
+def review_run_id(cwd, pr):
+    """The workflow run of the Claude review job on the pull request's head,
+    for a rerun; "" when the rollup names none."""
+    view = pr_view(cwd, pr, "statusCheckRollup") or {}
+    for c in view.get("statusCheckRollup") or []:
+        if not is_claude_review(c.get("name") or "", c.get("workflowName") or ""):
+            continue
+        link = JOB_LINK.search(c.get("detailsUrl") or c.get("link") or "")
+        if link:
+            return link.group(1)
+    return ""
 # A line of the review job's log carrying what the code-review skill returned.
 SKILL_RESULT = re.compile(r'"content": ("Skill \\"code-review\\" completed.*")\s*,?\s*$')
 SKILL_PREAMBLE = re.compile(r'^Skill "code-review" completed[^\n]*\n+(?:Result:\n)?')
@@ -2128,6 +2183,14 @@ def main():
             sys.stdout.write(merge_red(sys.argv[2], sys.argv[3], sys.argv[4]) + "\n")
         except Exception:
             sys.stdout.write("unknown\n")
+        return 0
+    # `--review-run <cwd> <pr>`: the review job's workflow run on the head, to
+    # run again (review_unfinished_rerun in review_gate.sh); nothing if none.
+    if len(sys.argv) >= 4 and sys.argv[1] == "--review-run":
+        try:
+            sys.stdout.write(review_run_id(sys.argv[2], sys.argv[3]) + "\n")
+        except Exception:
+            sys.stdout.write("\n")
         return 0
     # `--state <cwd> <pr> <repo>`: one word, see review_state.
     if len(sys.argv) >= 5 and sys.argv[1] == "--state":

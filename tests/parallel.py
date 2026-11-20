@@ -411,6 +411,30 @@ def rerun(refused, ago=600):
                           capture_output=True, text=True, timeout=60).stdout.split()
 check("fallback-past-reset-reruns", rerun(False), ["RERUN", "rc=0"])
 check("fallback-refused-rerun-falls-through", rerun(True), ["RERUN", "rc=1"])
+# A review that did not finish is run again by its own run id, and the rerun
+# is waited for until GitHub shows it running — the old red read sooner would
+# look like the rerun not finishing either. No run named: nothing to start.
+def unfinished_rerun(run_id, states):
+    # The view runs in a command substitution: the states are counted in a file.
+    seen = os.path.join(fb, "views")
+    if os.path.exists(seen):
+        os.remove(seen)
+    return subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; LIB="%s"; MERGE_POLL=0\n'
+                           'info() { :; }\npython3() { echo "%s"; }\nSTATES=(%s)\n'
+                           'gh() { if [[ "$2" == view ]]; then echo VIEW >&3; echo x >> %s; '
+                           'local n; n=$(wc -l < %s); echo "${STATES[n-1]:-completed}"; '
+                           'else echo "RERUN $3" >&3; fi; }\nexec 3>&1\n'
+                           'review_unfinished_rerun "$PWD" 1; echo "rc=$?"'
+                           % (LIB, LIB, run_id, " ".join("'%s'" % x for x in states), seen, seen)],
+                          capture_output=True, text=True, timeout=60).stdout.split()
+# A rerun that already ended counts by its newer attempt: no ten idle polls.
+check("unfinished-rerun-waits-for-running",
+      unfinished_rerun("42", ["1", "1 completed", "1 queued"]),
+      ["VIEW", "RERUN", "42", "VIEW", "VIEW", "rc=0"])
+check("unfinished-rerun-newer-attempt-ended",
+      unfinished_rerun("42", ["1", "1 completed", "2 completed"]),
+      ["VIEW", "RERUN", "42", "VIEW", "VIEW", "rc=0"])
+check("unfinished-rerun-no-run", unfinished_rerun("", []), ["rc=1"])
 with open(os.path.join(fb, ".sclaude", "local", "review-fallback"), "w") as fh:
     fh.write("1\tquota\n")
 got = subprocess.run(["bash", "-c", inherit.replace('review_fallback_set "%s" quota 0\n' % fb, "")],

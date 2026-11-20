@@ -169,11 +169,17 @@ breaks the other silently — grep before you edit:
 
   <!-- Added by Claude on 2026-11-03 at the user's request: a night decision
   is confirmed by the person in the morning, and resolved by the session. -->
-- `findings_explained` in `pr_context.py` reads the findings check that the
-  project's `claude-code-review.yml` writes: its title ("N unresolved review
-  findings", "posted as a comment, not as threads") and the `#discussion_r…`
-  links in its summary. Change that workflow's wording and this reads every
-  red check as real again.
+- `findings_explained` and `review_unfinished` in `pr_context.py` read the
+  findings check that the project's `claude-code-review.yml` writes: its title
+  ("N unresolved review findings", `UNTHREADED_TITLE`, `UNFINISHED_TITLE`), its
+  `external_id` and the `#discussion_r…` links in its summary. Change that
+  workflow's wording and this reads every red check as real again. The
+  contract is written out for products in `docs/setup.md` ("What sclaude reads
+  from your review workflow") and shown by `sclaude/templates/claude-code-review.yml`;
+  `tests/review-contract.py` fails when a coupled string is missing from either.
+
+  <!-- Changed by Claude on 2026-11-20 at the user's request: other products
+  need to know what their review workflow has to write for sclaude. -->
 
 - `closed/<id>.json` in a question channel (`.git/sclaude/` or a feature's
   `.git/sclaude/ask/<slug>/`) — how a question ended — is written by

@@ -25,7 +25,7 @@ skipped, and sclaude says so where it would have acted:
 |---|---|---|
 | a dev server that listens on `PORT` — `npm run dev` unless the product names its own in `.sclaude/config.json` (`commands.dev`); for a Node app on WSL, Node through nvm, which `wsl-update` keeps current | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
 | a test suite the product names in `.sclaude/config.json` | the local, preview and production test gates | no test gates |
-| an automatic Claude review on the product's pull requests (a `claude-code-review.yml` workflow) | the findings step 4 works through | step 4 has no findings to work from |
+| an automatic Claude review on the product's pull requests (a `claude-code-review.yml` workflow — start from [sclaude's reference one](#what-sclaude-reads-from-your-review-workflow)) | the findings step 4 works through | step 4 has no findings to work from |
 | a GitHub project board | the issue moving through `In progress`, `In QA`, `Done`; QA's hand-back | QA's verdict cannot be read from the board |
 | Vercel (`vercel` CLI, logged in) | previews and production from sclaude, production rollback | no preview, QA on a deployment or production step |
 | Supabase | per-environment databases, migrations promoted and rolled back with care | no database handling |
@@ -70,6 +70,57 @@ cycle.
 
 `sclaude doctor` checks the required part, and inside a product the parts that
 product uses.
+
+## What sclaude reads from your review workflow
+
+Step 4 is driven by what the automatic review on GitHub leaves on a pull
+request, and sclaude reads it by fixed names and phrases. Start from the
+reference workflow, `sclaude/templates/claude-code-review.yml`: copy it to
+`.github/workflows/claude-code-review.yml`, give the repository the
+`CLAUDE_CODE_OAUTH_TOKEN` secret, and adapt the prompt, the model and the effort
+to taste. Whatever you change, keep what this section lists; the strings in
+quotes are matched verbatim, and the reference workflow marks each one
+**Coupled**. A workflow that writes none of it still works with sclaude, only
+blindly: step 4 then opens a session on every pull request, whatever the
+review found.
+
+**The review job.** Its check name contains the word "review", and its own name
+or its workflow's contains "claude". That is how sclaude tells the review from
+the build, and from Vercel's "Preview Comments". Skip the job by its condition
+when the pull request carries the `no-review` label: sclaude puts that label on
+for a project reviewed on this machine. Run it again on a `/review` comment, the
+way to ask for a review by hand.
+
+**The findings check**, written after every review run, under exactly this name:
+
+    Counts Green/Red sign based on open review comments — whole PR (no AI)
+
+Write it twice under that name: once as a check run, which is the record, and
+once as a commit status, which is the signal (a check run may land in a suite
+that GitHub hides). On the check run:
+
+| field | what sclaude reads in it |
+|---|---|
+| `conclusion` | `success`: nothing of the review is open on the whole pull request. `failure`: findings are open, or the review did not finish |
+| `external_id` | `reviewed` only on a head the review actually read; the next run reads from there. `not-reviewed` otherwise: green when the review skipped on purpose (step 4 then closes, saying the pull request was not reviewed), red when it did not finish |
+| title, findings open | "N unresolved review finding(s)…", with one link per finding in the summary, to its thread (`…#discussion_r<id>`). Once every listed finding is resolved, by the review or by hand, sclaude knows the red is stale and asks for no session |
+| title, findings not threaded | contains "posted as a comment, not as threads": findings no thread stands for. Always work for a session, and sclaude digs them out of the job log for it |
+| title, review not finished | contains "review did not finish": the review handed back before the code-review skill and every agent it started had finished. sclaude runs the review again on that head once by itself, then asks whether to go on with the head unreviewed. It opens no session, since there is nothing to fix. Findings posted as a comment win over it: a title carrying both reads as findings not threaded, so write that one when both hold |
+
+**Findings are review threads.** Each finding is an inline review comment
+posted by a Bot account, on its file and line. sclaude counts the open threads,
+hands them to the review session, and reads replies that begin with two marks:
+"Resolved automatically: " (the review closed the thread as fixed) and
+"Left as it is" from anyone but a Bot (the author declined the finding). A
+finding the review could not post as a thread may go into one ordinary comment
+by the login `claude`.
+
+**The job log.** Keep the action's full output in the log (`show_full_output:
+true`). sclaude reads it to tell why a review did not run: Claude's usage limit
+and when it resets, Actions minutes or billing, a runner that could not reach
+the network. Each of those reruns the review once the limit resets, stops step 4, or moves
+the review to this machine — never to a fixing session. It also reads the code-review skill's own result line,
+for findings that reached no thread.
 
 ## Installation
 

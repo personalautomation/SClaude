@@ -1,0 +1,1274 @@
+# sclaude's reference review workflow. Copy it to a product as
+# `.github/workflows/claude-code-review.yml` and adapt it: it is the automatic
+# Claude review step 4 works through, and it writes what sclaude reads back
+# (docs/setup.md, "What sclaude reads from your review workflow"). The strings
+# marked **Coupled** below are matched by sclaude: reword one and sclaude reads
+# the review wrongly. It needs the `CLAUDE_CODE_OAUTH_TOKEN` secret.
+#
+name: Claude Code Review
+
+on:
+  pull_request:
+    # No `ready_for_review`. It came with the installer's template, whose
+    # review plugin skipped drafts and so had to be woken when one was marked
+    # ready. The review here reads a draft like any pull request, on every
+    # push, and marking a draft ready changes no code — so that event only
+    # bought a second run over a range already read. sclaude marks a pull
+    # request ready the moment QA accepts every issue it closes; with the
+    # event here, that would start a review after QA had said yes.
+    types: [opened, synchronize, reopened]
+  # **`/review` in a comment on a pull request is how to re-run a review on
+  # demand.** A comment from somebody who can write to the repository whose
+  # first word is `/review` runs the whole job on that pull request — on a pull
+  # request from a fork too, under `main`'s instructions (see `gate`).
+  #
+  # It is the better handle for two reasons, both read from the action's
+  # source. The inline-comment server — the only way a finding becomes a
+  # thread the findings check (FINDINGS_CHECK) can count and close — is started only
+  # for an entity event on a pull request (`isEntityContext(context) &&
+  # context.isPR`, src/mcp/install-mcp-server.ts); `issue_comment` on a pull
+  # request is one, `workflow_dispatch` never is. And GitHub runs a workflow
+  # triggered by `issue_comment` from the default branch, so the
+  # workflow-validation refusal described below does not apply: `/review`
+  # reviews a pull request that edits this very file.
+  #
+  # Every comment anywhere starts this workflow; the job's condition lets only
+  # `/review` through, and the concurrency group keeps the rest out of the
+  # review's queue.
+  issue_comment:
+    types: [created]
+  # Kept past the debugging it was added for, as the fallback way to re-run a
+  # review: the action refuses to run when a PR modifies its
+  # own workflow file, and the check is against the default branch rather than
+  # the PR's base, so a dispatch from `main` is the only handle on a changed
+  # version of this file.
+  #
+  # Do not talk yourself out of that sentence. The refusal is quiet — the step
+  # logs
+  #
+  #     Skipping action due to workflow validation: [...] must exist and have
+  #     identical content to the version on the repository's default branch
+  #
+  # as a warning, then exits 0, so the check goes green in about thirteen
+  # seconds and the PR looks reviewed. The two earlier commits that fixed this
+  # file were never reviewed on their own branches either; their green ticks
+  # meant this, and reading them as evidence that a workflow edit gets reviewed
+  # is how a third commit came to make the same mistake.
+  #
+  # The consequence for a PR that touches this file: it cannot be reviewed on
+  # its own branch at all, and the review it needs happens after merge, by
+  # dispatching this workflow from `main` at an open PR.
+  #
+  # Note when using it: the review stops on a pull request that is closed, so
+  # dispatching at an already-merged PR reports nothing and that is correct
+  # behaviour, not a failure. Point it at an open one.
+  #
+  # And it posts no threads: a dispatched run has no inline-comment tool (see
+  # `/review` above), so its findings land in one ordinary comment and are
+  # counted as `unthreaded`. Prefer `/review`.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to review"
+        required: true
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+# One review per pull request at a time. Two pushes in a row otherwise start
+# two full reviews side by side, each reading the commits since the last
+# finished review — nearly the same commits — and each free to post the
+# same findings.
+#
+# `cancel-in-progress: false`, so the second waits for the first rather than
+# stopping it: a review cancelled halfway may already have posted some of its
+# findings, and the one after it would find them again. Waiting, the second
+# starts after the first has marked its commit reviewed (see "List open
+# findings"), and reads only what arrived since.
+# GitHub keeps one pending run per group, so a third push replaces the
+# waiting second rather than queueing behind it — which loses nothing, since
+# the one that does run reads everything since the last review.
+concurrency:
+  # A comment that is not the `/review` command gets a group of its own — its
+  # run id — and is skipped there. In the pull request's group it would take
+  # the one pending place GitHub keeps, and replace a review waiting behind a
+  # running one with a run that does nothing.
+  #
+  # **The same test as the `gate` job's condition, word for word — change both
+  # or neither.** It used to be `startsWith(body, '/review')` alone, so
+  # "/reviewed, LGTM" or a stranger's `/review` took the waiting place and was
+  # then skipped by the job, and the push review it replaced never ran. The
+  # group can read only `github`, `inputs` and `vars`, so this is everything it
+  # can know: on a pull request, the body is the command, from somebody in the
+  # repository.
+  #
+  # What it cannot know is read from write: GitHub calls a collaborator with
+  # read access `COLLABORATOR` too. So a `/review` from such a person still
+  # takes the waiting place before `gate` refuses it. Accepted: the commits of
+  # the review it displaced are read by the next review, as for any run that
+  # leaves no mark (see "List open findings").
+  group: >-
+    claude-review-${{
+      (github.event_name != 'issue_comment'
+       || (github.event.issue.pull_request
+           && (github.event.comment.body == '/review'
+               || startsWith(github.event.comment.body, '/review ')
+               || startsWith(github.event.comment.body, fromJSON('"/review\n"'))
+               || startsWith(github.event.comment.body, fromJSON('"/review\r\n"')))
+           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
+      && (github.event.pull_request.number || github.event.issue.number || inputs.pr)
+      || github.run_id }}
+  cancel-in-progress: false
+
+# The review's open findings, read three times: before the review, to hand
+# it the findings it left earlier; after it, to refuse closing anything
+# that is not one of them; and at the end, to count what is left. Here
+# rather than on a job because two jobs read them.
+#
+# **The author is `claude` here, not `claude[bot]`.** GraphQL drops the
+# suffix REST shows. Filtering on `claude[bot]` matches nothing, and a
+# count of nothing is a green check over findings nobody addressed — the
+# exact failure the check exists to prevent. `__typename` keeps a person
+# whose login happens to be `claude` out of it.
+#
+# Every thread, a hundred to a page (`--paginate --slurp`, joined into one
+# answer by FINDINGS_PAGES), first 50 comments each. It used to be the first
+# 100 threads only: one pull request reached 108, threads come oldest first, and the eight
+# a full re-read had just posted were past the end — the check said "no
+# unresolved review findings" over eight open ones, the commit was marked
+# reviewed, and the next run would not have been handed them to close.
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  # The effort level `/code-review` runs at, and the most findings that level
+  # reports in one run. The cap is not ours: Claude Code picks a recipe per
+  # model and level, and for Opus at `medium` it is "8 inline angles → dedup
+  # (no verify) → ≤8 findings". Change one, look up the other — the recipe line
+  # is the second paragraph of the review's prompt in the job log.
+  #
+  # `medium`, not `high`: `high` reviews for recall and `medium` for precision,
+  # with the same categories of finding. On one large pull request `high` ran 27 rounds and never
+  # reached zero, the later ones mostly about the previous round's fixes; a
+  # finding that is only plausible costs a round of fixing and a round of
+  # reviewing the fix.
+  REVIEW_EFFORT: medium
+  REVIEW_CAP: 8
+  # The check that turns red while any finding of the review is open on the
+  # pull request — counted over the whole PR, not over this run's delta.
+  #
+  # **Coupled.** "List open findings" finds the last reviewed commit by this
+  # name, and sclaude reads it (FINDINGS_CHECK in sclaude/lib/review/pr_context.py) to
+  # decide whether step 4 has anything to answer. It is also the context of the
+  # status "Report review findings" posts, which sclaude matches by the same
+  # constant. Change all three or none.
+  # A commit marked under an older name is not found, so the first run after a
+  # rename reviews the whole pull request.
+  FINDINGS_CHECK: Counts Green/Red sign based on open review comments — whole PR (no AI)
+  FINDINGS_QUERY: >-
+    query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          headRefOid
+          reviewThreads(first: 100, after: $endCursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id isResolved isOutdated path line originalLine
+              comments(first: 50) {
+                nodes { author { __typename login } body url createdAt }
+              }
+            }
+          }
+        }
+      }
+    }
+  FINDINGS_PAGES: >-
+    {data: {repository: {pullRequest: {
+      headRefOid: .[0].data.repository.pullRequest.headRefOid,
+      reviewThreads: {nodes: [.[].data.repository.pullRequest.reviewThreads.nodes[]]}
+    }}}}
+  FINDINGS_OPEN: >-
+    .data.repository.pullRequest.reviewThreads.nodes
+    | map(select((.isResolved | not)
+                 and .comments.nodes[0].author.__typename == "Bot"
+                 and .comments.nodes[0].author.login == "claude"))
+  # The review's findings the author declined. FINDINGS_OPEN leaves resolved
+  # threads out, so the review never saw them, and every run raised them
+  # again — reworded, a few lines away, five times over in one pull request.
+  # They go into open-findings.json as `declined`, and the prompt tells the
+  # review not to raise them again.
+  #
+  # A decline is explicit. The thread's decision replies are those starting
+  # "Resolved automatically:" (the mark "Close fixed findings" leaves) or
+  # "Left as it is" from anyone but a Bot (the author, or the step 4 session
+  # posting as the author). A resolved thread is declined when its last
+  # decision reply is a "Left as it is" one, and that reply is its reason
+  # (`.decline`). Last, not any: a thread closed automatically, reopened and
+  # then declined is declined; one declined, reopened and fixed is not. A
+  # resolved thread with no decision reply is neither open nor declined. It
+  # used to count as declined, but people and fixing sessions resolve a fixed
+  # finding without a word, so the missing automatic reply proved nothing: a
+  # fixed finding was shown to the review as one never to raise again, and a
+  # bug that came back stayed silent.
+  FINDINGS_DECLINED: >-
+    .data.repository.pullRequest.reviewThreads.nodes
+    | map(select(.isResolved
+                 and .comments.nodes[0].author.__typename == "Bot"
+                 and .comments.nodes[0].author.login == "claude")
+          | (.comments.nodes[1:]
+             | map(select((.body | test("^\\s*Resolved automatically:"))
+                          or (.author.__typename != "Bot"
+                              and (.body | test("^\\s*Left as it is")))))
+             | last) as $decision
+          | select($decision != null and ($decision.body | test("^\\s*Left as it is")))
+          | .decline = $decision)
+
+jobs:
+  # Who may start a review, decided before anything spends a token. No model,
+  # no checkout, nothing from the pull request: the one thing here that can
+  # write is a comment.
+  #
+  # **`/review` needs write access — write, maintain or admin — not merely a
+  # place in the repository.** `COLLABORATOR` and `MEMBER` include people with
+  # read access only, and the condition below cannot see the difference. The
+  # action checks write itself, but only once its job is running: the refused
+  # `/review` used to start the review job, run "List open findings", and fail
+  # red with nothing on the pull request to say why. Here a refusal is a green
+  # gate, a skipped review, no findings check — and one comment saying what
+  # was missing. Somebody outside the repository never reaches this job: the
+  # condition skips it, and they get nothing back at all.
+  #
+  # A push and a dispatch are let through: a push is not anybody's request,
+  # and dispatching already takes write.
+  #
+  # **Pull requests from forks are reviewed**, on `/review` from somebody with
+  # write, on the fork's code — with Claude's instructions taken from `main`
+  # ("Take Claude's instructions from main" below). Nothing starts a review of
+  # a fork by itself: the repository's Actions settings run no workflow for a
+  # fork's pull request and pass it no secrets, so opening or pushing to one
+  # costs nothing. Whether the pull request is a fork is printed in the log.
+  #
+  # Named without the word "review": sclaude would read it as the review
+  # itself (pr_context.py).
+  gate:
+    name: Who may start it — write access only (no AI)
+    # Dependabot cannot start this review at all: the action refuses a run
+    # initiated by a bot and exits 1, so every dependency PR carried a red
+    # `claude-review` that said nothing about its diff. This skips the job
+    # instead, which turns that red into a skip.
+    #
+    # Read what it costs, because it is the failure this file otherwise spends
+    # a thousand words guarding against. A skipped job is green to every
+    # branch-protection rule, so from here on a Dependabot PR reports the same
+    # tick whether its bump is a patch or a major with breaking changes, and
+    # nothing reviews the second kind. That is accepted because the `checks`
+    # workflow still builds, typechecks, lints and tests these PRs, and a
+    # version bump's risk lives there rather than in a diff of two files.
+    #
+    # The alternative, if that trade stops being worth it, is the action's own
+    # `allowed_bots` — it lets the review actually run on these PRs rather than
+    # pretending it did. Prefer it over widening this condition to more actors.
+    #
+    # The `no-review` label is the second skip, and unlike the first it is a
+    # decision rather than a workaround: the author has looked at the diff and
+    # judged it not worth a review's tokens. `/pr no-review` puts it on at
+    # creation; adding it by hand later works the same way. It is checked here
+    # rather than only at creation because `synchronize` fires on every push to
+    # the branch, and a label read only once would let the second commit start
+    # the review the first one declined.
+    #
+    # It costs exactly what the Dependabot skip costs, and the same sentence
+    # applies: a skipped job is green, so a `no-review` PR's tick says nothing
+    # about its diff. The `checks` workflow still runs — build, typecheck, lint,
+    # tests — so what is given up is the reading, not the checking. Use it for
+    # changes whose risk lives in those checks; a policy, a grant, a migration
+    # or an auth path is not one of them.
+    #
+    # Removing the label does not start a review on its own: `labeled` and
+    # `unlabeled` are deliberately not triggers, since a label event carries no
+    # new commits and would re-review the same diff. To review after the fact,
+    # push to the branch, or comment `/review` on the pull request — the handle
+    # the comment at the top of this file describes.
+    #
+    # `/review` is let through only on a pull request, only as the whole
+    # comment or its first word — "/reviewed, LGTM" and "/review-later" are not
+    # the command — and only from somebody in the repository. Nobody else's
+    # comment starts anything: no run, no check, no reply. Whether that person
+    # can also *write* is the job's own step below, because the expression
+    # cannot tell (see the concurrency group, which repeats this test and must
+    # keep matching it). It is not stopped by `no-review` — a person asking
+    # for a review outranks a label saying none is needed.
+    if: >-
+      github.actor != 'dependabot[bot]'
+      && (
+        (github.event_name != 'issue_comment'
+         && !contains(github.event.pull_request.labels.*.name, 'no-review'))
+        || (github.event_name == 'issue_comment'
+            && github.event.issue.pull_request
+            && (github.event.comment.body == '/review'
+                || startsWith(github.event.comment.body, '/review ')
+                || startsWith(github.event.comment.body, fromJSON('"/review\n"'))
+                || startsWith(github.event.comment.body, fromJSON('"/review\r\n"')))
+            && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      )
+
+    runs-on: ubuntu-latest
+    permissions:
+      # For the refusal comment, and nothing else.
+      pull-requests: write
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      # `collaborators/<login>/permission` answers `admin`, `write`, `read` or
+      # `none` in `.permission` — that legacy field reports `maintain` as
+      # `write` and `triage` as `read`, which is exactly the line drawn here.
+      # `.role_name` has the precise role and is printed for the record.
+      #
+      # **Fails closed.** If GitHub does not answer, no review starts and the
+      # comment says the access could not be checked; the log has the error.
+      # A failed comment is a warning, not a red gate: the refusal is the skip.
+      #
+      # The login and the texts reach the shell through env, never expanded
+      # into the script.
+      - name: Check who asked
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          LOGIN: ${{ github.event.comment.user.login }}
+        run: |
+          if fork=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isCrossRepository --jq .isCrossRepository 2>&1); then
+            echo "Pull request #$PR_NUMBER is from a fork: $fork"
+          else
+            echo "::warning::Could not tell whether #$PR_NUMBER is from a fork ($fork)."
+          fi
+
+          if [ "$EVENT" != issue_comment ]; then
+            echo "Started by $EVENT, not by a comment: nobody to check."
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          body=
+          if ! perm=$(gh api "repos/$REPO/collaborators/$LOGIN/permission" --jq '"\(.permission) \(.role_name)"' 2>&1); then
+            echo "::warning::Could not read the access of $LOGIN ($perm). Not starting the review."
+            allowed=false
+            body="@$LOGIN, \`/review\` needs write access to this repository, and GitHub did not say whether you have it, so no review was started. Try again later, or ask a maintainer."
+          else
+            read -r level role <<<"$perm"
+            role=${role:-$level}
+            echo "$LOGIN: permission $level, role $role"
+            case $level in
+              admin|write) allowed=true ;;
+              *)
+                allowed=false
+                body="@$LOGIN, \`/review\` needs write access to this repository; yours is \`$role\`, so no review was started. Somebody with write access can start one by commenting \`/review\`."
+                ;;
+            esac
+          fi
+
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+          if [ -n "$body" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$body" \
+              || echo "::warning::Could not post the refusal comment."
+          fi
+
+  claude-review:
+    # Says what it reads: the delta since the last reviewed commit, and the
+    # whole PR once a run finds every open finding fixed (step 4 of the
+    # prompt). "Review" must stay a word in it: sclaude tells a review still
+    # running from a project with none by a check named so (pr_context.py).
+    name: Review — delta, whole PR once all fixed (Opus)
+    # Only what `gate` let through. Its condition is the one that used to be
+    # here; a skipped gate skips this too.
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # write, not read: an inline comment is a write. With `read` the review
+      # can reach a finding and then fail to say it, which is indistinguishable
+      # from having found nothing.
+      pull-requests: write
+      issues: read
+      id-token: write
+      # Read, for "List open findings": the last reviewed commit is found by
+      # the findings check run on it, and without this every request
+      # for check runs answered 403. The loop swallowed it, `base_sha` came out
+      # null, and every review read the whole pull request — on a large pull request, about
+      # $5 a push for ten thousand lines already reviewed. Nothing the model
+      # does reaches this token's check runs; it is the step's alone.
+      checks: read
+    # **The model's commands do not see the secrets.** With this set, Claude
+    # Code strips the Anthropic, cloud and Actions credentials from every
+    # command it runs for the model, and runs those commands in a bubblewrap
+    # sandbox of their own ("Isolate the model's commands" installs it). The
+    # action turns this on by itself only for `allowed_non_write_users`; here it
+    # is on for every run, because the code under review — a fork's above all —
+    # is text the model reads, and text can ask it to print its environment.
+    #
+    # It also covers two entries of the whitelist below that can run commands
+    # of their own: `find -exec` and `git fetch --upload-pack`. Both stay,
+    # because the review was refused without them (see the comment there); with
+    # the scrub, what they could run no longer sees anything worth taking.
+    #
+    # Claude Code also forces the default permission mode when this is on.
+    # That changes nothing here: the review already runs in it, with an
+    # explicit `--allowedTools`.
+    #
+    # Job level, not the step's: the action reads it from `env`, and its own
+    # documentation names the job or the workflow as the place.
+    env:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+    # What the `close-fixed-findings` job below acts on.
+    outputs:
+      resolved: ${{ steps.claude-review.outputs.structured_output }}
+      head_sha: ${{ steps.open-findings.outputs.head_sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # 0, not 1: the review reads the change against the git history of
+          # the lines it touches, and a depth-1 checkout has no
+          # history to read. Allowing `git log` and `git blame` without this
+          # would hand that reviewer two commands that answer nothing.
+          fetch-depth: 0
+          # A dispatch or a `/review` comment would otherwise check out `main`,
+          # the ref both run from, and the reviewer's `Read` and `Grep` would
+          # see `main`: the pull request's changed files in their old version,
+          # its new files not at all. The merge ref is what a `pull_request`
+          # run checks out by default, so every trigger reviews the same tree.
+          # Only the code comes from the pull request; the workflow itself is
+          # still the one on `main`.
+          ref: ${{ github.event_name != 'pull_request' && format('refs/pull/{0}/merge', env.PR_NUMBER) || '' }}
+
+      # **The instructions under review do not govern their own review.** Every
+      # file Claude Code reads as instructions or configuration is taken from
+      # `main` before anything else runs — `CLAUDE.md`, `CLAUDE.local.md`,
+      # `AGENTS.md`, `.mcp.json`, `.claude.json`, `.gitmodules`, `.ripgreprc`,
+      # and the directories `.claude` and `.husky` — **in every folder**, not
+      # only at the top. Whatever the pull request has under those names is
+      # removed, and what `main` has under them is put back.
+      #
+      # The action does part of this itself, and the part it skips is why this
+      # step exists. For a comment on a pull request it restores the
+      # top-level ones from `origin/main` ("PR head is untrusted" in its log),
+      # but its list has no `AGENTS.md` — which our `CLAUDE.md` imports with
+      # `@AGENTS.md`, so `main`'s rules pulled in the pull request's — and it
+      # never looks into subfolders, where Claude Code loads a `CLAUDE.md` as
+      # soon as it reads a file beside it. A dispatch is not a pull-request
+      # event to it at all, so there it restores nothing, and a planted
+      # `.claude/settings.json` — hooks are shell commands — would have run
+      # with this job's secrets. On a pull request from a fork this is what
+      # makes reviewing it safe; for every other trigger it is the same rule,
+      # so one step serves all of them.
+      #
+      # What it costs: a pull request that legitimately changes a `CLAUDE.md`
+      # is reviewed under `main`'s version of it. The change is still the
+      # review's to read — the reviewer reads code with `git show
+      # <head_sha>:<path>`, which this step does not touch. The action's own
+      # restore, later, finds `main`'s files already here and changes nothing.
+      #
+      # What it does not cover: text in ordinary files. A comment in the code
+      # under review that addresses the model is that code, and the review has
+      # to read it; the subprocess isolation on the review step is what keeps
+      # such text from reaching the secrets.
+      #
+      # `.git` is never touched. Nothing is left staged. The list of what was
+      # replaced goes to the log and to the Step Summary — that is where to
+      # check that a planted instruction was taken out.
+      - name: Take Claude's instructions from main
+        run: |
+          git fetch --quiet --no-recurse-submodules origin +refs/heads/main:refs/remotes/origin/main
+
+          names='CLAUDE.md CLAUDE.local.md AGENTS.md .mcp.json .claude.json .gitmodules .ripgreprc'
+          dirs='.claude .husky'
+          find_args=()
+          for n in $names $dirs; do find_args+=(-o -name "$n"); done
+
+          # Every match at any depth, of any type — a symlink named
+          # `CLAUDE.md` counts — and nothing below a matched directory.
+          mapfile -d '' -t present < <(find . -path ./.git -prune -o \( -false "${find_args[@]}" \) -print0 -prune)
+          for p in "${present[@]}"; do rm -rf -- "$p"; done
+
+          # Every path on `main` with one of those names, or inside one of
+          # those directories.
+          pattern="(^|/)($(sed 's/\./\\./g; s/ /|/g' <<<"$names"))\$|(^|/)($(sed 's/\./\\./g; s/ /|/g' <<<"$dirs"))/"
+          mapfile -t restore < <(git ls-tree -r --name-only origin/main | grep -E "$pattern" || true)
+          if [ ${#restore[@]} -gt 0 ]; then
+            git checkout origin/main -- "${restore[@]}"
+          fi
+          git reset --quiet
+
+          {
+            echo "### Claude's instructions, taken from main"
+            echo
+            echo "Removed from the pull request's tree (${#present[@]}):"
+            echo
+            for p in "${present[@]}"; do echo "- \`${p#./}\`"; done
+            [ ${#present[@]} -gt 0 ] || echo "- none"
+            echo
+            echo "Put back from \`main\` (${#restore[@]}):"
+            echo
+            for p in "${restore[@]}"; do echo "- \`$p\`"; done
+            [ ${#restore[@]} -gt 0 ] || echo "- none"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The findings this review left on earlier runs and nobody has closed,
+      # written where the reviewer can `Read` them. They come from here rather
+      # than from the model asking GitHub itself because asking takes
+      # `gh api graphql`, and with `pull-requests: write` that command can do
+      # anything to the pull request — the whitelist below exists to keep a
+      # review from writing anything but comments.
+      #
+      # It also fetches the pull request's head by name. The checkout above
+      # holds it as a parent of the merge ref, but `git show <head>:<path>` —
+      # how the reviewer reads the code a finding points at — should not
+      # depend on how that ref was fetched.
+      #
+      # And it works out where the last finished review stopped: `base_sha`,
+      # the newest commit of the pull request whose findings check
+      # carries `external_id: reviewed` — which "Report review findings" puts
+      # there only after a review that really ran. The reviewer is handed
+      # `base_sha..head_sha` instead of deciding from timestamps what it has
+      # already read, which it used to, and got wrong two ways:
+      #
+      # - It compared the newest commit's `committedDate` with its own last
+      #   comment. That is when the commit was made, not pushed, so a commit
+      #   pushed while a review was running — every push the concurrency queue
+      #   above holds back — was older than that review's comment and never
+      #   read at all.
+      # - A review with findings posts only inline threads and no comment in
+      #   the pull request's conversation, so after one the boundary did not
+      #   move and the next run read the same commits again.
+      #
+      # A failed, cancelled or skipped run leaves no mark, so its commits fall
+      # into the next run's range by themselves. After a force-push the old
+      # commits are gone from the pull request, no mark is found, and the
+      # whole pull request is reviewed — right for a rewritten history.
+      #
+      # `continue-on-error`: without this list the review still runs, it just
+      # closes nothing and reviews the whole pull request, and the check at
+      # the end still counts truthfully.
+      - name: List open findings
+        id: open-findings
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .claude-review
+          data=$(gh api graphql --paginate --slurp -f query="$FINDINGS_QUERY" \
+                   -F owner='${{ github.repository_owner }}' \
+                   -F name='${{ github.event.repository.name }}' \
+                   -F number="$PR_NUMBER" | jq -c "$FINDINGS_PAGES")
+          head=$(jq -r '.data.repository.pullRequest.headRefOid' <<<"$data")
+          git fetch --quiet origin "+refs/pull/$PR_NUMBER/head"
+          base=
+          # A failed request is said out loud and ends the search. It used to
+          # read as "not reviewed" and move on, so a missing permission looked
+          # exactly like a pull request nobody had reviewed yet — and cost a
+          # full review on every push without a word in the log.
+          for oid in $(gh pr view "$PR_NUMBER" --json commits --jq '.commits | reverse | .[].oid'); do
+            if ! marked=$(gh api -X GET "repos/${{ github.repository }}/commits/$oid/check-runs" \
+                            -f check_name="$FINDINGS_CHECK" \
+                            --jq 'any(.check_runs[]; .external_id == "reviewed")' 2>&1); then
+              echo "::warning::Could not read the review marks ($marked); reviewing the whole pull request."
+              break
+            fi
+            if [ "$marked" = true ]; then
+              base=$oid
+              break
+            fi
+          done
+          echo "last reviewed commit: ${base:-none}, head: $head"
+          jq --arg head "$head" --arg base "$base" "{head_sha: \$head, base_sha: (if \$base == \"\" then null else \$base end), findings: ($FINDINGS_OPEN | map({
+                thread_id: .id,
+                path,
+                line: (.line // .originalLine),
+                outdated: .isOutdated,
+                finding: .comments.nodes[0].body,
+                replies: [.comments.nodes[1:][] | {author: .author.login, at: .createdAt, body}]
+              })), declined: ($FINDINGS_DECLINED | map({
+                path,
+                line: (.line // .originalLine),
+                finding: .comments.nodes[0].body,
+                reason: .decline.body
+              }))}" <<<"$data" > .claude-review/open-findings.json
+          echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+          echo "$(jq '.findings | length' .claude-review/open-findings.json) open findings from earlier runs"
+          echo "$(jq '.declined | length' .claude-review/open-findings.json) findings the author declined"
+          jq -r '.declined[] | "  \(.path):\(.line) — \(.reason | gsub("\\s+"; " ") | .[:100])"' .claude-review/open-findings.json
+
+      # The sandbox the scrub needs. **Without bubblewrap Claude Code does not
+      # start at all** once CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set ("bubblewrap
+      # is required for subprocess env scrubbing and isolation"), and the
+      # action installs it only for `allowed_non_write_users` — so this is the
+      # action's own install step, run for us. The sysctl lifts Ubuntu 24.04's
+      # AppArmor restriction on the user namespaces bubblewrap uses.
+      #
+      # The last line proves the sandbox starts, and is the line to look for in
+      # the log to see that the model's commands ran isolated.
+      - name: Isolate the model's commands
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends bubblewrap socat && break
+            echo "apt-get attempt $i failed, retrying..."
+            sleep 5
+          done
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --unshare-pid --dev /dev --proc /proc true
+          echo "Subprocess isolation on: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, $(bwrap --version) — secrets are hidden from the commands the model runs."
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Both default to false, and both are on deliberately: without them a
+          # finished run is unreadable. The sanitiser is all-or-nothing — it
+          # drops every `assistant` and `user` message and keeps only `init` and
+          # the final `result`, so a review that worked and one that never
+          # started differ by nothing but a turn count. Which tools ran, what
+          # they returned, and what the reviewer concluded are all in the half
+          # that gets suppressed.
+          #
+          # `show_full_output` puts the whole message stream in the job log;
+          # `display_report` puts the readable report in the Step Summary, which
+          # is where to look first. The action marks both as a warning because
+          # tool results reach the log verbatim — a `Read` of a file appears in
+          # full. That is accepted here: the repository is private, this project's
+          # secrets live with its hosting providers rather than in tracked files, and
+          # the reviewer is confined to the read-only tools listed below. Adding
+          # a tool that reads credentials means revisiting this.
+          #
+          # `ACTIONS_STEP_DEBUG=true` — the "Re-run with debug logging" button —
+          # forces the same full output for one run, so a re-run stays useful for
+          # anything these two do not cover.
+          show_full_output: true
+          display_report: true
+          # The review is Claude Code's built-in `/code-review`, not the
+          # `code-review@claude-code-plugins` plugin this file used to install.
+          # A large pull request is why: 74 files and ~9,700 changed lines, and the plugin's run
+          # read about a third of them. The main session never followed the
+          # plugin's steps at all — no eligibility agent, no five reviewers, no
+          # scoring. It looked at the file list, decided on its own what
+          # mattered, gave two agents nine paths between them, and posted "No
+          # issues found" over the fifty files nobody opened. Seven turns, a
+          # green tick, and nothing to tell that review from a thorough one.
+          #
+          # What the command does is chosen by Claude Code per model and effort
+          # level, and printed as the first line of its own prompt. For Opus at
+          # `high` it was "8 inline angles → dedup (no verify) → ≤10 findings":
+          # one agent reads the diff from eight angles in a single context —
+          # no subagents, and no second agent checking each finding — and
+          # reports at most ten. On that pull request it read 69 of 77 files (the three
+          # left were an e2e spec, seed data and a seeding script) and posted
+          # nine findings, in seven minutes. `high` reviews for recall rather
+          # than for the fewest false positives; the run is now at `medium`,
+          # the same eight angles for precision and at most eight findings
+          # (see REVIEW_EFFORT). Its `--comment` posts through
+          # `mcp__github_inline_comment__create_inline_comment`, which the
+          # whitelist below already allows.
+          #
+          # **A review after a push reads only the fixes.** One pass never
+          # finds everything — on that pull request, five whole-PR passes found 10, 9, 8, 6
+          # and 14 new problems in code the earlier ones had read — and fixes
+          # made point by point can break what was right around them. So the
+          # run whose short review finds the fixing done (nothing new, and the
+          # last open findings — at least one — now fixed) reads the whole pull
+          # request once more, in the
+          # same run: a `/review` comment posted by this workflow's token would
+          # start no workflow, and a dispatch posts no threads. The cycle ends
+          # when a whole-pull-request review finds nothing.
+          #
+          # **The cap is the blind spot on a large diff.** With more real
+          # problems than REVIEW_CAP, the review posts the most severe and
+          # drops the rest without saying so, and the next push reviews only
+          # the new commits — the dropped ones would never surface. So the
+          # review reports how many findings it produced, and a run that
+          # reached the cap leaves its commit unmarked: the next run reads the
+          # same range again, does not repost what is open, and so brings the
+          # next batch.
+          #
+          # **The prompt is for the main session, and the main session invokes
+          # the command — the prompt does not start with it.** The first
+          # version did, and the command reads everything after its flags as
+          # the review target: the whole prompt arrived inside the review as
+          # "Review target: `<number> You are running unattended…`". The review
+          # followed it well enough (a dispatch found ten real
+          # issues), but the main session was told nothing, ended when the
+          # command returned, and never produced the structured output — so
+          # `claude-review` went red and the commit was never marked reviewed.
+          # Now the main session works out the range, hands the command a short
+          # target, and does the pass over open findings itself afterwards.
+          #
+          # **A dispatched run has no inline-comment tool.** The action starts
+          # the `github_inline_comment` server only for a pull-request event;
+          # on `workflow_dispatch` the session's `mcp_servers` is empty, and the
+          # command falls back to one ordinary comment. Findings there are not
+          # threads, so the findings check — which counts threads — read the ten
+          # findings of that dispatch as none, and turned green. The review now
+          # reports how many findings it could not post as threads, and that
+          # step counts them as open and does not mark the commit reviewed, so
+          # the next run on a push reviews the range again and posts them where
+          # they can be tracked.
+          #
+          # **A range target posts nothing.** Handed `git diff <base>..<head>`
+          # as its scope, the command reads the target as a commit range rather
+          # than a pull request, and with a range it drops `--comment`: "The
+          # review target is a commit range, not a PR, so `--comment` was
+          # ignored. Nothing was posted." Every delta review on one pull request ended that
+          # way — the findings check went red on `unthreaded` with nothing on
+          # the pull request to answer, and each fixing session had to dig the
+          # findings out of the run log. The main session has the inline-comment
+          # tool itself on a pull-request event, so it now posts whatever the
+          # command left unposted; on a dispatched run, which has no such tool,
+          # it puts them all in one ordinary comment instead.
+          #
+          # The paragraph about not ending a turn to wait stays: it is what
+          # stood between this file and the fourth green-but-unreviewed cause,
+          # a reviewer that said "I'll wait for the agent" and exited in 43
+          # seconds, and it costs nothing if nothing needs it.
+          prompt: |
+            You are running unattended in GitHub Actions, reviewing the pull
+            request ${{ github.repository }}#${{ env.PR_NUMBER }}.
+            There is no session to wake you: when you end your turn, the
+            process exits and the run is over, whatever was still pending.
+
+            So never end a turn to wait for something. If a tool tells you an
+            agent is running in the background and that you will be notified,
+            you will not be — collect its result within this same turn before
+            you continue, and if you cannot, do that step's work yourself
+            instead. Do not schedule a wakeup, do not poll, and do not stop
+            after launching work to report that you are waiting for it.
+
+            1. Read `.claude-review/open-findings.json`. `base_sha` is the
+               last commit a finished review covered, `head_sha` the one to
+               review now; `findings` are the review's earlier findings that
+               are still open; `declined` are earlier findings the author
+               explicitly decided to leave as they are, each with the author's
+               reply as its `reason`. If the
+               file is missing, treat `base_sha` as null, `findings` and
+               `declined` as empty, and take `head_sha` from
+               `gh pr view`. If the pull request is closed, skip to step 3
+               with nothing to review and say so.
+
+            2. Run the review, unless `base_sha` equals `head_sha` — then
+               nothing has arrived since the last review; skip to step 3 and
+               say that this is why. Invoke the `code-review` skill with the
+               Skill tool, with these arguments on one line:
+
+                   ${{ env.REVIEW_EFFORT }} --comment ${{ env.PR_NUMBER }} <scope>
+
+               where `<scope>` is plain words saying: review `git diff
+               <base_sha>..<head_sha>` (or, when `base_sha` is null, the whole
+               pull request); review every changed file in it, none left out
+               as unimportant, generated files may be skimmed; read code as it
+               is on `head_sha` with `git show <head_sha>:<path>` — several
+               files in one call, `git show <head_sha>:<a> <head_sha>:<b>`,
+               since a shell loop (`for … do … done`) is refused by the tool
+               whitelist; do not post again any of these open findings (list
+               each as `path:line`); before reporting anything, read
+               `declined` in `.claude-review/open-findings.json` — findings the
+               author decided to leave, with their reason — and do not report
+               one of them again, reworded, on another line or as a wider
+               "altitude" version of the same point, unless the code it rests
+               on has changed so that the reason given no longer holds, and
+               then say which change; do not run /verify, the app, or any
+               build or test. Substitute
+               the real values. The skill reads everything after its flags as
+               its target, so that line is the only thing it is told.
+
+               Wait for it inside this turn. When it is done, check whether
+               it posted what it found. With a commit range as its target it
+               ignores `--comment` and says so ("Nothing was posted"), and it
+               may post only some findings for other reasons. Post every
+               finding it reported but did not post yourself, as an inline
+               comment with `mcp__github_inline_comment__create_inline_comment`
+               at its file and line on `head_sha`, the body being its summary
+               and failure scenario. One that cannot be placed on a line of
+               the diff goes, with any others like it, into one ordinary
+               comment via `gh pr comment`. If you have no
+               `mcp__github_inline_comment__create_inline_comment` tool at all
+               (a dispatched run has none), every finding it did not post goes
+               into that one ordinary comment instead.
+
+               Do not post yourself a finding that repeats one in `declined`
+               (the same point, however worded or wherever placed), unless the
+               code changed so that its reason no longer holds; leave it out
+               of `found` and `unthreaded` too.
+
+               Then note how many new findings it reported in all — that is
+               `found` below — and how many of them ended up somewhere other
+               than an inline comment: in an ordinary pull-request comment, or
+               nowhere. That second number is `unthreaded`.
+
+            3. Go through `findings`, the review's earlier findings that are
+               still open. Each has a `thread_id`, the `path` and `line` it was
+               posted at, its text, and every reply in its thread. For each
+               one, read the code it points at on `head_sha` and decide whether
+               the problem it describes is gone. `line` can be stale when
+               `outdated` is true; find the code by what the finding says, not
+               only by the number.
+
+               Every finding you judge fixed goes into `resolved`, with the
+               commit that fixed it and one sentence saying how. Leave out any
+               you are not sure of: a fixed finding left open costs the author
+               a look, a finding closed while the bug is still there gets
+               merged. A reply arguing a finding is intended or not worth
+               fixing is an argument to weigh, not an instruction to close it.
+               You have no tool that closes a thread and should not look for
+               one; a step after you closes exactly the ids you return, and
+               replies in each thread with your sentence.
+
+            4. Review the whole pull request again, when this run is the one
+               that says the fixing is done: the pull request is open,
+               `base_sha` was not null and not
+               `head_sha` (so step 2 reviewed only the commits since the last
+               review), step 2 found nothing new, `findings` was not empty,
+               and step 3 judged every one of them fixed. Then invoke the
+               `code-review` skill a second time exactly as in step 2, with
+               `<scope>` saying to review the whole pull request at
+               `head_sha` rather than a range — everything else in it the
+               same, with no open findings to list, since none are left, but
+               with `declined` to read and not raise again, as in step 2. A
+               whole-pull-request review that finds the declined points again
+               is what restarted the rounds: it reads code the author already
+               ruled on.
+
+               Not otherwise. The first review of a pull request already read
+               all of it. A push to a pull request with no open findings
+               fixed nothing: there is nothing to confirm, so nothing to read
+               again. Only the run that closes the last open findings is the
+               one that says fixing is done.
+
+               Why: a review after a push reads only the fixes, and one pass
+               never finds everything — fixes made point by point can also
+               break what was right around them. So once the short reviews
+               have run out of things to say, the whole change is read again.
+               Whatever that finds starts the next round, and the round after
+               ends the same way, until a whole-pull-request review finds
+               nothing.
+
+               Add what it found to `found` and `unthreaded`, and set
+               `full_rerun` to true. In every other case skip this step and set
+               `full_rerun` to false.
+
+            5. Return the structured output: `resolved` (empty when nothing is
+               fixed), `found` (0 when the review found nothing or did not
+               run), `unthreaded` (0 when every finding became an inline
+               comment, or there were none), `full_rerun` and `complete`.
+               Set `complete` to true only once the `code-review` skill and
+               every agent it started have finished and reported; false if
+               anything it started has not. This is how the run ends. Ending
+               without it is a failed run, whatever was posted.
+          # `--allowedTools` is a whitelist: anything absent is refused, whatever
+          # a skill's own frontmatter declares.
+          #
+          # **`Skill` is the one that matters, and it was missing.** It is the
+          # tool Claude Code runs a slash command with, so without it the prompt
+          # above reached a plugin that was installed and could not be executed:
+          # `permission_denied`, `tool_name: "Skill"`, before any work at all.
+          # Every run looked the same — six turns, twenty seconds, no comments —
+          # and read as "nothing to report" rather than as "never started". Two
+          # earlier attempts to fix this by widening the Bash list and the
+          # permissions were both necessary and neither was the cause; execution
+          # never got that far.
+          #
+          # `Task` and the `gh` commands are what the review needs once it does
+          # run: it launches agents — reviewers over the diff, then one per
+          # candidate finding to confirm or refute it — and reads the PR through
+          # `gh`. `Task` is the old name of the tool now called `Agent` and
+          # still admits it; without either, `/code-review` falls back to a
+          # single pass and says so. Note what this list does *not* reach: the run that
+          # stalled on a background agent called `Agent` and `ScheduleWakeup`
+          # and recorded `permission_denials: []`, so the session's own control
+          # tools are outside the whitelist entirely. That is why the fix for it
+          # is in the prompt above and could not have been made here. `find` is
+          # on the list because the review locates the CLAUDE.md files that
+          # apply to the changed paths; it was the second thing refused.
+          #
+          # `Read`, `Grep` and `Glob` are the third, and `git log`/`git blame`
+          # the fourth. The review finds CLAUDE.md files and then reads them,
+          # reads the modified files' own comments, and reads the git history of
+          # the lines that changed. Without these they burn their turns on
+          # refusals: the run that exposed this spent eight minutes and 62
+          # permission denials on a 107-line diff and finished with `is_error`,
+          # having posted nothing. `git` is scoped to `log` and `blame` for that
+          # history, `git show` for reading code on the pull request's head,
+          # `git diff` and `git merge-base` for the range "List open findings"
+          # hands it, and `git fetch`, which writes only refs in this throwaway
+          # checkout — the built-in review reaches for it, `merge-base` and `wc`
+          # before anything else, and the first dispatch spent its opening turns
+          # on those refusals. A review has no business writing to the
+          # repository, and none of these can.
+          #
+          # `--json-schema` is how the review says which of its earlier findings
+          # are fixed, and how many new ones it could not post as threads: both
+          # land in `structured_output`, "Resolve fixed findings" acts on the
+          # first, and "Report review findings" counts the second. `complete`
+          # says whether the code-review skill and every agent it started had
+          # finished; without `true` that step leaves the commit unmarked and
+          # the check red ("review did not finish"). The action fails this step
+          # when the model returns no structured output, so a review that did
+          # not reach its end turns `claude-review` red rather than green —
+          # which is what one should look like.
+          #
+          # `--model opus` because without it the main session ran on the
+          # action's default, Sonnet, and the main session is what decided that large pull
+          # request needed two agents. Its agents inherit it. The family alias rather
+          # than a version, so a newer Opus arrives with the Claude Code the
+          # action ships, without an edit here; "Why the review ended" prints
+          # the full model name of every run.
+          claude_args: >-
+            --model opus
+            --allowedTools "Skill,Task,Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(find:*),Bash(git log:*),Bash(git blame:*),Bash(git show:*),Bash(git diff:*),Bash(git fetch:*),Bash(git merge-base:*),Bash(wc:*),mcp__github_inline_comment__create_inline_comment"
+            --json-schema '{"type":"object","properties":{"resolved":{"type":"array","description":"Earlier findings from open-findings.json that the head of the pull request fixes","items":{"type":"object","properties":{"thread_id":{"type":"string"},"commit":{"type":"string","description":"The commit that fixed it"},"reason":{"type":"string","description":"One sentence saying how it was fixed"}},"required":["thread_id","commit","reason"]}},"full_rerun":{"type":"boolean","description":"Whether this run, having found the fixing done, reviewed the whole pull request again"},"found":{"type":"integer","minimum":0,"description":"New findings the review reported this run, posted or not"},"unthreaded":{"type":"integer","minimum":0,"description":"Findings this run could not post as inline comments, and posted in an ordinary comment or not at all"},"complete":{"type":"boolean","description":"true only once the code-review skill and every agent it started have finished; false if anything it started has not reported"}},"required":["resolved","found","unthreaded","full_rerun","complete"]}'
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # Why a run ended, in the Step Summary, without opening the log.
+      #
+      # `show_full_output: true` above puts the entire message stream in the job
+      # log — every tool result verbatim — which is what makes a *finished*
+      # review readable and what makes a *failed* one expensive to diagnose.
+      # Scrolling that to find out whether the model ran out of budget, hit a
+      # permission wall, or never started costs more attention than the answer
+      # is worth, and the answer is a single JSON object at the end of the
+      # stream.
+      #
+      # So: read the last `type: "result"` record out of `execution_file` and
+      # print its facts. `subtype` and `is_error` say how it ended, `num_turns`
+      # separates "stopped before it began" from "stopped near the end",
+      # `modelUsage` carries the token counts, and `permission_denials_count`
+      # catches the failure mode this file has hit repeatedly.
+      #
+      # **It states facts and does not diagnose.** No line here says "ran out of
+      # tokens": the exact marker for that is not something this workflow can
+      # know without guessing, and a detector that guesses wrong is a second
+      # thing lying about why a review did not happen — which is the one problem
+      # the long comments above exist to prevent. The numbers are enough to tell
+      # at a glance, and the log is still there when they are not.
+      - name: Why the review ended
+        if: always() && steps.claude-review.outputs.execution_file != ''
+        run: |
+          file='${{ steps.claude-review.outputs.execution_file }}'
+          [ -f "$file" ] || { echo "no execution file at $file"; exit 0; }
+
+          # The stream is either a JSON array or one object per line, depending
+          # on how the action wrote it; `jq -s` with inputs handles both.
+          result=$(jq -s -c '[.[] | if type == "array" then .[] else . end]
+                             | map(select(.type == "result")) | last' "$file" 2>/dev/null)
+
+          if [ -z "$result" ] || [ "$result" = "null" ]; then
+            echo "### Review: no result record" >> "$GITHUB_STEP_SUMMARY"
+            echo "The run ended without writing one — it was cancelled, or the process died." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### How the review ended"
+            echo
+            echo '| | |'
+            echo '| --- | --- |'
+            echo "| subtype | \`$(echo "$result" | jq -r '.subtype // "—"')\` |"
+            echo "| is_error | \`$(echo "$result" | jq -r '.is_error // false')\` |"
+            echo "| turns | $(echo "$result" | jq -r '.num_turns // "—"') |"
+            echo "| duration | $(echo "$result" | jq -r 'if .duration_ms then (.duration_ms / 1000 | floor | tostring) + "s" else "—" end') |"
+            echo "| cost | \$$(echo "$result" | jq -r '.total_cost_usd // 0') |"
+            echo "| permission denials | $(echo "$result" | jq -r '.permission_denials_count // 0') |"
+            echo
+            usage=$(echo "$result" | jq -r '.modelUsage // {} | to_entries[]
+                    | "| \(.key) | \(.value.inputTokens // 0) in / \(.value.outputTokens // 0) out |"' 2>/dev/null)
+            if [ -n "$usage" ]; then
+              echo "**Tokens**"
+              echo
+              echo '| model | usage |'
+              echo '| --- | --- |'
+              echo "$usage"
+              echo
+            fi
+            echo "A review that did its job runs tens of turns and posts a comment."
+            echo "Few turns with no comment means it stopped early — the job log has the stream."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Acting on the review, in a job of its own. Two reasons, both found by the
+  # first real run:
+  #
+  # **`resolveReviewThread` needs `contents: write`.** `pull-requests: write`
+  # is enough to reply in a thread and not enough to resolve it — the reply
+  # went out and the resolve came back "Resource not accessible by
+  # integration". The review job is where a model runs with tools, and it
+  # keeps `contents: read`; this job runs no model, no checkout and nothing
+  # from the pull request, so write here reaches only what these two steps
+  # do.
+  #
+  # **A failure here is not the review failing.** As steps of the review job,
+  # a refused resolve turned `claude-review` red although the review had run
+  # and posted — the confusion between "broke" and "found" this file keeps
+  # apart everywhere else.
+  #
+  # Named for what it does rather than for the check it writes. As
+  # `review-findings` it sat in the pull request's list beside the findings
+  # check and read as the same thing twice; the check is its result, this is
+  # the job that closes fixed findings and then writes it. No word "review" in
+  # it: sclaude would read it as the review itself (pr_context.py).
+  close-fixed-findings:
+    name: Close fixed, count open findings — whole PR (no AI)
+    needs: claude-review
+    # Not when the review job was skipped (Dependabot, `no-review`, a
+    # `/review` that `gate` refused): no review, so nothing to close and no check to report — which is not the
+    # same as green. Otherwise always, including after a review that failed.
+    if: always() && needs.claude-review.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      # Only for `resolveReviewThread`; see above. Nothing here writes code.
+      contents: write
+      pull-requests: write
+      checks: write
+      # Only for the findings status, the signal "Report review findings" posts.
+      statuses: write
+
+    steps:
+      # Close the findings the review judged fixed: a reply in each thread
+      # saying which commit fixed it and how, then the thread resolved. The
+      # reply is the record — a closed finding says why it closed, so trusting
+      # the bot never means taking its word unread.
+      #
+      # The model decides and this step acts, rather than the model resolving
+      # threads itself, for the reason "List open findings" gives: the tool
+      # that could do it can do anything else too. An id is acted on only if
+      # it is, right now, an unresolved thread the review started, so a wrong
+      # or invented id closes nothing — least of all a thread a person
+      # started.
+      #
+      # The reply is skipped when the thread's last comment is already one:
+      # a run whose resolve failed after replying would otherwise post the
+      # same sentence again on every retry.
+      #
+      # The reply is posted as `github-actions`, not as `claude`: this is the
+      # workflow's token, not the review's.
+      - name: Resolve fixed findings
+        if: needs.claude-review.outputs.resolved != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, not pasted into the script: the reasons
+          # are model prose, and one apostrophe would end a quoted string.
+          RESOLVED: ${{ needs.claude-review.outputs.resolved }}
+        run: |
+          data=$(gh api graphql --paginate --slurp -f query="$FINDINGS_QUERY" \
+                   -F owner='${{ github.repository_owner }}' \
+                   -F name='${{ github.event.repository.name }}' \
+                   -F number="$PR_NUMBER" | jq -c "$FINDINGS_PAGES")
+          open=$(jq -c "$FINDINGS_OPEN" <<<"$data")
+          : > "$RUNNER_TEMP"/resolved
+          jq -c '.resolved[]?' <<<"$RESOLVED" | while read -r item; do
+            id=$(jq -r '.thread_id' <<<"$item")
+            thread=$(jq -c --arg id "$id" 'map(select(.id == $id)) | .[0] // empty' <<<"$open")
+            if [ -z "$thread" ]; then
+              echo "::warning::Not closing $id: it is not an open review finding on this pull request."
+              continue
+            fi
+            if ! jq -e '.comments.nodes | last | .body | startswith("Resolved automatically:")' <<<"$thread" > /dev/null; then
+              body=$(jq -r '"Resolved automatically: fixed in \(.commit). \(.reason)"' <<<"$item")
+              gh api graphql -f query='mutation($id: ID!, $body: String!) {
+                  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { clientMutationId }
+                }' -f id="$id" -f body="$body" > /dev/null
+            fi
+            gh api graphql -f query='mutation($id: ID!) {
+                resolveReviewThread(input: {threadId: $id}) { thread { isResolved } }
+              }' -f id="$id" > /dev/null
+            echo "$id" >> "$RUNNER_TEMP"/resolved
+            echo "Closed $id"
+          done
+
+      # The signal the merge button is read by. `claude-review` going green
+      # says the review ran; this says whether it left anything open, counted
+      # across the whole pull request rather than this run — a re-review reads
+      # only the commits since the last one, so "this run found nothing" is not
+      # "nothing is open". An early run showed the difference: two "No issues found"
+      # comments over three open findings, every check green.
+      #
+      # `failure`, not `action_required` or `neutral`: the one thing it has to
+      # be is unmistakably not green, in the checks box and in the pull request
+      # list. The name says it is not a breakage.
+      #
+      # Through the API rather than a job that exits 1, because a result of
+      # the same name on the same commit replaces the last one, while jobs
+      # from different runs stand side by side and a stale red would stay.
+      # And a `/review` run belongs to `main`'s commit, not the pull request's:
+      # its job result would never reach the pull request at all.
+      #
+      # Two results of one name: a check run and a commit status. The check run
+      # is the record — its `external_id` marks the reviewed commit and its
+      # title and summary are what sclaude reads — but created with this
+      # workflow's token it lands in an arbitrary check suite, and when that
+      # suite is skipped the merge box and the pull request list hide it
+      # (once: ten open findings under "All checks have passed"). The status
+      # is the signal: statuses always show there. Both carry the same title
+      # and verdict, taken from the one check-run document below — unless the
+      # check run is refused, and then the status is red (see the post).
+      #
+      # It runs whether or not the review succeeded: a review that broke still
+      # leaves the findings of earlier runs open, and `claude-review` is
+      # already red to say it broke.
+      #
+      # What it cannot do: notice a thread resolved by hand. Actions has no
+      # event for resolving a thread, so the count refreshes on the next push
+      # or on a `/review` comment. The check's summary says so.
+      - name: Report review findings
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.claude-review.outputs.head_sha }}
+          # The mark the next run's `base_sha` is found by. Only a review that
+          # finished and returned its structured output, which the action
+          # guarantees on a real run: the workflow-validation skip succeeds in
+          # seconds with none, and marking it would call unread commits read.
+          # A review with no `HEAD_SHA` read no range either.
+          REVIEWED: ${{ needs.claude-review.result == 'success' && needs.claude-review.outputs.resolved != '' && needs.claude-review.outputs.head_sha != '' }}
+          # Findings the review posted somewhere other than a thread — a
+          # dispatched run has no inline-comment tool and falls back to one
+          # ordinary comment. They are open findings this step cannot see in
+          # the threads, so they are counted from what the review reported,
+          # and the commit is not marked reviewed: the next run reads the range
+          # again and posts them as threads, where they can be closed.
+          #
+          # A review that reported REVIEW_CAP findings may have dropped more —
+          # see the run step. Its commit is left unmarked for the same reason,
+          # so the next run reads the range again for the next batch.
+          #
+          # A review that returned its structured output without `complete:
+          # true` handed back before the code-review skill and its agents had
+          # finished: whatever they were still reading is lost if the commit is
+          # marked. It is left unmarked and the check is red even with nothing
+          # open, its title saying "review did not finish" — **Coupled**:
+          # sclaude matches that phrase (UNFINISHED_TITLE in
+          # sclaude/lib/review/pr_context.py) and runs the review again rather
+          # than open a session with nothing to fix. Findings posted as a
+          # comment keep their own title even then: they are work for a
+          # session, and sclaude reads them by it. A run with no structured
+          # output at all (the validation skip, a failed run) is not this case.
+          STRUCTURED: ${{ needs.claude-review.outputs.resolved }}
+        run: |
+          incomplete=false
+          if [ -n "$STRUCTURED" ]; then
+            complete=$(jq -r '.complete // false' <<<"$STRUCTURED" 2>/dev/null || echo false)
+            [ "$complete" = true ] || { incomplete=true; REVIEWED=false; }
+          fi
+          unthreaded=$(jq -r '.unthreaded // 0' <<<"${STRUCTURED:-{\}}" 2>/dev/null || echo 0)
+          found=$(jq -r '.found // 0' <<<"${STRUCTURED:-{\}}" 2>/dev/null || echo 0)
+          full=$(jq -r '.full_rerun // false' <<<"${STRUCTURED:-{\}}" 2>/dev/null || echo false)
+          [ "$full" = true ] || full=false
+          [ "$unthreaded" -gt 0 ] && REVIEWED=false
+          capped=false
+          [ "$found" -ge "$REVIEW_CAP" ] && { capped=true; REVIEWED=false; }
+          data=$(gh api graphql --paginate --slurp -f query="$FINDINGS_QUERY" \
+                   -F owner='${{ github.repository_owner }}' \
+                   -F name='${{ github.event.repository.name }}' \
+                   -F number="$PR_NUMBER" | jq -c "$FINDINGS_PAGES")
+          # The head the review read, not whatever landed since: a push made
+          # during the run gets its own run and its own check.
+          sha=${HEAD_SHA:-$(jq -r '.data.repository.pullRequest.headRefOid' <<<"$data")}
+          findings=$(jq -c "$FINDINGS_OPEN | map({
+                path,
+                line: (.line // .originalLine),
+                outdated: .isOutdated,
+                url: .comments.nodes[0].url,
+                body: .comments.nodes[0].body
+              })" <<<"$data")
+          n=$(jq 'length' <<<"$findings")
+          closed=$(wc -l 2>/dev/null < "$RUNNER_TEMP"/resolved || echo 0)
+
+          jq -n --arg sha "$sha" --argjson f "$findings" --argjson n "$n" --argjson u "$unthreaded" --arg reviewed "$REVIEWED" \
+                --argjson capped "$capped" --arg cap "$REVIEW_CAP" --argjson full "$full" --argjson incomplete "$incomplete" --arg check "$FINDINGS_CHECK" \
+                --arg run "${{ github.server_url }}/${{ github.repository }}/pull/$PR_NUMBER" '
+            def firstline: split("\n") | map(select(test("\\S"))) | (.[0] // "") | .[:200];
+            {
+              name: $check,
+              head_sha: $sha,
+              external_id: (if $reviewed == "true" then "reviewed" else "not-reviewed" end),
+              status: "completed",
+              conclusion: (if $incomplete or $n + $u > 0 then "failure" else "success" end),
+              output: {
+                title: (if $u > 0 then "\($u) review finding\(if $u == 1 then "" else "s" end) posted as a comment, not as threads"
+                        elif $incomplete then "The review did not finish; this commit is not marked reviewed"
+                        elif $n == 0 then "No unresolved review findings in the whole PR"
+                        elif $n == 1 then "1 unresolved review finding in the whole PR"
+                        else "\($n) unresolved review findings in the whole PR" end),
+                summary: ((if $incomplete then "The last review handed back before the code-review skill and every agent it started had finished, so this commit is not marked reviewed: the next push, or a `/review` comment, reads the same commits again.\n\n" else "" end)
+                          + (if $full then "The last review found every earlier finding fixed and nothing new in the fixes, so it read the whole pull request again; what that pass found is listed below as well.\n\n" else "" end)
+                          + (if $capped then "The last review reported \($cap) findings, the most it reports in one run, so it may have left some out. The commit is not marked reviewed: the next push, or a `/review` comment, reads the same commits again and brings the next batch.\n\n" else "" end)
+                          + (if $u > 0 then "The last review could not post \($u) of its findings as inline threads, and left them in an ordinary comment on [the pull request](\($run)). This check cannot close those; the next review run reads the same commits again and posts them as threads.\n\n" else "" end)
+                          + (if $n == 0
+                           then "Every finding the automatic review left on this pull request is resolved."
+                           else ($f | map("- [`\(.path)\(if .line then ":\(.line)" else "" end)`](\(.url))\(if .outdated then " (outdated position)" else "" end) — \(.body | firstline)") | join("\n")) end)
+                          + "\n\nThe review closes a finding itself when a later push fixes it, and says so in the thread. A thread resolved by hand does not refresh this check: the next push, or a `/review` comment on the pull request, does.")
+                          [:65000],
+                annotations: [$f[] | select(.line != null) | {
+                  path,
+                  start_line: .line,
+                  end_line: .line,
+                  annotation_level: "failure",
+                  title: (if .outdated then "Review finding (outdated position)" else "Review finding" end),
+                  message: (.body[:4000])
+                }][:50]
+              }
+            }' > "$RUNNER_TEMP"/check-run.json
+
+          # The status's "Details" opens this run, so the summary carries the
+          # same list the check run does. Written before either post, so a
+          # refused one does not take the list with it.
+          {
+            echo "### Review findings"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| closed this run | $closed |"
+            echo "| still open | $n |"
+            echo
+            jq -r '.output.summary' "$RUNNER_TEMP"/check-run.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A refused record does not keep the signal off the commit: the
+          # status is posted either way. Either refusal still
+          # fails the step, at its end and never `|| true`: a missing result is
+          # the failure this step exists to prevent.
+          refused=0
+
+          # An annotation GitHub rejects fails the whole request, and a check
+          # that failed to be created is no record at all — so on a refusal of
+          # a run that has annotations, post it again without them. Without
+          # any, the retry would be the same request. The summary still lists
+          # every finding.
+          if ! gh api "repos/${{ github.repository }}/check-runs" --input "$RUNNER_TEMP"/check-run.json > /dev/null; then
+            if jq -e '.output.annotations | length > 0' "$RUNNER_TEMP"/check-run.json > /dev/null; then
+              echo "::warning::The check run was refused; posting it again without annotations."
+              jq 'del(.output.annotations)' "$RUNNER_TEMP"/check-run.json \
+                | gh api "repos/${{ github.repository }}/check-runs" --input - > /dev/null \
+                || { echo "::error::The check run was refused."; refused=1; }
+            else
+              echo "::error::The check run was refused."; refused=1
+            fi
+          fi
+
+          # 140 characters is the most a status description takes. Without
+          # the record the status is red whatever the count: a green one would
+          # stand beside an earlier run's red check run of the same name on
+          # this commit, which sclaude reads.
+          jq --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --arg refused "$refused" '{
+              context: .name,
+              state: (if $refused == "1" then "failure" else .conclusion end),
+              description: (if $refused == "1" then "The findings check run could not be created; see Details" else .output.title[:140] end),
+              target_url: $url
+            }' "$RUNNER_TEMP"/check-run.json \
+            | gh api "repos/${{ github.repository }}/statuses/$sha" --input - > /dev/null \
+            || { echo "::error::The commit status was refused."; refused=1; }
+
+          exit "$refused"

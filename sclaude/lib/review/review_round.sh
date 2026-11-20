@@ -186,6 +186,37 @@ review_reset_rerun() {
   return 0
 }
 
+# Run the review in Actions again on the pull request's head, after it handed
+# back before it finished (pr_context.review_unfinished): the whole run, by
+# GitHub's own rerun, so any project's review workflow takes it — a comment
+# command would be one project's. 0 once it is started (the caller asks the
+# pull request again, which waits on it), 1 when no review run is named.
+#
+#   review_unfinished_rerun <wt> <pr>
+review_unfinished_rerun() {
+  local run
+  local before
+  run="$(python3 "$LIB/review/pr_context.py" --review-run "$1" "$2" 2>/dev/null || true)"
+  [[ "$run" =~ ^[0-9]+$ ]] || return 1
+  before="$(cd "$1" && gh run view "$run" --json attempt --jq .attempt 2>/dev/null || true)"
+  (cd "$1" && gh run rerun "$run" >/dev/null 2>&1) || return 1
+  info "  The automatic review of PR #$2 did not finish on $(git -C "$1" rev-parse --short HEAD 2>/dev/null): it runs again (run $run)." >&2
+  # GitHub takes a while to start the rerun — longer on a busy queue — and
+  # until then the pull request still shows the old red, which would read as
+  # the rerun not finishing either. Waited for until the run is on a newer
+  # attempt (one that already ended counts) or shows running, up to ten polls.
+  info "  Waiting for GitHub to start it." >&2
+  local i got
+  for (( i = 0; i < 10; i++ )); do
+    sleep "${MERGE_POLL:-30}"
+    got="$(cd "$1" && gh run view "$run" --json attempt,status --jq '"\(.attempt) \(.status)"' 2>/dev/null || true)"
+    [[ -n "$got" ]] || continue
+    [[ "${got#* }" != completed ]] && break
+    [[ "$before" =~ ^[0-9]+$ && "${got%% *}" =~ ^[0-9]+$ && "${got%% *}" -gt "$before" ]] && break
+  done
+  return 0
+}
+
 # The cause in words, for the terminal and the topic.
 #
 #   review_fallback_words <quota|minutes|runner>

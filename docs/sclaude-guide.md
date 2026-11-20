@@ -280,7 +280,11 @@ and off are yours and stay for the whole review, step 4 reopened included. `[n n
 format) runs once more at once; one that did not run, or was refused again,
 asks whether to go on with the head unreviewed — its reason in the terminal
 and the feature's topic — and `n` reviews it again rather than leaving
-sclaude. While a review session works in its own tab, the
+sclaude. The review on GitHub is treated the same way when it hands back
+before it finished (its findings check says "review did not finish"): no
+session opens for it; it runs again once by itself, and if that does not
+finish either you are asked whether to go on with the head unreviewed — `n`
+runs it again, `[g]` ticked does so by itself. While a review session works in its own tab, the
 terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`
 too; `[s]` said then ends the search, so after that session sclaude asks
 whether to check its fixes — or checks them, with `[g]` ticked.

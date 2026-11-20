@@ -404,13 +404,18 @@ with tempfile.TemporaryDirectory() as wt:
     saved_threads = review_report.threads
     review_report.threads = lambda cwd, pr, repo: None
     os.environ[review_report.BRIEF_ENV] = brief_file
+    unread = io.StringIO()
     try:
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(unread):
             review_report.main()
     finally:
         del os.environ[review_report.BRIEF_ENV]
         review_report.threads = saved_threads
     check("brief-not-from-unread-threads", os.path.exists(brief_file), False)
+    # Nor a table: its counts are the threads', and unread they read as zeros.
+    check("no-table-from-unread-threads",
+          ("could not be read" in unread.getvalue(), "round " in unread.getvalue(), "Fixed " in unread.getvalue()),
+          (True, False, False))
     zeros = dict.fromkeys(review_report.BRIEF_ROWS, 0)
     check("brief-skips-a-round-still-running",
           review_report.newest([("round 1", zeros, False), ("round 2", zeros, True)])[0], "round 1")

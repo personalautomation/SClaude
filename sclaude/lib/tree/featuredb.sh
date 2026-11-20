@@ -38,6 +38,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
 # 54320-54329 and of the dev servers' 3100-3199.
 DB_BLOCK_FIRST=55000
 DB_BLOCK_LAST=55990
+# Feature stacks the removal left on the machine, in the main checkout (db_left).
+STACKS_LEFT=".sclaude/local/stacks-left"
 
 db_cli() {
   local cli; cli="$(project_tree_first database.local.cli "$1" 2>/dev/null || true)"
@@ -899,6 +901,51 @@ db_stop() {
   return 0
 }
 
+# What the local databases left behind outside themselves, swept when no
+# feature is in progress: the project's `sweep` (database.local), run in the
+# main checkout. A feature's teardown can remove only what is surely its own
+# (what appeared after its stack was filled); the rest — a seed's uploads
+# done again, a feature's older files — stays, owned by nobody. With no
+# feature's tree on the machine the main local database is the only one left,
+# which is when the project can tell what nobody uses. Run by the menu at
+# that moment; what the sweep says goes to its log and its last line here.
+# Not fatal either way: a sweep that refuses (a database that does not
+# answer) leaves things as they were.
+#
+#   db_sweep
+db_sweep() {
+  local sweep log out last
+  sweep="$(project_get database.local.sweep "$REPO" 2>/dev/null || true)"
+  [[ -n "$sweep" ]] || return 0
+  [[ -z "$(list_features)" ]] || return 0
+  # A feature's stack the removal left behind (db_left) may still point into
+  # the same storage: no sweep while one is written down.
+  local left
+  left="$(grep -v '^[[:space:]]*$' "$REPO/$STACKS_LEFT" 2>/dev/null | paste -sd' ' -)"
+  if [[ -n "$left" ]]; then
+    info "  database: no sweep — a removed feature's database is still on this machine ($left)."
+    info "            Remove it in Docker, then its line in $REPO/$STACKS_LEFT."
+    return 0
+  fi
+  log="$REPO/.sclaude/local/sweep.log"
+  mkdir -p "$(dirname "$log")" 2>/dev/null || true
+  # Bounded: it runs before the picker, and a store or a database that does
+  # not answer must not hold sclaude's start.
+  local rc=0 limit=300 began=$SECONDS
+  out="$(cd "$REPO" && timeout "$limit" bash -c "$sweep" 2>&1 </dev/null)" || rc=$?
+  last="$(tail -1 <<< "$out" | sed 's/^ *//')"
+  if (( rc == 0 )); then
+    info "  database: ${last:-the sweep said nothing}"
+  elif (( rc == 124 && SECONDS - began >= limit )); then
+    # Stopped by the limit, not a 124 of the sweep's own.
+    info "  database: the sweep was stopped after ${limit}s, perhaps part done — ${last:-no answer} (.sclaude/local/sweep.log)"
+  else
+    info "  database: the sweep left things as they were — ${last:-no answer} (.sclaude/local/sweep.log)"
+  fi
+  printf '\n%s · %s\n%s\n' "$(date -u +%FT%TZ)" "$sweep" "$out" >> "$log" 2>/dev/null || true
+  return 0
+}
+
 # Removes the stack and its data. Only for a tree about to be removed — the
 # volumes are the feature's database, and nothing else holds a copy.
 #
@@ -915,7 +962,7 @@ db_remove() {
   [[ -f "$dir/supabase/config.toml" ]] || return 0
   # Started if it has to be: this is the last moment anything knows the stack
   # and its teardown exist — the tree goes next, and with it db.env.
-  docker_ensure || { warn "  database: Docker is down — this feature's stack is left behind"; return 0; }
+  docker_ensure || { warn "  database: Docker is down — this feature's stack is left behind"; db_left "$wt"; return 0; }
   cli="$(db_cli "$wt")"
   teardown="$(project_get database.local.teardown "$wt" 2>/dev/null || true)"
   if [[ -n "$teardown" && -f "$envf" ]]; then
@@ -933,7 +980,26 @@ db_remove() {
       warn "  database: $teardown failed — what it owned outside the database may remain (.sclaude/local/feature/db.log)"
     fi
   fi
-  (cd "$wt" && $cli stop --no-backup --workdir "$dir") >/dev/null 2>&1 \
-    && echo "  ${GREEN}feature database removed${OFF}"
+  if (cd "$wt" && $cli stop --no-backup --workdir "$dir") >/dev/null 2>&1; then
+    echo "  ${GREEN}feature database removed${OFF}"
+  else
+    warn "  database: this feature's stack could not be removed — it is left behind"
+    db_left "$wt"
+  fi
   return 0
+}
+
+# A feature's stack the removal left on the machine, written down in the main
+# checkout (STACKS_LEFT): the tree that knew it goes next, and the project's
+# sweep must not run while it may still point into the same storage
+# (db_sweep). One line a stack, its project_id, until the person removes it
+# and the line with it.
+#
+#   db_left <wt>
+db_left() {
+  local f="$REPO/$STACKS_LEFT" id
+  id="$(db_project_id "$1" 2>/dev/null)" || return 0
+  [[ -n "$id" ]] || return 0
+  mkdir -p "$(dirname "$f")" 2>/dev/null || true
+  grep -qxF "$id" "$f" 2>/dev/null || echo "$id" >> "$f"
 }

@@ -835,6 +835,25 @@ with tempfile.TemporaryDirectory() as tree:
     check("history: once_edge writes once in a pass, and again after a way back into the preview",
           ops == ["qa_check qa_verdict", "merge_wait preview", "qa_check qa_verdict"], str(ops))
 
+# ...and so under pipefail, as bin/sclaude runs, with a history longer than
+# a pipe holds: grep -q stopping early must not read as "not taken".
+with tempfile.TemporaryDirectory() as tree:
+    feature = os.path.join(tree, ".sclaude", "local", "feature")
+    os.makedirs(feature)
+    open(os.path.join(feature, "state.json"), "w").write("{}")
+    with open(os.path.join(feature, "history.jsonl"), "w") as fh:
+        # Read newest first, the way is met at once and grep stops while the
+        # older lines are still being read.
+        for n in range(3000):
+            fh.write(json.dumps({"at": "x", "what": "note", "op": "filler %d" % n, "pad": "." * 40}) + "\n")
+        fh.write(json.dumps({"at": "x", "what": "edge", "op": "qa_check qa_verdict"}) + "\n")
+    subprocess.run(["bash", "-c", 'set -uo pipefail; source "$1/sclaude/lib/core/state.sh"; t="$2"; '
+                    'once_edge "$t" qa_check qa_verdict qa ""', "-", ROOT, tree],
+                   check=True, capture_output=True)
+    ops = [json.loads(line)["op"] for line in open(os.path.join(feature, "history.jsonl"))]
+    check("history: once_edge under pipefail finds a way taken in a long history",
+          ops.count("qa_check qa_verdict") == 1, str(ops.count("qa_check qa_verdict")))
+
 with tempfile.TemporaryDirectory() as tree:
     os.makedirs(os.path.join(tree, ".sclaude", "local", "feature"))
     open(os.path.join(tree, ".sclaude", "local", "feature", "state.json"), "w").write("{}")
@@ -958,6 +977,77 @@ check("deviations: the retrospective's lines, one per cause with its times",
       len(_lines) == 1 and _lines[0].startswith("- a sync with main ran between")
       and "(2 times: " in _lines[0], str(_lines))
 check("deviations: no lines along the map", not process.process_history.off_lines(got), process.process_history.off_lines(got))
+# A friction review held for the person ([g]) through review rounds and
+# reviewed at last opens sclaude's workshop: the pass begins where its
+# session opened, beside the change to sclaude, not at the first hold.
+def _held(t, key):
+    return [edge(t, "f_log", "f_empty", "sclaude", key=key), edge(t, "f_empty", "f_rules", "sclaude", key=key),
+            {"at": at(t), "what": "friction." + key, "op": "held"},
+            edge(t, "f_rules", "f_away", "setting", "[g] in step 4", key=key)]
+_late = process.history({}, _held("09:00", "review-3") + [
+    {"at": at("09:05"), "what": "steps.review", "op": "open", "session": "r1"},
+    {"at": at("09:10"), "what": "steps.review", "op": "end", "session": "r1"}] + _held("09:20", "review-3") + [
+    {"at": at("09:30"), "what": "steps.review", "op": "open", "session": "r2"},
+    {"at": at("09:40"), "what": "steps.review", "op": "end", "session": "r2"},
+    edge("09:41", "f_rules", "f_review", "sclaude", "more than rules", key="review-3"),
+    {"at": at("09:41"), "what": "friction.review-3", "op": "open", "session": "f"},
+    edge("09:45", "w_ask", "w_open", "person", session="f"),
+    edge("09:45", "w_open", "w_change", "sclaude", "sclaude core-open", session="f"),
+    {"at": at("09:50"), "what": "workshop", "op": "ready", "session": "f"},
+    {"at": at("09:51"), "what": "workshop", "op": "main", "session": "f"},
+    {"at": at("09:52"), "what": "friction.review-3", "op": "finish", "session": "f", "outcome": "fixed"},
+    {"at": at("09:53"), "what": "review.local", "op": "start"}], "review_run")
+_seq = [v.get("n") or v["pass"][0] for v in _late["visits"]]
+check("history: a held friction review's pass begins where it is reviewed, beside its change to sclaude",
+      ("friction" in _seq and _seq.index("workshop") == _seq.index("friction") + 1
+       and _seq.index("friction") > len(_seq) - 1 - _seq[::-1].index("review")
+       and not process.process_history.off_lines(_late)), str(_seq) + process.process_history.off_lines(_late))
+_never = process.history({}, _held("09:00", "review-4") + [
+    {"at": at("09:05"), "what": "steps.review", "op": "open", "session": "r1"}], "review")
+check("history: one held and never reviewed stands where it was last held",
+      [v.get("n") or v["pass"][0] for v in _never["visits"]][:3] == ["new", "friction", "review"],
+      str([v.get("n") or v.get("pass") for v in _never["visits"]]))
+_again = process.history({}, [
+    edge("09:00", "f_log", "f_empty", "sclaude", key="review-5"), edge("09:00", "f_empty", "f_rules", "sclaude", key="review-5"),
+    edge("09:00", "f_rules", "f_review", "sclaude", "more than rules", key="review-5"),
+    {"at": at("09:00"), "what": "friction.review-5", "op": "open", "session": "f"},
+    {"at": at("09:10"), "what": "friction.review-5", "op": "finish", "session": "f", "outcome": "fixed"},
+    {"at": at("09:20"), "what": "steps.review", "op": "open", "session": "r1"}] + _held("09:30", "review-5"), "review")
+check("history: a hold after a review of the same key takes nothing back",
+      [v.get("n") or v["pass"][0] for v in _again["visits"]].count("friction") == 1
+      and [v.get("n") or v["pass"][0] for v in _again["visits"]].index("friction")
+      < [v.get("n") or v["pass"][0] for v in _again["visits"]].index("review"),
+      str([v.get("n") or v.get("pass") for v in _again["visits"]]))
+# A review cut off (opened, never finished) and held later is placed where it
+# is reviewed at last, as one held from the start is.
+_cut = process.history({}, [
+    edge("09:00", "f_log", "f_empty", "sclaude", key="review-6"), edge("09:00", "f_empty", "f_rules", "sclaude", key="review-6"),
+    edge("09:00", "f_rules", "f_review", "sclaude", "more than rules", key="review-6"),
+    {"at": at("09:00"), "what": "friction.review-6", "op": "open", "session": "f1"},
+    {"at": at("09:05"), "what": "steps.review", "op": "open", "session": "r1"},
+    {"at": at("09:10"), "what": "steps.review", "op": "end", "session": "r1"}] + _held("09:20", "review-6") + [
+    {"at": at("09:30"), "what": "steps.review", "op": "open", "session": "r2"},
+    {"at": at("09:40"), "what": "steps.review", "op": "end", "session": "r2"},
+    edge("09:41", "f_rules", "f_review", "sclaude", "more than rules", key="review-6"),
+    {"at": at("09:41"), "what": "friction.review-6", "op": "open", "session": "f2"},
+    {"at": at("09:50"), "what": "friction.review-6", "op": "finish", "session": "f2", "outcome": "fixed"}], "review")
+_cs = [v.get("n") or v["pass"][0] for v in _cut["visits"]]
+check("history: a review cut off and held is placed where it is reviewed at last",
+      _cs.count("friction") == 1 and _cs.index("friction") > [i for i, n in enumerate(_cs) if n == "review"][1], str(_cs))
+# qa auto takes the verdict off the map (PASS): QA's check goes on to the
+# handoff with no jump.
+with process.configured({"qa": "auto", "merge": "auto",
+                         "board": {"columns": {"backlog": "Backlog", "progress": "In progress", "qa": "In QA", "done": "Done"}}}):
+    _qa = process.history({}, [edge("09:00", "preview", "in_qa", "sclaude"),
+                               edge("09:00", "in_qa", "qa_check", "sclaude", "the issue moved to In QA"),
+                               {"at": at("09:00"), "what": "qa", "op": "in"},
+                               {"at": at("09:01"), "what": "qa", "op": "accepted"},
+                               edge("09:02", "qa_check", "qa_verdict", "qa", "the board"),
+                               edge("09:02", "qa_verdict", "handoff", "sclaude"),
+                               {"at": at("09:02"), "what": "handoff", "op": "done"}], "handoff")
+check("history: with qa auto the check goes on to the handoff, no way missing",
+      not process.process_history.off_lines(_qa) and "qa_verdict" not in [v.get("n") for v in _qa["visits"]],
+      process.process_history.off_lines(_qa) + str([v.get("n") for v in _qa["visits"]]))
 # A status session run_status marked as the preview's (`about`) plays on
 # the epilogue's copy beside the preview, and the way on goes from the place
 # before it: no deviation. One with no mark is the cycle's own epilogue.

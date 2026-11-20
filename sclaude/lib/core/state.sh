@@ -423,8 +423,13 @@ last_place() {
 #   edge_taken <tree> <from> <to>
 edge_taken() {
   local h="$1/.sclaude/local/feature/history.jsonl"
-  [[ -f "$h" ]] && tac "$h" | sed -n '/"op": "[a-z_]* \(review\|pr\|preview\)"/q;p' \
-    | grep -qF "\"op\": \"$2 $3\""
+  # Process substitution rather than a pipe into grep -q, as in
+  # environment_saved: grep stops at its first match, the reader gets
+  # SIGPIPE, and under `set -o pipefail` (bin/sclaude) the pipeline fails —
+  # so once the history outgrew the pipe's buffer a way taken read as not
+  # taken, and once_edge wrote it again.
+  [[ -f "$h" ]] && grep -qF "\"op\": \"$2 $3\"" \
+    < <(tac "$h" | sed -n '/"op": "[a-z_]* \(review\|pr\|preview\)"/q;p')
 }
 
 # The same in a feature's tree.

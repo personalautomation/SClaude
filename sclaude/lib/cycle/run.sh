@@ -1267,17 +1267,26 @@ auto_return() {
 regression_push_fix() {
   local wt="$1" pr="$2" ahead branch
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
+  # Deferred entries sent to main whose commit the branch could not drop at
+  # the time go first: they are no fix, and pushed they would come back
+  # twice with the branch's merge.
+  deferred_reset_pending "$wt" || true
   ahead="$(python3 "$LIB/review/pr_context.py" --unpushed "$wt" "$pr" 2>/dev/null || true)"
   [[ "$ahead" =~ ^[1-9][0-9]*$ ]] || return 1
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 2
   # What those commits are: main merged in on the way into the step
   # (sync_branch) is no fix of the regression's, and was said to be one.
-  local own merges
+  local own merges chores
   own="$(git -C "$wt" rev-list --no-merges --count HEAD --not --remotes 2>/dev/null || echo "$ahead")"
   merges=$(( ahead - own ))
+  # sclaude's own bookkeeping commits (chore(sclaude): deferred entries and
+  # the like) are no fix of the regression's either.
+  chores="$(git -C "$wt" log --no-merges --format=%s HEAD --not --remotes 2>/dev/null | grep -c '^chore(sclaude):' || true)"
   echo ""
-  if (( own == 0 )); then
+  if (( own > 0 && own == chores )); then
+    info "  sclaude's own bookkeeping is $ahead commit(s) PR #$pr does not carry — pushing $branch."
+  elif (( own == 0 )); then
     info "  main, merged in, is $ahead commit(s) PR #$pr does not carry — pushing $branch."
   elif (( merges > 0 )); then
     info "  The regression's fix and main merged in are $ahead commit(s) PR #$pr does not carry — pushing $branch."

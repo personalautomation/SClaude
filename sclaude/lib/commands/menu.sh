@@ -95,6 +95,8 @@ cmd_menu() {
   if [[ -z "$rows" ]]; then
     echo ""
     info "No features in progress."
+    # The one moment no feature's database is left beside the main one.
+    db_sweep
     # The menu with its `config` row is skipped, so the picker carries it.
     # Local rather than a prefix, which would export it to every process the
     # feature's start launches.

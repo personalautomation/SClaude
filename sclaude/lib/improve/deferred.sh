@@ -261,8 +261,17 @@ deferred_to_main() {
 
   # The branch drops what it sent.
   if [[ "$only" == 1 ]]; then
-    git -C "$wt" reset -q --keep "$from" 2>/dev/null \
-      || warn "  the deferred entries are on main; $branch still carries them — reset it to ${from:0:8} by hand"
+    local why
+    if ! why="$(git -C "$wt" reset -q --keep "$from" 2>&1)"; then
+      # A change not committed in the deferred folders (a session still
+      # writing them) keeps the reset from going through. It is tried again
+      # before the branch is next pushed (deferred_reset_pending), not left
+      # to the person: pushed as it is, the branch carries rows main has, and
+      # its merge with main takes both sides' rows — those rows twice.
+      state_set "$wt/.sclaude/local/feature/state.json" deferred.reset "$from $head" 2>/dev/null || true
+      warn "  the deferred entries are on main; $branch still carries them, for now: $(head -1 <<< "$why")"
+      warn "  sclaude drops them from $branch before it is next pushed"
+    fi
   else
     ( while IFS= read -r f; do
         if git -C "$wt" cat-file -e "$side:$f" 2>/dev/null; then
@@ -278,6 +287,33 @@ deferred_to_main() {
       || warn "  the deferred entries are on main; put $branch's deferred folders back to ${side:0:8} by hand"
   fi
   info "  the deferred entries' changes went to main${sha:+ as $sha}, past the pull request"
+  return 0
+}
+
+# The reset deferred_to_main could not make, made now if it still can be:
+# the branch's head is still the one that carried the entries, it is not on
+# origin yet, and nothing is in the way any more. Called before each push of
+# the branch (regression_push_fix, friction_push_project). A head that moved
+# on keeps them — commits on top are somebody's work, the session's new
+# entries among them — and one already pushed keeps them too: a reset there
+# would leave the branch behind its own remote. Either way the pending reset
+# is forgotten, and the merge with main takes both sides' rows, those twice.
+#
+#   deferred_reset_pending <tree>  → 0 reset, 1 nothing pending or not possible
+deferred_reset_pending() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" pending from head branch
+  pending="$(state_get "$state" deferred.reset 2>/dev/null || true)"
+  [[ -n "$pending" ]] || return 1
+  read -r from head <<< "$pending"
+  branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$head" ]] \
+     || git -C "$wt" merge-base --is-ancestor "$head" "refs/remotes/origin/$branch" 2>/dev/null; then
+    state_set "$state" deferred.reset null 2>/dev/null || true
+    return 1
+  fi
+  git -C "$wt" reset -q --keep "$from" 2>/dev/null || return 1
+  state_set "$state" deferred.reset null 2>/dev/null || true
+  info "  the deferred entries sent to main earlier are dropped from the branch now"
   return 0
 }
 

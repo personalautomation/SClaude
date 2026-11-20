@@ -548,6 +548,14 @@ try:
                                    "FEED say 🧱 Block 1 had grown past 55 lines: it is split in 2" in out,
                                    "ID=1a" in out),
           (True, 4, 1, True, True, True))
+    # local_review answers with its findings count on stdout, and a split runs
+    # inside it: nothing the split says may land there.
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    # (history_add and ask_feed write to their files; the stubs above echo.)
+    out = sh(split_sh + 'history_add() { :; }; ask_feed() { :; }; project_get() { echo 55; }; said="$(blocks_split "%s" %s 2>/dev/null)"; echo "STDOUT=[$said]"' % (wt, merged))
+    check("a-split-says-nothing-on-stdout", [l for l in out.splitlines() if l.startswith("STDOUT=")], ["STDOUT=[]"])
     check("a-split-block-is-labelled-by-its-id-and-place",
           [sh('blocks_label "%s" %d' % (wt, k)).strip() for k in (1, 2, 3, 4)], ["block 1a (1/4)", "block 1b (2/4)", "block 2 (3/4)", "the seams (4/4)"])
     # The first session fails (a quota), the second answers: its answer is

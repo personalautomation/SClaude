@@ -343,6 +343,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the pass over the seams is named seams, in the report and on the map alike",
           [r["block"] for r in review_report.journal_runs(os.path.join(tree, JOURNAL))] == ["1", "2a", "seams"]
           and [(r["block"], r["bseq"]) for r in review_map.rounds_of(tree, "7")][-1] == ("seams", 1))
+    _js = open(os.path.join(ROOT, "sclaude", "lib", "flow", "process_review.js")).read()
+    _summary = _js[_js.index("function summary("):_js.index("function draw()")]
+    check("the header counts the review's fixes as the icicles draw them: a stopped pass's apart",
+          "own.filter((x) => !stopped(x))" in _summary and "after a stopped pass" in _summary
+          and "!(d.rounds[x.r] || {}).stopped" in _js)
     check("the map names the seams' rounds as the report does",
           "r.block === '" + review_report.SEAMS + "'" in open(os.path.join(
               ROOT, "sclaude", "lib", "flow", "process_review.js")).read())

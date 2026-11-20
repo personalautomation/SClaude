@@ -20,6 +20,7 @@
 #   * the drift and staleness counts skip commits that only add entries.
 #
 # Run it with: python3 tests/deferred-to-main.py
+import json
 import os
 import shutil
 import subprocess
@@ -50,7 +51,7 @@ def write(path, text, mode="w"):
 
 
 def send(wt, frm, state):
-    script = ('for m in core/ui core/developer tree/branches improve/deferred; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/ui core/state core/developer tree/branches improve/deferred; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'gh() { echo %s; }\n'
               'deferred_to_main "%s" "%s"; echo "RC $?"' % (LIB, state, wt, frm))
@@ -241,6 +242,43 @@ try:
     git(wt, "commit", "-q", "-am", "later row")
     check("carried: left to the pull request", "RC 1" in send(wt, frm, "OPEN"), True)
     check("carried: main untouched", main_file(origin), None)
+
+    # The reset kept from going through (a change not committed in the
+    # folder): said, remembered, and made before the branch is next pushed.
+    origin, wt = setup(tmp, "dirty")
+    frm = git(wt, "rev-parse", "HEAD")
+    write(os.path.join(wt, DEFERRED), "d\trow\n")
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", "chore(sclaude): put off one")
+    head = git(wt, "rev-parse", "HEAD")
+    write(os.path.join(wt, ".sclaude/local/feature/state.json"), "{}")
+    write(os.path.join(wt, DEFERRED), "being\twritten\n", "a")
+    out = send(wt, frm, "MERGED")
+    check("dirty: sent, the reset put off rather than handed to the person",
+          ("RC 0" in out, "by hand" in out, "before it is next pushed" in out, git(wt, "rev-parse", "HEAD")),
+          (True, False, True, head))
+    pending = json.load(open(os.path.join(wt, ".sclaude/local/feature/state.json"))).get("deferred", {}).get("reset")
+    check("dirty: the reset is remembered", pending, "%s %s" % (frm, head))
+    git(wt, "checkout", "-q", "--", DEFERRED)
+    script = ('for m in core/ui core/state core/developer tree/branches improve/deferred; do source "%s/$m.sh"; done\n'
+              'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
+              'deferred_reset_pending "%s"; echo "RC $?"' % (LIB, wt))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
+    check("dirty: made once nothing is in the way, and forgotten",
+          ("RC 0" in out, git(wt, "rev-parse", "HEAD"),
+           json.load(open(os.path.join(wt, ".sclaude/local/feature/state.json"))).get("deferred", {}).get("reset")),
+          (True, frm, None))
+
+    # A pending reset whose commit went to origin meanwhile is forgotten,
+    # the branch left where its remote is.
+    git(wt, "reset", "-q", "--hard", head)
+    git(wt, "push", "-q", "-f", "origin", "feat/12-x")
+    write(os.path.join(wt, ".sclaude/local/feature/state.json"), json.dumps({"deferred": {"reset": "%s %s" % (frm, head)}}))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
+    check("dirty: a commit pushed meanwhile is kept, the reset forgotten",
+          ("RC 1" in out, git(wt, "rev-parse", "HEAD"),
+           json.load(open(os.path.join(wt, ".sclaude/local/feature/state.json"))).get("deferred", {}).get("reset")),
+          (True, head, None))
 
     # A commit already on origin: left alone.
     git(wt, "push", "-q", "origin", "feat/12-x")

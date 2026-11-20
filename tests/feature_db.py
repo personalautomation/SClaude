@@ -448,6 +448,58 @@ def ensure_cases():
         check("removal stops without a backup, after the teardown",
               any(c.startswith("stop --no-backup") for c in calls(root)[before:]), True)
 
+        # The sweep: the project's command, in the main checkout, only with no
+        # feature in progress; a refusal is said and changes nothing.
+        repo = os.path.join(root, "repo")
+        os.makedirs(os.path.join(repo, ".sclaude", "local"), exist_ok=True)
+        swept = os.path.join(root, "swept")
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({"database": {"local": {"sweep": 'pwd > %s; echo "  removed 3 of 5"' % swept}}}, fh)
+        out = bash(root, 'list_features() { :; }; db_sweep')
+        check("the sweep runs in the main checkout with no feature in progress, its last line shown",
+              (open(swept).read().strip() if os.path.exists(swept) else "", "INFO   database: removed 3 of 5" in out),
+              (repo, True))
+        os.remove(swept)
+        out = bash(root, 'list_features() { printf "x\\t/t\\tcode\\n"; }; db_sweep')
+        check("no sweep while a feature is in progress", (os.path.exists(swept), out.strip()), (False, ""))
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({"database": {"local": {"sweep": 'echo "  REFUSE  no answer" >&2; exit 1'}}}, fh)
+        out = bash(root, 'list_features() { :; }; db_sweep; echo "RC=$?"')
+        check("a sweep that refuses is said, and is not fatal",
+              ("left things as they were — REFUSE  no answer" in out, "RC=0" in out), (True, True))
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({}, fh)
+        check("no sweep named, nothing said", bash(root, 'list_features() { :; }; db_sweep').strip(), "")
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({"database": {"local": {"sweep": 'touch %s' % swept}}}, fh)
+        out = bash(root, 'list_features() { :; }; db_sweep')
+        check("a silent sweep is said to have said nothing, not shown its log's header",
+              ("database: the sweep said nothing" in out, os.path.exists(swept)), (True, True))
+        os.remove(swept)
+        # A feature's stack the removal left behind, written down by db_left:
+        # no sweep until the person removes it and its line.
+        left = os.path.join(repo, ".sclaude", "local", "stacks-left")
+        with open(left, "w") as fh:
+            fh.write("prod-left\n")
+        out = bash(root, 'list_features() { :; }; db_sweep')
+        check("a removed feature's stack written down: no sweep, and it is named",
+              ("no sweep" in out and "prod-left" in out, os.path.exists(swept)), (True, False))
+        os.remove(left)
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({"database": {"local": {"sweep": "exit 124"}}}, fh)
+        out = bash(root, 'list_features() { :; }; db_sweep')
+        check("a sweep's own 124, not the limit, is a refusal like any other",
+              ("perhaps part done" in out, "left things as they were" in out), (False, True))
+
+        # Docker down at the removal: the stack is left behind, and written
+        # down in the main checkout for the sweep to wait on.
+        out = bash(root, 'docker_ensure() { return 1; }; db_remove "%s"' % b)
+        with open(left) as fh:
+            recorded = fh.read().split()
+        check("a stack left behind by its removal is written down, by its project_id",
+              ("left behind" in out, recorded == [state(b)["db"]["project_id"]]), (True, True))
+        os.remove(left)
+
         # The regression's local stage sources the file; a deployed one does not.
         write_config(a, cli, "")
         with open(envf, "w") as fh:

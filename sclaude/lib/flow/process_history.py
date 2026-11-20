@@ -216,6 +216,16 @@ def _map_of(node):
                  if name != "overview" and node in nodes), None)
 
 
+def _on_map(node):
+    """Where a place of the whole model stands on the map the config draws:
+    itself, or what a block the config takes out carries its arrows on to
+    (process_config.PASS) - the code writes the model's places either way."""
+    hops = 0
+    while node not in process_model.NODES and node in process_config.PASS and hops < len(process_config.PASS):
+        node, hops = process_config.PASS[node], hops + 1
+    return node
+
+
 def _seconds(a, b):
     ta, tb = _when(a), _when(b)
     return max(0, int((tb - ta).total_seconds())) if ta and tb else None
@@ -657,13 +667,28 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
     # be in, the parts' count, the time they span, and whether the detailed
     # map went on past step 2 over the whole.
     parts, pmode, pcurrent, ptotal, pspan, pon = {}, None, "1", 0, [], False
-    # The cycle's recorded edges, and the friction reviews whose pass began.
-    edges, quiet = [], {}
+    # The cycle's recorded edges, the friction reviews whose pass began, and
+    # when each held one was last held (a hold is no pass yet: see `unplace`).
+    edges, quiet, held_at, reviewed = [], {}, {}, set()
     last_run = {}
     merged = qa_open = False
     first = rows[0]["at"] if rows else None
     if first:
         places.point("new", first)
+
+    def unplace(key, at):
+        # A friction review held for the person ([g], friction_hold) took no
+        # session: its pass begins where it is reviewed at last, which may be
+        # rounds later, so the place a held try gave it is taken back. One
+        # never reviewed stands where it was last held (after the rows). One
+        # already reviewed keeps its place: a hold after it (a re-read) is no
+        # new pass.
+        if key in reviewed:
+            return
+        places.list[:] = [p for p in places.list if p.get("pass") != ["friction", key]]
+        quiet[key] = False
+        held_at[key] = at
+
     for r in rows:
         what, op, at = r["what"], r["op"], r["at"]
         head, _, rest = what.partition(".")
@@ -688,7 +713,11 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         if what == EDGE:
             on = _map_of(_edge(r)[0])
             if on == "detail":
-                edges.append(r)
+                a, b = (_on_map(n) for n in _edge(r))
+                # An arrow into a block the config takes out leads on past it;
+                # one wholly inside such blocks is no way at all here.
+                if a != b:
+                    edges.append(r if (a, b) == _edge(r) else dict(r, op="%s %s" % (a, b)))
             elif on == "workshop":
                 session = r.get("session") or (list(workshop)[-1] if workshop else "")
                 if session not in workshop:
@@ -698,7 +727,9 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             elif on == "friction" and r.get("key"):
                 if r["key"] not in friction:
                     friction[r["key"]] = []
-                if not quiet.get(r["key"]) and _edge(r)[1] not in FRICTION_QUIET:
+                if _edge(r) == ("f_rules", "f_away"):
+                    unplace(r["key"], at)
+                elif not quiet.get(r["key"]) and _edge(r)[1] not in FRICTION_QUIET:
                     quiet[r["key"]] = True
                     places.detour("friction", r["key"], at)
                 friction[r["key"]].append(r)
@@ -753,8 +784,14 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             if rest not in friction:
                 friction[rest] = []
             # Its pass begins at the first row that is more than a log
-            # found empty (an empty log is no review, and no pass).
-            if op != "empty" and not quiet.get(rest):
+            # found empty (an empty log is no review, and no pass) or a hold.
+            # Reviewed once it finished: a review cut off and held later is
+            # placed where it is reviewed at last.
+            if op == "finish":
+                reviewed.add(rest)
+            if op == "held":
+                unplace(rest, at)
+            elif op != "empty" and not quiet.get(rest):
                 quiet[rest] = True
                 places.detour("friction", rest, at)
             friction[rest].append(r)
@@ -790,7 +827,10 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                 qa_open = True
             elif qa_open or op == "back":
                 places.leave("qa", at)
-                places.point("qa_verdict", at)
+                # A config that takes the verdict out (qa auto) draws QA's
+                # check straight on to what follows (PASS): no place of its own.
+                if "qa_verdict" in process_model.NODES:
+                    places.point("qa_verdict", at)
                 qa_open = False
         elif what == "handoff":
             places.point("handoff", at)
@@ -815,6 +855,12 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             places.last = at
         if r.get("run") and what != "command":
             places.last_of[r["run"]] = at
+    # A friction review held and never reviewed stands where it was last held.
+    for key, at in held_at.items():
+        if not quiet.get(key):
+            i = next((k for k, p in enumerate(places.list) if (p.get("from") or "") > at), len(places.list))
+            places.list.insert(i, {"pass": ["friction", key], "from": at, "to": at})
+            quiet[key] = True
 
     # A stay left with no end row is going on only when sclaude's state says
     # so, and then counts up to now (`live`): a step's conversation while it

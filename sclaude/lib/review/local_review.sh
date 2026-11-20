@@ -225,7 +225,7 @@ local_review_run() {
   # with more to read (a capped pass whose follow-up never ran), over the same
   # range again.
   last="$(python3 "$LIB/review/local_review.py" since "$journal" "$head" "$pr" 2>/dev/null || true)"
-  local merges=""
+  local merges="" since_last=""
   if [[ -n "$first" ]]; then
     # A block's first read: its own files whole, its criteria, its place
     # among the other blocks — or, the last, the seams.
@@ -234,6 +234,7 @@ local_review_run() {
     [[ -n "$base" && -n "$scope" ]] || { warn "  The cut of PR #$pr into blocks could not be read: the local review did not run." >&2; return 1; }
   elif [[ -n "$last" && "$last" != "$head" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
     base="$last"
+    since_last=1
     merges="$(git -C "$wt" rev-list --merges "$last..$head" 2>/dev/null | tr '\n' ' ')"
     if [[ -z "${merges// /}" ]]; then
       scope="the commits since the last review: \`git diff $base..$head\`"
@@ -277,7 +278,7 @@ local_review_run() {
     printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · $(blocks_label "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
-  local earlier began new more cap pass=1 round retried=""
+  local earlier began new more cap pass=1 round retried="" caught_up="" read_by=""
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
   answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears
@@ -364,6 +365,8 @@ local_review_run() {
       break
     fi
     mv -f "$answer.part" "$answer"
+    # Every pass over this range that answered: what any of them opened is read.
+    read_by+="${read_by:+,}$pass_session"
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
     cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" || -n "$verify" ]] && cap=0
@@ -411,6 +414,26 @@ local_review_run() {
       break
     fi
     if [[ "${more:-0}" != 1 ]]; then
+      # A pass over the commits since the last review picks what it opens:
+      # a file a fix changed that it never opened is read by nobody after it
+      # — the blocks after this one read their own files. Once per head, a
+      # short pass reads those files' changes alone, as one round with this
+      # one; the run is marked owing it (owed) until it has.
+      local -a unread=()
+      if [[ -n "$since_last" && -z "$verify" && -z "$caught_up" && "$pass" -lt "$LOCAL_REVIEW_PASSES" ]]; then
+        mapfile -t unread < <(python3 "$LIB/review/local_review.py" unread "$wt" "$base" "$head" "$read_by" \
+                                2>>"$(local_review_file "$wt" .log)")
+      fi
+      if (( ${#unread[@]} )) && python3 "$LIB/review/local_review.py" owed "$journal" 2>/dev/null; then
+        caught_up=1
+        pass=$((pass + 1))
+        # Each path quoted for the command the pass is given: a name with a
+        # space is one path.
+        local quoted; quoted="$(printf "'%s' " "${unread[@]//\'/\'\\\'\'}")"
+        scope="only these files, which the pass before this one over the same commits did not open: ${quoted% }. What the branch's own commits in that range changed in them, each commit read whole: \`git log --first-parent --no-merges -p $base..$head -- ${quoted% }\`"
+        info "  That pass did not open ${#unread[@]} file(s) the commits changed: reading their changes alone, pass $pass." >&2
+        continue
+      fi
       [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" && "$new" -ge "$LOCAL_REVIEW_CAP" ]] \
         && warn "  Pass $pass still found the cap; stopping at $LOCAL_REVIEW_PASSES passes — more may be left unsaid." >&2
       break

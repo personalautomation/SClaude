@@ -1740,18 +1740,27 @@ echo "watcher=[$SESSION_WATCHER]"
     subprocess.run(git + ["-C", clone, "commit", "-q", "--allow-empty", "-m", "fix"],
                    check=True)
 
-    def push_fix(ahead, pr="160"):
+    def push_fix(ahead, pr="160", said=None):
         with open(os.path.join(fakelib, "review/pr_context.py"), "w") as fh:
             fh.write("print(%d)\n" % ahead)
-        script = ('LIB="%s"; info() { :; }; warn() { :; }\n%s\n'
+        script = ('LIB="%s"; info() { echo "INFO $*"; }; warn() { :; }; deferred_reset_pending() { return 1; }\n%s\n'
                   'regression_push_fix "%s" "%s"; echo "rc=$?"'
                   % (fakelib, push, clone, pr))
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        if said is not None:
+            said.extend(l for l in out.stdout.splitlines() if l.startswith("INFO"))
         return out.stdout.strip().splitlines()[-1]
 
     check("push-fix-nothing-ahead", push_fix(0), "rc=1")
     check("push-fix-no-pr", push_fix(1, pr="null"), "rc=1")
     check("push-fix-pushes", push_fix(1), "rc=0")
+    # sclaude's own bookkeeping is pushed as what it is, not as a fix.
+    subprocess.run(git + ["-C", clone, "commit", "-q", "--allow-empty", "-m", "chore(sclaude): put off one"],
+                   check=True)
+    said = []
+    check("push-fix-bookkeeping-pushed", push_fix(1, said=said), "rc=0")
+    check("push-fix-bookkeeping-named-so",
+          [l for l in said if "commit(s)" in l], ["INFO   sclaude's own bookkeeping is 1 commit(s) PR #160 does not carry — pushing feat/x."])
     check("push-fix-reached-origin",
           subprocess.run(["git", "-C", origin, "rev-parse", "-q", "--verify",
                           "refs/heads/feat/x"], capture_output=True).returncode, 0)

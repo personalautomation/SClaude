@@ -41,6 +41,13 @@
 #                                                 has no count or nothing could be posted
 #   local_review.py open <cwd> <pr> <repo> <journal>  post what waits to be posted,
 #                                                 then say how many are open
+#   local_review.py unread <cwd> <base> <head> <sessions>  the files the branch's own
+#                                                 commits changed in <base>..<head> that
+#                                                 none of the passes' conversations (ids,
+#                                                 comma-separated) opened,
+#                                                 one a line; nothing when it cannot tell
+#   local_review.py owed <journal>                mark the last run left with more to
+#                                                 read, as a capped one is
 #
 # The journal (JOURNAL, review-rounds.jsonl) is one line per review run,
 # wherever it ran: when, how long, which head. A pass here adds the range and
@@ -543,6 +550,61 @@ def github_runs(journal, runs, pr=""):
             fh.write(json.dumps(row) + "\n")
 
 
+def unread(cwd, base, head, sessions):
+    """What a pass over the commits since the last review was to read and
+    did not open: the files the branch's own commits changed in the range
+    (merges brought the rest, reviewed elsewhere), still there at the head,
+    less those its conversations read, showed as a diff or named
+    (review_map.seen_files, as the review map tells a file read). A pass
+    reading a range picks what it opens, and a fix's change to a file it
+    passes over would go unread by every pass after it. Nothing when the
+    conversation left no transcript here: what it read is not known."""
+    try:
+        listed = subprocess.run(["git", "-C", cwd, "log", "--first-parent", "--no-merges", "--name-only",
+                                 "--format=", "%s..%s" % (base, head)],
+                                capture_output=True, text=True, timeout=60)
+        there = subprocess.run(["git", "-C", cwd, "ls-tree", "-r", "--name-only", head],
+                               capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if listed.returncode or there.returncode:
+        return []
+    alive = set(there.stdout.split("\n"))
+    changed = sorted({p for p in listed.stdout.split("\n") if p and p in alive})
+    if not changed:
+        return []
+    import review_map  # noqa: E402 — the map's own reader, only when needed
+    seen = review_map.seen_files(cwd, [x for x in sessions.split(",") if x], changed)
+    if seen is None:
+        return []
+    return [p for p in changed if p not in seen]
+
+
+def owed(journal):
+    """The last run is not done with its head: its follow-up reads what it
+    left (a pass that did not open every file it was to read). Marked as a
+    capped run is, so that the next call reads the same range again if the
+    follow-up never runs, and the report counts the two as one round."""
+    try:
+        with open(journal, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return 1
+    for i in range(len(lines) - 1, -1, -1):
+        try:
+            row = json.loads(lines[i])
+        except ValueError:
+            continue
+        if "spent" in row:
+            continue
+        row["more"] = True
+        lines[i] = json.dumps(row, ensure_ascii=False)
+        with open(journal, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        return 0
+    return 1
+
+
 def main(argv):
     if not argv:
         return 2
@@ -589,6 +651,12 @@ def main(argv):
         return record(*args)
     if cmd == "spent" and len(args) in (5, 6, 7):
         return spent(*args)
+    if cmd == "unread" and len(args) == 4:
+        for path in unread(*args):
+            print(path)
+        return 0
+    if cmd == "owed" and len(args) == 1:
+        return owed(args[0])
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.
         _, waiting = flush(args[0], args[1], args[2], args[3])

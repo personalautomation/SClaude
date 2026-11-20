@@ -658,6 +658,9 @@ friction_push_project() {
   local wt="$1" from="${2:-}" sent="${3:-}" branch
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 0
+  # Deferred entries just sent to main whose commit the branch could not drop
+  # go first: pushed, they would come back twice with the branch's merge.
+  deferred_reset_pending "$wt" || true
   if [[ -n "$from" && "$( (cd "$wt" && branch_pr_state "$branch") )" == "MERGED" ]]; then
     friction_propose_project "$wt" "$from" "$branch" "$sent"
     return 0

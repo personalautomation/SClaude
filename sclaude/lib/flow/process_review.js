@@ -318,15 +318,22 @@ const reviewMap = (() => {
     // Lines added and removed, every round's changes summed; the person's
     // own asks during the review are the development's, counted apart.
     const sum = (xs) => xs.reduce((a, x) => [a[0] + x.add, a[1] + x.del], [0, 0]);
+    // A round with no recorded answer draws none of its fixes in the
+    // icicles (draw(), below): the header counts as they draw, and names
+    // those fixes apart in its note.
+    const stopped = (x) => !!(d.rounds[x.r] || {}).stopped;
     const inRounds = d.hunks.filter((x) => x.r < rounds.length);
-    const [rAdd, rDel] = sum(inRounds.filter((x) => !x.asked && x.outcome !== 'moved'));
+    const own = inRounds.filter((x) => !x.asked && x.outcome !== 'moved');
+    const [rAdd, rDel] = sum(own.filter((x) => !stopped(x)));
+    const [sAdd, sDel] = sum(own.filter(stopped));
     const [aAdd, aDel] = sum(inRounds.filter((x) => x.asked));
     const [mAdd, mDel] = sum(inRounds.filter((x) => !x.asked && x.outcome === 'moved'));
     const linesSay = 'Lines the review\'s own fixes added (+) and removed (−), every round\'s changes summed: '
       + 'a spot rewritten in several rounds counts each time; tests, docs and migrations count too.\n'
       + 'What the person asked for during the review (feat and Requirement: commits, beige on the map) and code moved from one file to another (mauve) are counted apart: '
       + 'hover the title, The review, for them.\n\nExactly: +' + rAdd + ' −' + rDel
-      + (aAdd || aDel ? '; asked for +' + aAdd + ' −' + aDel : '') + (mAdd || mDel ? '; moved +' + mAdd + ' −' + mDel : '');
+      + (aAdd || aDel ? '; asked for +' + aAdd + ' −' + aDel : '') + (mAdd || mDel ? '; moved +' + mAdd + ' −' + mDel : '')
+      + (sAdd || sDel ? '; after a stopped pass, not drawn in the icicles: +' + sAdd + ' −' + sDel : '');
     const cost = rounds.reduce((a, r) => a + (r.cost || 0), 0);
     const rec = hands.filter((x) => x.rec).length;
     return '<b>PR #' + h(d.pr) + '</b> · ' + rounds.length + ' round' + (rounds.length === 1 ? '' : 's')
@@ -334,7 +341,8 @@ const reviewMap = (() => {
       + ' · threads: ' + Object.entries(n).map(([k, v]) => '<span class="rv-k" style="--c:' + colour(k, 1) + '">' + v + ' ' + OUT[k][1] + '</span>').join(' ')
       // The person's asks and moved code are in the title's note, beside
       // the blocks' table: the header stays one line (the user's word).
-      + ' · <span class="rv-lines" title="' + h(linesSay) + '">' + pm(rAdd, rDel) + ' in review fixes</span>'
+      + ' · <span class="rv-lines" title="' + h(linesSay) + '">' + pm(rAdd, rDel) + ' in review fixes'
+      + (sAdd || sDel ? ' (and ' + pm(sAdd, sDel) + ' after a stopped pass)' : '') + '</span>'
       + ' · ✋ ' + hands.length + (rec ? ' (' + rec + ' recommended)' : '');
   }
   function draw() {

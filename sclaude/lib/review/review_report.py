@@ -860,7 +860,12 @@ def main():
     print(rule("Review report · PR #%s%s" % (pr, " · on GitHub, then on this machine" if moved
                                              else " · reviewed on this machine" if local else "")))
     if threads_failed:
-        print("  The review threads could not be read (gh, network or permissions).")
+        # Every count in the table is a thread's: unread, the table would be
+        # a column of zeros that reads as a clean review, and the rounds
+        # beside them may be another pull request's. Nothing is shown.
+        print("  The review threads could not be read (gh, network or permissions): no report this time,")
+        print("  every count in it being a thread's.")
+        return 0
     mark_near_fixes(found, groups, cwd)
     mark_repeats(found)
     people = sessions(cwd, since)

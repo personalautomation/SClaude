@@ -1416,7 +1416,16 @@ after the project's `teardown` — for example, deleting from object storage
 what the feature's people uploaded and the main database does not reference; it is told
 when the stack was filled (`SCLAUDE_DB_FILLED`), and asks the main database
 itself which of the stack's rows are its own — sclaude knows nothing of what a
-row is.
+row is. What a teardown cannot tell is the feature's own — anything older than
+the stack's last fill — is left for the project's `sweep`, which sclaude runs
+in the main checkout when it starts with no feature in progress: the main
+database is then the only one left, so what it does not use is nobody's. A
+removal that could not take a feature's stack away (Docker down, a stop that
+failed) writes its project_id down in `.sclaude/local/stacks-left`, and the
+sweep holds off while a line is there, naming it, until the person removes
+the stack and the line. It runs five minutes at most. Its last line is shown,
+everything goes to `.sclaude/local/sweep.log`, and one that refuses leaves
+things as they were.
 The main repository keeps its own stack, and a feature on the shared cloud
 project has none. With Docker down sclaude starts it — Docker Desktop from WSL,
 or `docker.service` where sudo needs no password — and waits up to
@@ -2082,6 +2091,18 @@ the head is not taken as reviewed: the capped pass before it keeps its
 a session that pushes first moves the head, and the rest of that range is
 not read again), and the gate asks the person, or under `[g]` tries again
 by itself.
+
+**A pass over the commits since the last review reads every file they
+changed.** It picks what it opens, and a fix's change to a file it passed
+over would be read by no pass after it: the blocks after this one read
+their own files. Once it answers, `local_review.py unread` lists the files
+the branch's own commits changed in its range, still there at the head,
+that none of its passes' conversations opened — read from their
+transcripts, as the review map tells a file read (`seen_files`). When there
+are any, the run is marked `more` (`owed`), as a capped one is, and one
+short pass reads those files' changes alone, once per head; a run that
+never gets to it reads the range again. A pass whose transcript is not on
+this machine claims nothing.
 
 **A review that cannot run on GitHub stops, or moves here.** When the gate
 reads a red Claude review job, `pr_context.py --fallback` (`review_fallback`)

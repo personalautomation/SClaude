@@ -239,7 +239,9 @@ blocks_split() {
   python3 "$LIB/review/review_blocks.py" outgrown "$wt" "$file" "$k" "$head" "$limit" 2>/dev/null || return 1
   id="$(blocks_id "$wt" "$k")"
   answer="$(local_review_file "$wt" -split.md)"
-  info "  Block $id has grown past $limit changed lines: a session splits it by behaviour ($LOCAL_REVIEW_MODEL)…"
+  # Everything it says goes to stderr: local_review, which calls it, answers
+  # with its findings count on stdout.
+  info "  Block $id has grown past $limit changed lines: a session splits it by behaviour ($LOCAL_REVIEW_MODEL)…" >&2
   # Only an answer judged and found wanting is told to the next try, and
   # only then is the head marked: a session that failed (a quota, the
   # network) judged nothing, and a crash here is sclaude's, not the answer's.
@@ -264,7 +266,7 @@ blocks_split() {
       state_set "$state" blocks.total $((n + 1))
       history_add "$state" blocks split block="$id" parts="$parts"
       local said; said="$(python3 "$LIB/review/review_blocks.py" summary "$file" 2>/dev/null)"
-      info "  Block $id is split in $parts; the blocks now:"
+      info "  Block $id is split in $parts; the blocks now:" >&2
       printf '%s\n' "$said" | sed 's/^/    /' >&2
       ask_feed say "🧱 Block $id had grown past $limit lines: it is split in $parts, each read whole; now reading $(blocks_label "$wt" "$k")."$'\n'"$said" 2>/dev/null || true
       return 0

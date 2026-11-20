@@ -210,7 +210,9 @@ in the product while recording — a check that failed, a fault it had to go
 round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
 session would leave as it is does not hold the step till morning. A minor one the
 review posted, with no reply under it yet — nothing at risk for users, data or security, nothing promised changed, no check
-weakened — the session resolves itself, with a reply saying it was resolved at
+weakened, nothing left to mislead whoever maintains the code, and within those
+limits grammar in a comment, a duplicate or an unlikely case with small
+consequences — the session resolves itself, with a reply saying it was resolved at
 night without you, and lists it in its report; unresolve it on GitHub to make it
 open work again. Any other waits for you, and in the morning sclaude offers a
 session that asks you about each such thread and, on your yes, replies and

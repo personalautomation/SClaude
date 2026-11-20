@@ -177,9 +177,15 @@ Sort each one:
 - **covered by a policy or stance** — apply it; no question.
 - **would undo an earlier fix** (branch log, resolved threads) — never applied
   silently: it becomes a question, with both sides.
-- **substantive** — a bug, or something a user of the product would see: fix.
-- **nit** — fix it when the fix leaves the code smaller or the same size;
-  otherwise it goes to the iteration's question as part of a class.
+- **substantive** — a bug (one both unlikely and small in its consequences
+  is a nit), something a user of the product would see, or
+  something that would mislead whoever maintains the code next (a comment that
+  says other than the code does, a wrong account of a function's dependencies
+  or of the data model): fix.
+- **nit** — grammar in a comment, a case both unlikely and small in its
+  consequences, and the like: fix it when the fix leaves the code smaller or
+  the same size; otherwise it goes to the iteration's question as part of a
+  class.
 - **disputed** — you would leave it, or the fix has a real trade-off: a question.
 
 ## 3. Questions — about the class, not the instance

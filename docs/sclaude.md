@@ -1418,7 +1418,8 @@ when the stack was filled (`SCLAUDE_DB_FILLED`), and asks the main database
 itself which of the stack's rows are its own — sclaude knows nothing of what a
 row is. What a teardown cannot tell is the feature's own — anything older than
 the stack's last fill — is left for the project's `sweep`, which sclaude runs
-in the main checkout when it starts with no feature in progress: the main
+in the main checkout when it starts with no feature in progress, and when
+`sclaude done` has just removed the last one: the main
 database is then the only one left, so what it does not use is nobody's. A
 removal that could not take a feature's stack away (Docker down, a stop that
 failed) writes its project_id down in `.sclaude/local/stacks-left`, and the

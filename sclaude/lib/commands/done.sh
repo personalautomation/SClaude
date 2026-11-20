@@ -131,6 +131,7 @@ cmd_done() {
     # The watch on QA's earlier answer is spent, as in retro_reopen.
     watch_stop "$slug"
     issue_hold_open "$issue"
+    retro_board_back "$issue"
     issue_sync "$wt"
     echo ""
     say "${BOLD}'$slug' now carries work of its own on $branch — it goes on to step '$(step_title pr)' for it.${OFF}"
@@ -304,4 +305,10 @@ cmd_done() {
   [[ "$kept" == 1 ]] || branches_parts_delete "$feature_tip" <<< "$part_branches"
 
   echo "${GREEN}Feature '$slug' cleaned up.${OFF}"
+
+  # The last feature gone: the project's sweep runs now rather than at the
+  # next start (db_sweep holds off while another feature, or a stack a
+  # removal left behind, is still on this machine). Last, after the branches:
+  # it may take minutes, and one cut short leaves nothing of the clean-up undone.
+  db_sweep
 }

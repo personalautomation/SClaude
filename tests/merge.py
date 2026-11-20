@@ -318,6 +318,12 @@ check_true("merge-wait-auto-held-said",
            0 <= mwait.find("is auto, but held") < mwait.find("is auto: sclaude merges it itself")
            and "merge_check_red" in mwait)
 check_true("merge-wait-m-says-why-not", "Nothing to merge from here yet" in mwait)
+# Under `merge: auto` nobody is asked to merge it, nor named as what the
+# wait is on: "merge it on GitHub" only where the person is the one to.
+check_true("merge-wait-auto-asks-nobody",
+           re.search(r'if \[\[ "\$mode" == auto \]\]; then\n\s*info "Waiting for the merge of PR #\$pr\$\{issue:\+ \(issue #\$issue\)\}\."', mwait)
+           is not None
+           and '[[ "$held" == none || "$held" != "$(merge_check_pair "$wt")" ]] && who="Running by itself"' in mwait)
 check_true("merge-wait-gets-the-offer-mode",
            'merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode"' in deploy)
 

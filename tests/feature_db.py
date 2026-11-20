@@ -470,6 +470,13 @@ def ensure_cases():
         with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
             json.dump({}, fh)
         check("no sweep named, nothing said", bash(root, 'list_features() { :; }; db_sweep').strip(), "")
+        # `sclaude done` sweeps once the feature's tree is gone, so the last
+        # feature removed does not wait for the next start.
+        with open(os.path.join(LIB, "commands", "done.sh")) as fh:
+            done_src = fh.read()
+        check("done sweeps last, after the tree and the branches are gone",
+              0 < done_src.find('remove_worktree "$wt"') < done_src.find("cleaned up.")
+              < done_src.find("\n  db_sweep\n"), True)
         with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
             json.dump({"database": {"local": {"sweep": 'touch %s' % swept}}}, fh)
         out = bash(root, 'list_features() { :; }; db_sweep')

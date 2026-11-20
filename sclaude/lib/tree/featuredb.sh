@@ -908,7 +908,8 @@ db_stop() {
 # done again, a feature's older files — stays, owned by nobody. With no
 # feature's tree on the machine the main local database is the only one left,
 # which is when the project can tell what nobody uses. Run by the menu at
-# that moment; what the sweep says goes to its log and its last line here.
+# that moment, and by `sclaude done` once it has removed a feature's tree;
+# what the sweep says goes to its log and its last line here.
 # Not fatal either way: a sweep that refuses (a database that does not
 # answer) leaves things as they were.
 #

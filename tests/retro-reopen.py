@@ -50,7 +50,9 @@ def run_bash(script, cwd, bin_dir):
     body += ('info() { :; }; warn() { :; }\n'
              'issue_sync() { echo SYNC; }\n'
              'issue_hold_open() { echo "HOLD $1"; }\n'
-             'watch_stop() { echo "UNWATCH $1"; }\n')
+             'watch_stop() { echo "UNWATCH $1"; }\n'
+             'issue_move_status() { echo "MOVE $1|$2|$3"; }\n'
+             'QA_DONE=Done; PROGRESS_TO="In progress"\n')
     body += script
     env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"])
     out = subprocess.run(["bash", "-c", body], cwd=cwd, capture_output=True,
@@ -120,11 +122,164 @@ try:
     # pull request would have read that as QA handing the feature back.
     check("qa-watch-stopped", "UNWATCH demo" in out, True)
     check("issue-synced", "SYNC" in out, True)
+    # Back at work: the board's Done goes back to In progress.
+    check("board-back-in-progress", "MOVE 145|Done|In progress" in out, True)
+    # The other way back to step 3 — a feature with no change of its own the
+    # retrospective gave one — moves the board the same way.
+    with open(os.path.join(LIB, "commands", "done.sh")) as fh:
+        check("board-back-on-the-no-change-way-too", fh.read().count('retro_board_back "$issue"'), 1)
 
     # --- step 3 is told ---------------------------------------------------------
     out, _, _ = run_bash('retro_pr_block "%s"' % wt, wt, bin_dir)
     check("block-names-the-merged-pr", "PR #160 carried it and is merged" in out, True)
     check("block-names-the-range", "`git log %s..HEAD`" % merged[:7] in out, True)
+
+    # --- after a squash merge the branch moves onto main --------------------
+    # main holds the pull request as one squashed commit; the branch holds
+    # its own history up to the merged head and two commits past it. Merging
+    # main in would meet the squash in conflicts: the branch is moved onto
+    # main with the two alone.
+    def g(cwd, *args):
+        return subprocess.run(git + ["-C", cwd] + list(args), capture_output=True, text=True,
+                              check=True).stdout.strip()
+    origin = os.path.join(tmp, "squash.git")
+    sq = os.path.join(tmp, "squash")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True)
+    subprocess.run(["git", "clone", "-q", origin, sq], check=True, capture_output=True)
+    with open(os.path.join(sq, "app.txt"), "w") as fh:
+        fh.write("base\n")
+    g(sq, "add", "-A"); g(sq, "commit", "-q", "-m", "base"); g(sq, "push", "-q", "origin", "HEAD:main")
+    g(sq, "switch", "-q", "-c", "feat/demo")
+    for line in ("one", "two"):
+        with open(os.path.join(sq, "app.txt"), "a") as fh:
+            fh.write(line + "\n")
+        g(sq, "commit", "-qam", line)
+    pr_head = g(sq, "rev-parse", "HEAD")
+    # The squash on main: the same content, another commit.
+    g(sq, "switch", "-q", "main")
+    g(sq, "merge", "-q", "--squash", "feat/demo"); g(sq, "commit", "-q", "-m", "squashed (#160)")
+    g(sq, "push", "-q", "origin", "main")
+    g(sq, "switch", "-q", "feat/demo")
+    for name in ("fix1.txt", "fix2.txt"):
+        with open(os.path.join(sq, name), "w") as fh:
+            fh.write("x\n")
+        g(sq, "add", name); g(sq, "commit", "-q", "-m", "retro " + name)
+    sq_bin = os.path.join(tmp, "squash-bin")
+    os.makedirs(sq_bin)
+    with open(os.path.join(sq_bin, "gh"), "w") as fh:
+        fh.write('#!/usr/bin/env bash\nfor a; do [[ "${prev:-}" == --head ]] && b="$a"; prev="$a"; done\n'
+                 '[[ "$b" == feat/demo ]] && echo %s\n' % pr_head)
+    os.chmod(os.path.join(sq_bin, "gh"), 0o755)
+    sq_state = os.path.join(sq, ".sclaude/local/feature/state.json")
+    os.makedirs(os.path.dirname(sq_state), exist_ok=True)
+
+    def sq_reopened(**extra):
+        # As retro_reopen leaves it: the merged pull request, no move yet.
+        with open(sq_state, "w") as fh:
+            json.dump(dict({"branch": "feat/demo", "reopened_by": "retro", "reopened_pr": 160}, **extra), fh)
+    sq_reopened()
+    out, err, rc = run_bash('info() { echo "INFO $*"; }; retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: the move is written down for step 3",
+          bool(json.load(open(sq_state)).get("retro", {}).get("moved")), True)
+    check("squash: the branch is main and the two commits past the merged head",
+          (g(sq, "rev-parse", "HEAD~2"), g(sq, "log", "--format=%s", "-2").split("\n"),
+           "now stand on origin/main" in out),
+          (g(sq, "rev-parse", "origin/main"), ["retro fix2.txt", "retro fix1.txt"], True))
+    # Step 3 is told the commits by where they now stand.
+    out, _, _ = run_bash('retro_pr_block "%s"' % sq, sq, sq_bin)
+    check("squash: step 3 is told the moved commits as origin/main..HEAD",
+          ("`git log origin/main..HEAD`" in out, "rebase them onto" in out), (True, False))
+
+    # Rebased by step 3 itself (no record), then step 3 started again: the
+    # branch is plainly on main, and is told so.
+    sq_reopened()
+    out, _, _ = run_bash('retro_pr_block "%s"' % sq, sq, sq_bin)
+    check("squash: a branch plainly on main with no record is told it is moved",
+          "`git log origin/main..HEAD`" in out, True)
+
+    def back_on_head(name):
+        # The branch at the merged head again, with one fresh commit past it,
+        # sent back anew: no move written down.
+        sq_reopened()
+        g(sq, "reset", "-q", "--hard", pr_head)
+        with open(os.path.join(sq, name), "w") as fh:
+            fh.write("x\n")
+        g(sq, "add", name); g(sq, "commit", "-q", "-m", "retro " + name)
+        return g(sq, "rev-parse", "HEAD")
+
+    def on_origin():
+        return subprocess.run(["git", "-C", sq, "ls-remote", "--heads", "origin", "feat/demo"],
+                              capture_output=True, text=True).stdout.strip()
+
+    # On origin at the merged head: it holds nothing main lacks, and goes,
+    # so step 3 pushes the moved branch with no force.
+    back_on_head("fix3.txt")
+    g(sq, "push", "-q", "origin", "%s:refs/heads/feat/demo" % pr_head)
+    run_bash('retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: a branch on origin at the merged head goes, and the branch moves",
+          (on_origin(), g(sq, "rev-parse", "HEAD~1")), ("", g(sq, "rev-parse", "origin/main")))
+    # On origin past the merged head: somebody's work there — left as it is.
+    before = back_on_head("fix4.txt")
+    g(sq, "push", "-q", "-f", "origin", "HEAD:refs/heads/feat/demo")
+    run_bash('retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: a branch on origin past the merged head is left as it is",
+          (g(sq, "rev-parse", "HEAD"), bool(on_origin())), (before, True))
+    g(sq, "push", "-q", "origin", ":refs/heads/feat/demo")
+    # Origin not answering is no "absent": left as it is.
+    url = g(sq, "remote", "get-url", "origin")
+    g(sq, "remote", "set-url", "origin", os.path.join(tmp, "nowhere.git"))
+    run_bash('retro_move_past "%s"' % sq, sq, sq_bin)
+    g(sq, "remote", "set-url", "origin", url)
+    check("squash: no answer from origin leaves the branch as it is", g(sq, "rev-parse", "HEAD"), before)
+    # Main merged in after the merged head: the sync resolves it, not a replay.
+    sq_reopened()
+    g(sq, "merge", "-q", "--no-edit", "origin/main")
+    before = g(sq, "rev-parse", "HEAD")
+    run_bash('retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: main merged in after the merged head leaves the branch as it is",
+          g(sq, "rev-parse", "HEAD"), before)
+    out, _, _ = run_bash('retro_pr_block "%s"' % sq, sq, sq_bin)
+    check("squash: with main merged in, step 3 is not asked to rebase",
+          ("do not rebase it" in out, "rebase them onto" in out, "--first-parent --no-merges" in out),
+          (True, False, True))
+    # gh not answering: the branch was not moved, and step 3 keeps the rebase.
+    mute = os.path.join(tmp, "mute-bin")
+    os.makedirs(mute, exist_ok=True)
+    with open(os.path.join(mute, "gh"), "w") as fh:
+        fh.write("#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(mute, "gh"), 0o755)
+    sq_reopened()
+    out, _, _ = run_bash('retro_pr_block "%s"' % sq, sq, mute)
+    check("squash: an unknown merged head is not taken for a moved branch",
+          ("<head of #160>" in out, "rebase them onto" in out, "already moved" in out), (True, True, False))
+    # Another branch ending in the same name, at the merged head, approves
+    # nothing: origin is asked for refs/heads/<branch> exactly.
+    before = back_on_head("fix5.txt")
+    g(sq, "push", "-q", "origin", "%s:refs/heads/bot/feat/demo" % pr_head)
+    g(sq, "push", "-q", "-f", "origin", "HEAD:refs/heads/feat/demo")
+    run_bash('retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: a branch named alike elsewhere does not get this one deleted",
+          (g(sq, "rev-parse", "HEAD"), bool(on_origin())), (before, True))
+    g(sq, "push", "-q", "origin", ":refs/heads/feat/demo", ":refs/heads/bot/feat/demo")
+    # A move that stops on a conflict is taken back: the sync before step 3
+    # resolves it, as before.
+    g(sq, "push", "-q", "origin", ":refs/heads/feat/demo")
+    g(sq, "switch", "-q", "main")
+    with open(os.path.join(sq, "fix1.txt"), "w") as fh:
+        fh.write("main\n")
+    g(sq, "add", "fix1.txt"); g(sq, "commit", "-q", "-m", "main touches fix1"); g(sq, "push", "-q", "origin", "main")
+    g(sq, "switch", "-q", "feat/demo")
+    # Back on the merged head, with one commit past it that main's change meets.
+    g(sq, "reset", "-q", "--hard", pr_head)
+    with open(os.path.join(sq, "fix1.txt"), "w") as fh:
+        fh.write("branch\n")
+    g(sq, "add", "fix1.txt"); g(sq, "commit", "-q", "-m", "retro fix1 again")
+    before = g(sq, "rev-parse", "HEAD")
+    out, _, _ = run_bash('info() { echo "INFO $*"; }; retro_move_past "%s"' % sq, sq, sq_bin)
+    check("squash: a conflict leaves the branch as it was, and says main is merged in",
+          (g(sq, "rev-parse", "HEAD"), g(sq, "status", "--porcelain", "--untracked-files=no"),
+           "do not move onto origin/main cleanly" in out),
+          (before, "", True))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

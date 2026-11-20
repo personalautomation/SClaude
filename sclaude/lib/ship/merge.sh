@@ -430,7 +430,13 @@ merge_wait() {
   mode="$(project_flow_mode merge)"
   [[ "$mode" == both ]] && keys=", m merges here"
   echo ""
-  info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}; merge it on GitHub."
+  # Under `merge: auto` nobody is asked to merge: "merge it on GitHub" read
+  # as a question to the person while sclaude waited for GitHub's checks.
+  if [[ "$mode" == auto ]]; then
+    info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}."
+  else
+    info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}; merge it on GitHub."
+  fi
   [[ "$mode" == both ]] && info "  Or press m here to merge it from sclaude."
   # Held by the check of the merge with main (merge_build_check): the offer
   # just before said so, and "merges it itself" right under it is not what
@@ -456,8 +462,15 @@ merge_wait() {
       return 2
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K\033[?7l  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now%s)\033[?7h' \
-        "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" "$keys"
+      # Not "Human in the loop" while sclaude is still to merge it itself and
+      # nothing holds it: the wait is GitHub's, as local_review's is its own.
+      # Read each time round: a hold that came or went, or a merge GitHub
+      # refused (answered), puts the person back in the loop.
+      local who="Human in the loop"
+      [[ "$mode" == auto && "$answered" -eq 0 ]] \
+        && [[ "$held" == none || "$held" != "$(merge_check_pair "$wt")" ]] && who="Running by itself"
+      printf '\r\033[2K\033[?7l  %s%s%s — waiting for the merge (%s so far, next check in %ss, any key checks now%s)\033[?7h' \
+        "$DIM" "$who" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" "$keys"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       info "  waiting for the merge of PR #$pr${issue:+ (issue #$issue)} ($(regression_duration "$waited"))"
       logged="$waited"

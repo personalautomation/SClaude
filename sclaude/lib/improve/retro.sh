@@ -379,6 +379,74 @@ retro_changed_code() {
   return 0
 }
 
+# The branch moved onto origin/main with only the commits past its merged
+# pull request's head, before step 3 takes it again. A pull request squashed
+# (or rebased) into main leaves its commits on the branch and out of main's
+# history: merging main in before step 3 then met them in conflicts with
+# their own squash, a sync session resolved those, and step 3 still cut the
+# branch again from main by hand. A copy of the branch on origin still at
+# the merged head holds nothing main lacks: it is deleted there first, so
+# step 3 pushes the moved branch with no force. Left as it is — for that
+# sync — when the head is unknown or already in main's history (a merge
+# commit), when the branch took main in after the merge, when origin holds it
+# past that head or does not answer, with changes not committed, or when the
+# move stops on a conflict.
+#
+#   retro_move_past <wt>
+retro_move_past() {
+  local wt="$1" branch head n remote rc=0 gone=""
+  branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 0
+  head="$(cd "$REPO" && merged_pr_head "$branch")"
+  [[ -n "$head" ]] || return 0
+  git -C "$wt" fetch -q origin main 2>/dev/null || true
+  git -C "$wt" merge-base --is-ancestor "$head" HEAD 2>/dev/null || return 0
+  git -C "$wt" merge-base --is-ancestor "$head" origin/main 2>/dev/null && return 0
+  # Main merged in after the merge (a sync, a regression's fix): replaying
+  # it would flatten what that merge resolved — the sync before step 3 does it.
+  [[ -z "$(git -C "$wt" rev-list --merges "$head..HEAD" 2>/dev/null)" ]] || return 0
+  n="$(git -C "$wt" rev-list --count "$head..HEAD" 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || return 0
+  [[ -z "$(git -C "$wt" status --porcelain --untracked-files=no 2>/dev/null)" ]] || return 0
+  # The branch on origin: absent (2) is the way clear; at the merged head it
+  # holds nothing main lacks and goes now rather than at the clean-up, so
+  # step 3 pushes the moved branch with no force; anything past that head, or
+  # no answer from origin, leaves the branch as it is.
+  # Asked by its full name: a pattern also matches refs/heads/<x>/<branch>.
+  remote="$(git -C "$wt" ls-remote --exit-code origin "refs/heads/$branch" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0) [[ "$remote" != *$'\n'* && "${remote%%[[:space:]]*}" == "$head" ]] || return 0; gone=1 ;;
+    2) ;;
+    *) return 0 ;;
+  esac
+  if [[ -n "$gone" ]] && ! git -C "$wt" push -q --no-verify origin --delete "$branch" >/dev/null 2>&1; then
+    return 0
+  fi
+  if git -C "$wt" rebase -q --onto origin/main "$head" >/dev/null 2>&1; then
+    # Step 3 is told by this, not by guessing from the history (retro_pr_range).
+    state_set "$wt/.sclaude/local/feature/state.json" retro.moved "$(git -C "$wt" rev-parse origin/main)" 2>/dev/null || true
+    info "  branch: its $n commit(s) past the merged pull request now stand on origin/main"
+  else
+    git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+    info "  branch: its commits past the merged pull request do not move onto origin/main cleanly; main is merged in before step 3"
+  fi
+  return 0
+}
+
+# Back at work, so back in progress on the board: from Done only — a column
+# a person moved the issue to themselves stays (issue_move_status moves only
+# from the column it names). Left in Done, the issue said the feature was
+# finished through a whole second round of pull request and review, until
+# the preview moved it on to QA. For both ways the retrospective sends a
+# feature back to step 3 (retro_reopen, and `sclaude done` for a feature that
+# had no change of its own).
+#
+#   retro_board_back <issue>
+retro_board_back() {
+  [[ -n "${QA_DONE:-}" && -n "${PROGRESS_TO:-}" ]] || return 0
+  issue_move_status "$1" "$QA_DONE" "$PROGRESS_TO"
+}
+
 # Puts the feature back on step 3, so the commits go out the way the feature's
 # own did: step 3 opens their pull request, step 4 takes the automatic review's
 # findings, and the preview, QA and the merge follow as after any review.
@@ -393,6 +461,8 @@ retro_changed_code() {
 retro_reopen() {
   local wt="$1" old="$2" slug="$3" state="$1/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 1
+  state_set "$state" retro.moved null 2>/dev/null || true
+  retro_move_past "$wt"
   step_rewind_to "$wt" pr pr review
   state_set "$state" reopened pr 2>/dev/null || true
   state_set "$state" reopened_by retro 2>/dev/null || true
@@ -416,9 +486,45 @@ retro_reopen() {
   # feature back, and the cycle would have gone round the review once more with
   # sclaude's own status comments for QA's notes.
   watch_stop "$slug"
-  issue_hold_open "$(state_get "$state" issue 2>/dev/null || true)"
+  local issue; issue="$(state_get "$state" issue 2>/dev/null || true)"
+  issue_hold_open "$issue"
+  retro_board_back "$issue"
   issue_sync "$wt"
   return 0
+}
+
+# Which commits the second pull request carries, as step 3 is told it, by
+# where the branch stands: moved onto main's tip, as retro_move_past wrote
+# down (retro.moved) — never guessed from the history, which cannot tell a
+# moved branch from one that never held the head; still holding the merged
+# head, with a rebase asked for when main squashed it in; or carrying a merge
+# past the head, which a rebase would flatten, so none is asked for and the
+# commits are read by first parent. A head not here is fetched, as
+# retro_changed_code does; one that cannot be had (gh, the network) is named
+# by its place, and the rebase sentence stays.
+#
+#   retro_pr_range <wt> <merged pr>
+retro_pr_range() {
+  local wt="$1" old="$2" state="$1/.sclaude/local/feature/state.json" mh short="<head of #$2>" here=""
+  mh="$(cd "$REPO" && merged_pr_head "$(state_get "$state" branch)")"
+  [[ -n "$mh" ]] && { git -C "$wt" cat-file -e "$mh^{commit}" 2>/dev/null \
+                      || git -C "$wt" fetch -q origin "$mh" 2>/dev/null; } && here=1
+  # Moved: as written down, or plainly so — the head gone from the branch and
+  # main's tip on it (a rebase step 3 itself made, before a restart).
+  if [[ -n "$(state_get "$state" retro.moved 2>/dev/null || true)" ]] \
+     || { [[ -n "$here" ]] && ! git -C "$wt" merge-base --is-ancestor "$mh" HEAD 2>/dev/null \
+          && git -C "$wt" merge-base --is-ancestor origin/main HEAD 2>/dev/null; }; then
+    printf '%s' "It carries only the commits #$old did not, already moved onto \`origin/main\`: \`git log origin/main..HEAD\`."
+    return 0
+  fi
+  if [[ -n "$here" ]]; then
+    short="$(git -C "$wt" rev-parse --short "$mh")"
+    if [[ -n "$(git -C "$wt" rev-list --merges "$mh..HEAD" 2>/dev/null)" ]]; then
+      printf '%s' "It carries only the commits #$old did not: \`git log --first-parent --no-merges $short..HEAD\`. The branch took main in after #$old was merged: do not rebase it, which would undo what that merge resolved; the pull request's diff against \`main\` is what it changes."
+      return 0
+    fi
+  fi
+  printf '%s' "It carries only the commits #$old did not: \`git log $short..HEAD\`. When \`origin/main..HEAD\` shows more than those (#$old was squash-merged), rebase them onto \`origin/main\` first, so the pull request holds nothing that is already merged."
 }
 
 # The paragraph step 3 is given when retro_reopen sent the feature back to it,
@@ -433,7 +539,7 @@ retro_pr_block() {
   cat <<EOF
 **This is a second pull request for the feature.** PR #$old carried it and is merged. Since then the retrospective over the feature committed more on this branch, and sclaude sent the feature back to this step for them. A merged pull request cannot be reopened, so open a new one from this branch.
 
-- It carries only the commits #$old did not: \`git log $(git -C "$1" rev-parse --short "$(cd "$REPO" && merged_pr_head "$(state_get "$state" branch)")" 2>/dev/null || echo "<head of #$old>")..HEAD\`. When \`origin/main..HEAD\` shows more than those (#$old was squash-merged), rebase them onto \`origin/main\` first, so the pull request holds nothing that is already merged.
+- $(retro_pr_range "$1" "$old")
 - Its description says what these commits change and why, and names #$old as the pull request the feature shipped in. The acceptance criteria are the feature's and were checked on #$old: list only those these commits touch, and if they touch none, say so in place of the list.
 - The manuals and the regression test question are about these commits only.
 EOF

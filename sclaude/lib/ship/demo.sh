@@ -11,10 +11,11 @@
 # model's work. Step 2's is for the person accepting the work; this one is for
 # whoever looks next:
 #   preview   once the preview's regression is green, before the issue goes
-#             to QA — where QA moves it on the board (qa: github, both): a
-#             delta, only what changed for the user since the last full demo,
-#             then the whole feature again;
-#   epilogue  before the last epilogue, where nobody does QA (qa: auto): the
+#             to QA — where QA moves it on the board (qa: github, both, or
+#             auto-own on somebody else's issue): a delta, only what changed
+#             for the user since the last full demo, then the whole feature;
+#   epilogue  before the last epilogue, where nobody does QA (qa: auto, or
+#             auto-own on the worker's own issue — qa_settle in qa.sh): the
 #             whole feature, for the issue's record, and no delta.
 # The review may have changed what the feature does, not only how, so a
 # model writes it again: a headless session with the sdemo skill, given the

@@ -98,17 +98,21 @@ VARIANTS = {
         "text": "qa: auto — moved to Done once the preview regression is green",
         "details": "With qa set to auto, sclaude moves the issue to Done itself once the preview regression is green; a person can still hand it back from the board."}),
                  ("qa", {"both"}, {
-        "text": "on the preview, ticking them in the issue — or a key in sclaude's wait"})],
+        "text": "on the preview, ticking them in the issue — or a key in sclaude's wait"}),
+                 ("qa", {"auto-own"}, {
+        "text": "the issue's author, on the preview — sclaude, when that is you",
+        "details": "With qa set to auto-own, an issue opened by the GitHub account sclaude runs as — the person working on it — is moved to Done by sclaude once the preview regression is green, as with auto; anybody else's issue waits for its author's check on the board, as with github."})],
     "prepare": [("database.local", {False}, {
         "text": "worktree from origin/main, branch feat/<slug>, its own dev server"})],
     "prod": [("database.promote", {False}, {
         "text": "vercel --prod, then the production regression"})],
     "o_ghreview": [("review", {"local"}, {
         "lane": "sclaude", "title": "Local review", "text": "passes on this machine"})],
-    "o_qa": [("qa", {"auto"}, {"lane": "sclaude", "title": "QA: auto", "text": "accepted when the preview is green"})],
+    "o_qa": [("qa", {"auto"}, {"lane": "sclaude", "title": "QA: auto", "text": "accepted when the preview is green"}),
+             ("qa", {"auto-own"}, {"text": "by the issue's author; by sclaude when that is you"})],
     # The demo for QA is recorded only where a person does QA; with qa: auto
-    # it is brought up to the code before the last epilogue instead
-    # (demo_refresh in demo.sh).
+    # — or auto-own on the worker's own issue — it is brought up to the code
+    # before the last epilogue instead (demo_refresh in demo.sh, qa_settle).
     "code": [("demo", {"off"}, {
         "text": "builds it, checks it in Chrome, commits with Requirement: ACn",
         "details": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion. demo: off — no demo video is recorded."})],
@@ -122,11 +126,15 @@ VARIANTS = {
     "preview_ok": [("demo", {"off"}, {
         "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."}),
                    ("qa", {"auto"}, {
-        "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."})],
+        "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."}),
+                   ("qa", {"auto-own"}, {
+        "details": "Green: on somebody else's issue, when the product's code changed since the feature's demo, it is recorded again for QA — what changed, then the whole feature (or kept, when nothing a user meets changed) — and the issue goes to In QA; on your own issue it goes to In QA with no demo, which waits for the epilogue. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."})],
     "epilogue": [("demo", {"off"}, {
         "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended."}),
                  ("qa", {"auto"}, {
-        "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. Nobody does QA here, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue — or kept, when nothing a user meets changed — and what it found wrong in the product is printed."})],
+        "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. Nobody does QA here, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue — or kept, when nothing a user meets changed — and what it found wrong in the product is printed."}),
+                 ("qa", {"auto-own"}, {
+        "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. On your own issue nobody did QA, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue — or kept, when nothing a user meets changed — and what it found wrong in the product is printed."})],
     "o_prod": [("ship", {"off"}, {"kind": "task", "title": "Not shipped from here", "text": "ship: off — production is yours to deploy"}),
                ("regression.prod", {False}, {"kind": "task", "text": "shipped; no suite runs there"}),
                ("ship", {"auto"}, {"text": "shipped by sclaude; a red suite, not rolled back: held here"})],
@@ -161,7 +169,8 @@ def setting(cfg, name):
         return cfg.get("review") if cfg.get("review") in ("local", "off", "github-local") else "github"
     if name in ("qa", "merge"):
         mode = cfg.get(name)
-        return mode if mode in ("github", "both", "auto") else ("both" if name == "merge" else "github")
+        words = ("github", "both", "auto", "auto-own") if name == "qa" else ("github", "both", "auto")
+        return mode if mode in words else ("both" if name == "merge" else "github")
     if name in ("previewRegression", "prodRegression"):
         return cfg.get(name) if cfg.get(name) in ("smoke", "none") else "full"
     if name == "ship":

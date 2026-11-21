@@ -217,7 +217,7 @@ bare = {}
 configs = [("no sections", bare)] + [
     ("review %s, qa %s, merge %s" % (r, q, m),
      dict(process.example_config(), review=r, qa=q, merge=m))
-    for r in ("github", "github-local", "local", "off") for q in ("github", "both", "auto") for m in ("github", "both", "auto")]
+    for r in ("github", "github-local", "local", "off") for q in ("github", "both", "auto", "auto-own") for m in ("github", "both", "auto")]
 for name, cfg in configs:
     nodes, edges = process.for_config(cfg, process.NODES, process.EDGES)
     check("%s: every arrow between blocks drawn" % name, all(a in nodes and b in nodes for a, b, *_ in edges))
@@ -283,6 +283,10 @@ with process.configured({"board": {"columns": {"done": "Done"}}}):
     check("qa: the verdict otherwise", "qa_verdict" in process.NODES)
     check("qa: the person's check otherwise", process.NODES["qa_check"][3] == "QA checks the criteria",
           str(process.NODES["qa_check"][:4]))
+with process.configured({"qa": "auto-own", "board": {"columns": {"done": "Done"}}}):
+    check("qa: auto-own still waits for the board's verdict on others' issues",
+          "qa_verdict" in process.NODES and process.NODES["qa_check"][0] == "qa"
+          and "author" in process.NODES["qa_check"][4], str(process.NODES["qa_check"][:5]))
 with process.configured({}):
     check("ship: ask keeps the question in your lane",
           process.NODES["ship"][0] == "person" and process.NODES["ship"][3] == "Ship to production?",

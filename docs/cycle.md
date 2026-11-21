@@ -216,8 +216,10 @@ left uncommitted there holds production up until it is what origin holds: the
 stop lists where the two differ, and you commit and push the change, or take
 origin's copy and set your own choice with `sclaude config`. `qa` and `merge` each take `github` (a person does it
 on GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
-accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
-the merge `both`. An acceptance given by sclaude says so in a comment on the
+accepts, `m` merges) and `auto` (sclaude does it). `qa` also takes `auto-own`:
+`auto` when the issue was opened by whoever works on it (the GitHub account
+sclaude runs as), and `github` for anybody else's issue, so its author checks
+what they asked for. By default QA is `github` and the merge `both`. An acceptance given by sclaude says so in a comment on the
 issue.
 
 Production and the suites against the deployments are set the same way.
@@ -239,7 +241,8 @@ spec that walks a new path people depend on. A product that chose `smoke` and
 declares no smoke list gets its full list, said in the run's heading.
 `demo` takes `on` (the default: step 2 records a demo video of the feature
 before its question, and it is recorded again when the code changed since —
-before QA, or before the last epilogue with `qa: auto`) and `off` (no demo videos anywhere in the cycle; the report and the
+before QA, or before the last epilogue with `qa: auto` (or `auto-own` on your
+own issue)) and `off` (no demo videos anywhere in the cycle; the report and the
 criteria are the check).
 `demoVoice` takes `on` (the default: the demo's videos are spoken, in English,
 by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo))

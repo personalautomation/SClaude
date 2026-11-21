@@ -819,6 +819,7 @@ a deployment and it was right, and that is the one thing in this cycle no part
 of it can establish for itself — the same reason `In QA` → `Done` is a human's
 move. A step that could tick its own criteria would be marking its own homework.
 The one exception is a product's own choice: with `qa` set to `both` or `auto`
+(or `auto-own` on an issue its worker opened, `qa_settle` in `qa.sh`)
 sclaude ticks every box when it accepts the issue, and comments that it did.
 
 A feature planned before any of this existed has no section and no criteria.

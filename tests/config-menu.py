@@ -183,12 +183,12 @@ try:
         check("sleep-set", json.load(fh).get("sleep_mode"), "on")
     os.remove(local)
 
-    # qa and merge: three words each; an absent merge is the offer sclaude
-    # made before the key existed.
-    for key in ("qa", "merge"):
+    # qa and merge: three words each, and qa's auto-own; an absent merge is
+    # the offer sclaude made before the key existed.
+    for key, words in (("qa", ["github", "both", "auto", "auto-own"]),
+                       ("merge", ["github", "both", "auto"])):
         rc, out = menu("choices", key)
-        check("%s-choices" % key, [l.split("\t")[0] for l in out.splitlines()],
-              ["github", "both", "auto"])
+        check("%s-choices" % key, [l.split("\t")[0] for l in out.splitlines()], words)
     check("qa-default", menu("default", "qa")[1].strip(), "github")
     check("merge-default", menu("default", "merge")[1].strip(), "both")
     write(config, {})
@@ -201,6 +201,11 @@ try:
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
         check("flow-mode-%s" % (value or "absent"), out,
               [want, "both" if want == "github" else want])
+    # auto-own is qa's alone: merge reads it as unknown.
+    write(config, {"qa": "auto-own", "merge": "auto-own"})
+    script = 'source "%s/core/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
+    check("flow-mode-auto-own", out, ["auto-own", "both"])
     # The flow and the screen agree on what an absent key means: the defaults
     # live in two files, and this is what ties them.
     write(config, {})

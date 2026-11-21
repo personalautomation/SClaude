@@ -251,6 +251,58 @@ qa_accepted() {
   history_add "$state" qa accepted
 }
 
+# Who gives QA's word for this feature: `project_flow_mode qa`, with
+# `auto-own` settled for its issue — `auto` when the issue's author is the
+# GitHub account sclaude runs as, the person working on it, whose own request
+# it is to look at; `github` for anybody else's, since the author is the one
+# who knows what they asked for. An answer GitHub does not give (no network,
+# no issue) is `github`: waiting for a person is the side that loses nothing.
+#
+# Settled once an issue in a run, outside a subshell, into QA_MODE (the word
+# acted on), QA_SET (the word as set) and QA_PEOPLE (qa_issue_people's line):
+# the demo before QA, the wait and the demo before the epilogue each ask, and
+# one GitHub call failing between them would give one issue two answers — no
+# demo recorded for a QA that a person is then asked to do.
+#
+#   qa_settle <wt> [issue]      sets QA_MODE, QA_SET, QA_PEOPLE
+#
+# The kept answer is GitHub's, in variables of its own: a run in which `qa`
+# goes to another value and back finds it as it was, not that value's mode.
+QA_OWN_FOR="" QA_OWN_PEOPLE=""
+qa_settle() {
+  local wt="${1:-}" issue="${2:-}"
+  if [[ -z "$issue" && -n "$wt" ]]; then
+    issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
+  fi
+  QA_SET="$(project_flow_mode qa "$wt")"
+  QA_MODE="$QA_SET" QA_PEOPLE=""
+  [[ "$QA_SET" == auto-own ]] || return 0
+  if [[ -z "$issue" || "$QA_OWN_FOR" != "$issue" ]]; then
+    QA_OWN_PEOPLE="$(qa_issue_people "$issue")"
+    QA_OWN_FOR="$issue"
+  fi
+  QA_PEOPLE="$QA_OWN_PEOPLE"
+  [[ "$QA_PEOPLE" == own* ]] && QA_MODE=auto || QA_MODE=github
+  return 0
+}
+
+# The issue's author and this machine's GitHub account, as one line: `own
+# <login>` when they are the same (GitHub logins ignore case), `other <author>
+# <login>` when not, nothing when either is not known.
+qa_issue_people() {
+  local issue="${1:-}" author login
+  [[ -n "$issue" && "$issue" != null ]] || return 0
+  author="$(GH_PROMPT_DISABLED=1 gh issue view "$issue" --repo "$(gh_repo)" \
+    --json author --jq '.author.login' 2>/dev/null || true)"
+  login="$(GH_PROMPT_DISABLED=1 gh api user --jq .login 2>/dev/null || true)"
+  [[ -n "$author" && -n "$login" ]] || return 0
+  if [[ "${author,,}" == "${login,,}" ]]; then
+    echo "own $login"
+  else
+    echo "other $author $login"
+  fi
+}
+
 # --- waiting for QA ----------------------------------------------------------
 #
 # The order at the end of the cycle is review → preview → QA → merge →
@@ -304,7 +356,9 @@ qa_accept_here() {
     torn) warn "  The criteria comment on issue #$issue lost one of its markers — nothing ticked; tick them on GitHub." ;;
     *) warn "  Could not tick the criteria in issue #$issue${word:+ ($word)} — tick them on GitHub." ;;
   esac
-  if [[ "$how" == auto ]]; then
+  if [[ "$how" == auto-own ]]; then
+    who="automatically: \`qa\` is \`auto-own\` in the project config, the issue's author is the one who worked on it, and $(preview_suite_said "$wt"). Nobody else looked at the preview."
+  elif [[ "$how" == auto ]]; then
     who="automatically: \`qa\` is \`auto\` in the project config, and $(preview_suite_said "$wt"). Nobody looked at the preview."
   else
     declare -F developer_name >/dev/null && who="$(developer_name 2>/dev/null || true)"
@@ -365,12 +419,13 @@ qa_accept_offer() {
 # `qa` in the project's config decides who may give the word besides the
 # board (project_flow_mode): with `both`, `a` pressed during the wait accepts
 # from here; with `auto`, an issue in In QA is accepted at once, once — if the
-# board refuses the move, the wait goes on as with `github`.
+# board refuses the move, the wait goes on as with `github`; `auto-own` is
+# `auto` for an issue its worker opened and `github` otherwise (qa_settle).
 qa_wait() {
   QA_BY=qa QA_HOW="the board"
   local slug="$1" issue="$2" pr="$3" branch="${4:-}" wt="${5:-}"
   local now prev said="" waited=0 logged=0 announced=0 unticked start=$SECONDS
-  local mode auto_tried=0 keys=""
+  local mode set_as author login auto_tried=0 keys=""
 
   [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]] || return 0
   now="$(issue_status_now "$issue" 2>/dev/null || true)"
@@ -382,7 +437,8 @@ qa_wait() {
   # back column.
   [[ "$(watch_verdict "$slug")" == "returned" ]] && return 2
 
-  mode="$(project_flow_mode qa "$wt")"
+  qa_settle "$wt" "$issue"
+  set_as="$QA_SET" mode="$QA_MODE"
 
   # The column before this look, which is what tells a hand-back from an issue
   # that never reached QA at all. The watch file holds the one observed when QA
@@ -446,8 +502,12 @@ qa_wait() {
       auto_tried=1
       [[ -t 1 && "$announced" -eq 1 ]] && printf '\r\033[2K'
       echo ""
-      say "${BOLD}Accepting issue #$issue: \`qa\` is auto, and $(preview_suite_said "$wt").${OFF}"
-      if qa_accept_here "$issue" auto "$wt"; then
+      if [[ "$set_as" == auto-own ]]; then
+        say "${BOLD}Accepting issue #$issue: \`qa\` is auto-own, you opened it, and $(preview_suite_said "$wt").${OFF}"
+      else
+        say "${BOLD}Accepting issue #$issue: \`qa\` is auto, and $(preview_suite_said "$wt").${OFF}"
+      fi
+      if qa_accept_here "$issue" "$set_as" "$wt"; then
         now="$QA_DONE"
         continue
       fi
@@ -458,6 +518,17 @@ qa_wait() {
       announced=1
       echo ""
       say "${BOLD}Waiting for QA on issue #$issue.${OFF}"
+      # Said only here, where a wait begins: an issue already accepted on
+      # arrival needs no word on whose QA it would have been.
+      if [[ "$set_as" == auto-own ]]; then
+        case "$QA_PEOPLE" in
+          other*)
+            read -r _ author login <<<"$QA_PEOPLE"
+            info "  \`qa\` is auto-own, but it was opened by $author, not by $login: QA is theirs." ;;
+          own*) ;;
+          *) warn "  \`qa\` is auto-own, but GitHub did not say who opened it." ;;
+        esac
+      fi
       info "  QA checks the acceptance criteria in the issue and moves it to '$QA_DONE'."
       [[ "$mode" == both ]] \
         && info "  Or press a here to accept it from sclaude: every criterion ticked, the issue moved."

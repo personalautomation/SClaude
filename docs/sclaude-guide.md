@@ -190,7 +190,8 @@ the feature does — a headless session records a delta of what changed for the
 user and the whole demo again, starting from the last script and what changed,
 and the issue's demo comment is replaced: step 2's demo is for you accepting
 the work, this one for QA to see what the feature is and what changed. Only
-where a person does QA (`qa: github` or `both`); with `qa: auto` the whole demo
+where a person does QA (`qa: github` or `both`, or `auto-own` on somebody
+else's issue); with `qa: auto` (or `auto-own` on your own issue) the whole demo
 is recorded again before the last epilogue instead, and no delta. Where
 nothing a user meets changed — tests, a refactoring, a fix nobody sees — that
 session records nothing and keeps the demo there is (`demo.py keep`), and

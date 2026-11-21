@@ -54,6 +54,8 @@ CHOICES = {
         ("both", "the same, or press a in the wait: sclaude ticks every "
                  "criterion and moves the issue itself"),
         ("auto", "nobody is waited for: a green preview is accepted at once"),
+        ("auto-own", "auto when the issue was opened by whoever works on it "
+                     "(the GitHub account sclaude runs as); github for anybody else's"),
     ],
     "merge": [
         ("github", "the pull request is merged on GitHub; sclaude waits"),

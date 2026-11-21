@@ -315,7 +315,8 @@ remind_prod() {
       status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
       # Green, and before QA is sent to it: what changed and the whole feature,
       # for QA to see — where a person does QA.
-      [[ "$(project_flow_mode qa "$wt")" != auto ]] && demo_refresh "$wt" preview
+      qa_settle "$wt" "$issue"
+      [[ "$QA_MODE" != auto ]] && demo_refresh "$wt" preview
       qa_retest "$wt" "$issue" "$pr" fresh || true
       [[ -n "$issue" ]] && issue_qa_ready "$issue"
       cycle_edge "$wt" preview in_qa sclaude "preview regression green"
@@ -1048,7 +1049,8 @@ remind_prod() {
   # same status.
   # Nobody did QA: the issue's demo is brought up to the code here, for its
   # record, before the epilogue writes the issue's last word.
-  [[ "$(project_flow_mode qa "$wt")" == auto ]] && demo_refresh "$wt" epilogue
+  qa_settle "$wt" "$issue"
+  [[ "$QA_MODE" == auto ]] && demo_refresh "$wt" epilogue
   run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"
 
   # The pass got here for this pull request and this production, the epilogue

@@ -260,6 +260,46 @@ qa_accept_here() { echo "accepted:$2" >> "%s"; [[ "${ACCEPT_FAILS:-}" ]] && retu
     check("auto-refused-tried-once", accepted(), ["accepted:auto"])
     check_true("auto-refused-says-so", "waiting for QA on the board instead" in out)
 
+    # auto-own: auto for an issue its worker opened, github for anybody
+    # else's, github when GitHub does not say. GitHub logins ignore case.
+    def gh(author):
+        return ('gh_repo() { echo o/r; }\n'
+                'gh() { case "$1 $2" in "issue view") [[ -n "%s" ]] && echo "%s" ;; '
+                '"api user") echo Me ;; esac; }\n'
+                'project_flow_mode() { echo auto-own; }\n') % (author, author)
+    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed), extra=accept + gh("me"))
+    check("own-accepts", (rc, accepted()), (0, ["accepted:auto-own"]))
+    check_true("own-says-so", "auto-own, you opened it" in out)
+    out, rc, _ = run(tmp, ["In QA", "In QA", "Done"], watch=dict(armed), extra=accept + gh("someone"))
+    check("other-waits-for-qa", (rc, accepted()), (0, []))
+    check_true("other-names-the-author", "opened by someone, not by Me: QA is theirs" in out)
+    check_true("other-announces-the-wait", "Waiting for QA on issue #71" in out)
+    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed), extra=accept + gh(""))
+    check("unknown-author-waits", accepted(), [])
+    check_true("unknown-author-says-so", "did not say who opened" in out)
+    # qa_settle, which decides the demo before QA and before the epilogue.
+    for author, want in (("ME", "auto"), ("someone", "github"), ("", "github")):
+        out, rc, _ = run(tmp, ["Done"], watch=dict(armed),
+                         extra=gh(author) + 'qa_settle "" 71; echo "mode=$QA_MODE"')
+        check("qa-settle-%s" % (author or "unknown"), "mode=%s" % want in out, True)
+    # One answer an issue a run: GitHub gone after the first, the wait acts
+    # on what the demo before QA was decided by — and is not even asked. Nor
+    # when `qa` went to another value and back in between.
+    asked = os.path.join(tmp, "gh-asked")
+    gone = 'gh() { echo x >> "%s"; return 1; }\n' % asked
+    for name, between in (("settled-once", ""),
+                          ("settled-across-a-change",
+                           'project_flow_mode() { echo github; }; qa_settle "" 71\n'
+                           'project_flow_mode() { echo auto-own; }\n')):
+        if os.path.exists(asked):
+            os.remove(asked)
+        out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
+                         extra=accept + gh("me") + 'qa_settle "" 71\n' + gone + between)
+        check(name, (accepted(), os.path.exists(asked)), (["accepted:auto-own"], False))
+    # A not-yet-waited issue already accepted says nothing of whose QA it was.
+    out, rc, _ = run(tmp, ["Done"], watch=dict(armed), extra=accept + gh("someone"))
+    check_true("accepted-on-arrival-is-silent", "QA is theirs" not in out)
+
     # With `both`, a pressed and confirmed accepts; github ignores the key.
     keyed = accept + '''
 poll_pause() { POLL_KEY=a; }

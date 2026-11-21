@@ -591,7 +591,7 @@ check_true("auto-qa-says-what-the-suite-did",
            and 'and $(preview_suite_said "$wt"). Nobody looked at the preview.' in deploy
            and "preview regression was green" not in deploy)
 check_true("qa-accept-here-gets-the-tree",
-           'qa_accept_here "$issue" auto "$wt"' in deploy
+           'qa_accept_here "$issue" "$set_as" "$wt"' in deploy
            and 'qa_accept_here "$issue" key "$wt"' in deploy)
 # A merged branch whose preview QA accepted, unchanged since, is no exception
 # to the flow: the alarm and the "anyway" question are for a merge before QA.

@@ -67,7 +67,7 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
-from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command,  # noqa: E402
+from _shell import (GIT_VALUED, REDIRECTION, SEPARATORS, call_form, closing_at, inner_command,  # noqa: E402
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
                     readable, scan, strip_wrappers,
                     substitutions, tokenize, ungroup)
@@ -1409,6 +1409,61 @@ def refuses(command, step, cwd=None, depth=0):
     return None
 
 
+# A call of several commands is refused whole: the ones beside the banned
+# one did not run either. Unsaid, a session read "do that instead, and carry
+# on" as leave the banned part out, took the edit sent with it as made, and
+# committed and reported a change that was never written.
+# Worded so that it stays true where the count below takes a loop's header
+# or a group's redirection for a command of its own.
+COMPOUND_NOTE = ("  Nothing in this call ran: any other command in it, beside the "
+                 "refused one, did not run either.")
+# Only an ending that sends the session on takes the instruction too. TAIL
+# stops it for the person, and "run those again" beside it would send it two
+# ways at once.
+COMPOUND_AGAIN = "  Run those again on their own, without the refused one."
+COMPOUND_TAILS = (REDIRECT_TAIL, CORE_OPEN_TAIL)
+
+
+def call_count(command, depth=0):
+    """How many commands a line runs, those of a `bash -c` string among them.
+
+    Walked as refuses() walks it, so a group's braces, a keyword or a
+    redirection is no command of its own.
+    """
+    count, shape = 0, {}
+    for raw in segments(command, raw=True) or []:
+        raw = strip_heads(raw, shape)
+        if not raw:
+            continue
+        flat = strip_redirections(strip_keywords(ungroup(raw)[0]))
+        words = strip_runners(strip_wrappers(flat))
+        # What is left of `} 2>&1`: strip_redirections keeps a leading one.
+        if all(REDIRECTION.match(w) for w in words):
+            continue
+        inner = inner_command(words[:1] + flat[len(flat) - len(words) + 1:])
+        count += call_count(inner, depth + 1) if inner is not None and depth < 3 else 1
+    return count
+
+
+def compound_note(command, tail):
+    """What a refused call of more than one command is told, else "".
+
+    UNPARSED_TAIL refuses the line whole, not one command in it, and already
+    sends all of it back.
+    """
+    if tail == UNPARSED_TAIL or not command:
+        return ""
+    # The refusal for a ban check that raised comes here too, and the count
+    # walks the same parser: raising again would trade its reason for the
+    # failsafe's and log the call twice.
+    try:
+        if call_count(command) < 2:
+            return ""
+    except Exception:
+        return ""
+    return COMPOUND_NOTE + (COMPOUND_AGAIN if tail in COMPOUND_TAILS else "")
+
+
 def deny(reason, step="", subject="", tail=None):
     # The refusal reaches the log: between steps the review session will go
     # through it and decide whether the ban was deliberate or is getting in the
@@ -1418,7 +1473,8 @@ def deny(reason, step="", subject="", tail=None):
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": reason + (TAIL if tail is None else tail),
+            "permissionDecisionReason": reason + compound_note(subject, tail)
+            + (TAIL if tail is None else tail),
         }
     }, ensure_ascii=False))
     sys.exit(0)

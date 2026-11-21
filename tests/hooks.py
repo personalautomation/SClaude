@@ -1347,6 +1347,39 @@ def main():
                 or "next move is theirs" in reason:
             failures.append(("review", command, "REDIRECT_TAIL", reason.strip()[-120:]))
 
+    # A call of several commands is refused whole, and the refusal says so:
+    # a session told only "do that instead" took the edit sent beside the
+    # banned command as made. One command alone is not told it, nor a line
+    # refused whole; one that stops for the person is told nothing ran, but
+    # not to run the rest again.
+    note = const("forbidden-commands.py", "COMPOUND_NOTE")
+    again = const("forbidden-commands.py", "COMPOUND_AGAIN")
+    redirect = const("forbidden-commands.py", "REDIRECT_TAIL")
+    compound_cases = (
+        ("supabase db reset", False, redirect),
+        ("{ supabase db reset; } 2>&1", False, redirect),
+        ("python3 - <<'EOF'\nprint(1)\nEOF\n"
+         "npx --yes supabase db reset >/dev/null 2>&1 & echo skip", True, redirect),
+        ('bash -c "python3 edit.py && supabase db reset"', True, redirect),
+        ("echo hi && gh pr merge 1", "stop", const("_failsafe.py", "TAIL")),
+        ('cd x && echo "$(ls"', False, const("forbidden-commands.py", "UNPARSED_TAIL")))
+    for command, want, ending in compound_cases:
+        said = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
+                               "--step", "review", "--root", PRODUCT],
+                              input=json.dumps({"tool_name": "Bash",
+                                                "tool_input": {"command": command}}),
+                              capture_output=True, text=True, timeout=20,
+                              env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT,
+                                       SUPABASE_WORKDIR=own_stack)).stdout
+        try:
+            reason = json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"]
+        except (ValueError, KeyError):
+            reason = said
+        got = "stop" if note in reason and again not in reason else note in reason
+        if got != want or not reason.endswith(ending):
+            failures.append(("review", command.replace("\n", " "), "compound note %s" % want,
+                             reason.strip()[-160:]))
+
     # A hook that breaks refuses rather than letting the call through: every
     # module it loads, broken in turn, and an empty core.json, which used to
     # read as a layer with no rules.
@@ -1396,7 +1429,7 @@ def main():
                              "logged" if got else "dropped"))
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
-        len(const("collect-denials.py", "OWN_MARKERS")) + 1 + len(branch_cases) + \
+        len(const("collect-denials.py", "OWN_MARKERS")) + 1 + len(compound_cases) + len(branch_cases) + \
         len(denial_cases) + len(broken_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))

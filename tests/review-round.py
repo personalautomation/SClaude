@@ -1280,7 +1280,16 @@ echo "watcher=[$SESSION_WATCHER]"
                 review["go_on_rounds"] = go_on
             json.dump({"steps": {"review": review}} if review else {}, fh)
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
-            fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
+            # A list of words: one each look, the last kept (a run that
+            # finishes while the gate waits).
+            words = list(word) if isinstance(word, (list, tuple)) else [word]
+            fh.write("import os, sys\nif '--open-since' in sys.argv:\n    print(%r)\n    sys.exit()\n"
+                     "words = %r\nn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'looks')\n"
+                     "k = int(open(n).read()) if os.path.exists(n) else 0\n"
+                     "open(n, 'w').write(str(k + 1))\nprint(words[min(k, len(words) - 1)])\n" % (split, words))
+        looks = os.path.join(fake, "review", "looks")
+        if os.path.exists(looks):
+            os.remove(looks)
         # A head to follow up (review_github_followup reads HEAD).
         if not os.path.isdir(os.path.join(wt, ".git")):
             for cmd in (["git", "init", "-q"], ["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
@@ -1299,12 +1308,13 @@ echo "watcher=[$SESSION_WATCHER]"
                          "sys.exit(0 if cmd == 'github-sync' else 1)\n" % unread)
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(["review_close_gate", "review_back_edge", "review_leave_run", "review_enough_close", "review_session_since",
-                                "review_stuck_say", "review_report_unshown", "review_github_followup"])
+                                "review_stuck_say", "review_report_unshown", "review_close_report",
+                                "review_github_followup"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo "REVIEWED${LOCAL_REVIEW_FOLLOW:+ FOLLOW=$LOCAL_REVIEW_FOLLOW FILES=$LOCAL_REVIEW_FILES}" >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
                  'local_review_count() { echo COUNTED >&2; echo %s; }\nlocal_review_done() { %s; }\n'
-                 'review_report() { echo REPORT; }\nreview_fallback_switch() { echo QUOTA; return 1; }\n'
+                 'review_report() { echo "REPORT unless=${REVIEW_REPORT_UNLESS:-}"; }\nreview_fallback_switch() { echo QUOTA; return 1; }\n'
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
@@ -1529,6 +1539,42 @@ echo "watcher=[$SESSION_WATCHER]"
     check("open-findings-left-to-the-table", "Step 4 is not done" not in out, True)
     # No report on this head showed them: printed now (REVIEW_REPORTED).
     check("unshown-findings-get-the-report", "REPORT" in out, True)
+    # Closing with nothing open after a report was shown on this head: the
+    # table ends on the last run, not on its row of waits, and the same table
+    # is not printed again (UNLESS carries what was shown). A gate that
+    # closes at once with nothing shown, or one shown on another head (another
+    # feature or pull request), prints nothing.
+    head = lambda: subprocess.run(["git", "rev-parse", "HEAD"], cwd=os.path.join(tmp, "enough-wt"),
+                                  capture_output=True, text=True).stdout.strip()
+    enough_gate("", "ok", 0, mode="github")
+    mine = os.path.join(tmp, "enough-wt") + "#143"
+    out, left = enough_gate("", "ok", 0, mode="github", stubs='state_get() { echo 143; }; '
+                            'REVIEW_REPORTED="%s open: rounds:3/4"; REVIEW_REPORTED_FOR="%s"' % (head(), mine))
+    check("close-ends-on-the-table", "REPORT unless=open: rounds:3/4" in out and "RC=0" in out, True)
+    # Shown on an earlier head of this pull request (the last report on this
+    # one could not read the threads): printed, with nothing to compare.
+    out, left = enough_gate("", "ok", 0, mode="github", stubs='state_get() { echo 143; }; '
+                            'REVIEW_REPORTED="0000000 open: rounds:3/4"; REVIEW_REPORTED_FOR="%s"' % mine)
+    check("close-earlier-head-ends-on-the-table", "REPORT unless=" in out and "unless=open" not in out, True)
+    out, left = enough_gate("", "ok", 0, mode="github", stubs='state_get() { echo 143; }; '
+                            'REVIEW_REPORTED="%s open: rounds:3/4"; REVIEW_REPORTED_FOR="/other#143"' % head())
+    check("close-other-feature-quiet", "REPORT" not in out and "RC=0" in out, True)
+    # What the cases above stub is what review_report records, and only for a
+    # report that showed something (the shown file is empty otherwise).
+    check("reported-for-recorded-with-the-report",
+          '[[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")" \\\n'
+          '    && REVIEW_REPORTED_FOR="$wt#$pr"' in RUN
+          and '"${REVIEW_REPORTED_FOR:-}" == "$1#$pr"' in RUN, True)
+    # Nothing shown before, but the gate waited for the run: printed too.
+    out, left = enough_gate("", ["pending", "ok"], 0, mode="github")
+    check("close-after-wait-ends-on-the-table", "REPORT" in out and "RC=0" in out, True)
+    # The search ended and the waited-for run left new threads: the step
+    # closes on them, after the table.
+    out, left = enough_gate("pass", ["pending", "open: 2 review thread(s) open"], 0, mode="github", split="0 2")
+    check("enough-close-ends-on-the-table",
+          "REPORT" in out and out.index("REPORT") < out.index("you ended the search") and "RC=0" in out, True)
+    out, left = enough_gate("", "ok", 0, mode="github")
+    check("close-unshown-quiet", "REPORT" not in out and "RC=0" in out, True)
     # bin/sclaude runs under set -u: unset before any report in the process.
     unshown = RUN[RUN.index("review_report_unshown() {"):]
     unshown = unshown[:unshown.index("\n}\n")]

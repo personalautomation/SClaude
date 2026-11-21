@@ -507,6 +507,7 @@ review_close_gate() {
                "$(review_session_since "$wt")" 2>/dev/null || true)"
     read -r older newer <<<"$split"
     if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
+      review_close_report "$wt" "$slug" "$gate_reported" "$announced"
       review_enough_close "$wt" "$pr" "$newer"
       REVIEW_CLOSE_HOW="you ended the search" REVIEW_CLOSE_NOTE="$newer finding(s) left on the PR"
       return 0
@@ -533,6 +534,7 @@ review_close_gate() {
     review_close_gate "$wt" "$slug" "$pr"
     return $?
   fi
+  [[ "$word" == open:* ]] || review_close_report "$wt" "$slug" "$gate_reported" "$announced"
   [[ "$word" == open:* ]] || return 0
 
   # Findings left open are what a report printed on this head says, its
@@ -744,6 +746,25 @@ review_report_unshown() {
   REVIEW_REPORT_UNLESS="$unless" review_report "$1" "$2"
 }
 
+# The table step 4 closes on: how the review ended. The last report this
+# process printed may still show a run going (its row all waits), and the
+# gate then waited for that run to finish — closing on it said nothing, and
+# the regression's lines followed the table with its last round never filled
+# in. Printed when the gate did not print one itself and either waited for a
+# run or a report on this feature's pull request was shown in this process
+# (REVIEW_REPORTED_FOR, on any head: one the threads could not be read for
+# keeps the last), not another feature's or pull request's; and only when it
+# differs from what was last shown on this head. A gate that closed at once
+# on a fresh start prints nothing.
+#
+#   review_close_report <wt> <slug> <gate_reported> <announced>
+review_close_report() {
+  [[ "$3" -eq 0 ]] || return 0
+  local pr; pr="$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
+  [[ "$4" -eq 1 || "${REVIEW_REPORTED_FOR:-}" == "$1#$pr" ]] || return 0
+  review_report_unshown "$1" "$2"
+}
+
 review_report() {
   local wt="$1" slug="$2" state pr repo
   state="$wt/.sclaude/local/feature/state.json"
@@ -775,7 +796,10 @@ review_report() {
   # The head the terminal last saw a report on, and what it showed: the open
   # findings and the rounds (review_close_gate). Kept as it was when nothing was printed:
   # the threads unreadable, or the same as last shown.
-  [[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")"
+  # And whose: review_close_report asks whether this feature's pull request
+  # had a report shown in the process, whatever head it was on.
+  [[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")" \
+    && REVIEW_REPORTED_FOR="$wt#$pr"
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
   rm -f "$brief" "$stuck" "$shown"
 }

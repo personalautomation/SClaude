@@ -519,10 +519,11 @@ BIN = "".join(open(os.path.join(ROOT, _p)).read()
 # Where a round closes — a session's end, the gate's pass with findings or
 # without (on the way into step 4 too), the gate finding what is open with no
 # report on this head printed — and where a session is launched on the
-# findings (run_step, fresh and resumed). The round marker's two are gone
+# findings (run_step, fresh and resumed), and the step's close once the gate
+# waited for a run or a report was shown. The round marker's two are gone
 # with it: every round now closes at the gate.
 check("printed-at-every-round-close",
-      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 7)
+      len(re.findall(r'review_(?:report(?:_unshown)?|close_report) "\$wt" "\$slug"', RUN)), 9)
 check("checks-take-up-nothing", "run_took_up" in RUN, False)
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:

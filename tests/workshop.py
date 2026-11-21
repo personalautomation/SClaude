@@ -197,6 +197,87 @@ export SCLAUDE_SESSION=%(session)s
     git(live, "reset", "-q", "--hard", "origin/main")
     check("state-none-after", sh('workshop_state "%s"' % tree).strip(), "none")
 
+    # Another hand's unpushed commit on the live checkout's main, brought into
+    # the workshop by a rebase onto that main, is not the workshop's: left out
+    # of what is published, and left unpublished where it was.
+    with open(os.path.join(live, "sclaude", "lib", "other.sh"), "w") as fh:
+        fh.write("echo other\n")
+    git(live, "add", "-A")
+    git(live, "commit", "-qm", "docs(other): another hand's work")
+    foreign = git(live, "rev-parse", "HEAD")
+    git(ws, "rebase", "-q", "main")
+    with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
+        fh.write("echo own\n")
+    git(ws, "commit", "-qam", "feat(sclaude): the workshop's own work")
+    with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
+        fh.write("echo own again\n")
+    git(ws, "commit", "-qam", "fix(sclaude): review iteration 1 — once more")
+    with open(mark, "w") as fh:
+        fh.write(git(ws, "rev-parse", "HEAD") + "\n")
+    sh("cmd_core_ready")
+    out = sh('workshop_after_session s1 --session-id s1 -n x p')
+    check("foreign-said-left-out", "left out: 1 commit(s) not made in this workshop" in out, True)
+    check("foreign-published-own-subject", git(origin, "log", "-1", "--format=%s", "main"),
+          "feat(sclaude): the workshop's own work")
+    check("foreign-not-published", git(origin, "ls-tree", "-r", "--name-only", "main").count("other.sh"), 0)
+    check("foreign-body-not-named", "another hand" in git(origin, "log", "-1", "--format=%B", "main"), False)
+    check("foreign-kept-where-it-was", git(live, "rev-parse", "main"), foreign)
+    git(live, "reset", "-q", "--hard", "origin/main")
+
+    # The same with the live checkout standing on another branch: its main
+    # is still another hand's.
+    git(live, "commit", "-q", "--allow-empty", "-m", "docs(other): more of another hand's work")
+    git(live, "switch", "-q", "-c", "elsewhere")
+    git(ws, "rebase", "-q", "main")
+    with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
+        fh.write("echo own while elsewhere\n")
+    git(ws, "commit", "-qam", "feat(sclaude): own work while the checkout is elsewhere")
+    with open(mark, "w") as fh:
+        fh.write(git(ws, "rev-parse", "HEAD") + "\n")
+    sh("cmd_core_ready")
+    out = sh('workshop_after_session s1 --session-id s1 -n x p')
+    check("foreign-main-off-checkout", ("left out: 1 commit(s)" in out,
+                                        "another hand" in git(origin, "log", "-1", "--format=%B", "main")), (True, False))
+    git(live, "switch", "-q", "main")
+    git(live, "branch", "-q", "-D", "elsewhere")
+    git(live, "reset", "-q", "--hard", "origin/main")
+
+    # A branch the session made inside the workshop — a backup at its head —
+    # is checked out nowhere: its commits are still the workshop's own.
+    with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
+        fh.write("echo kept\n")
+    git(ws, "commit", "-qam", "feat(sclaude): a change with a backup beside it")
+    git(ws, "branch", "backup")
+    with open(mark, "w") as fh:
+        fh.write(git(ws, "rev-parse", "HEAD") + "\n")
+    sh("cmd_core_ready")
+    out = sh('workshop_after_session s1 --session-id s1 -n x p')
+    check("backup-branch-not-foreign", ("left out" in out, git(origin, "log", "-1", "--format=%s", "main")),
+          (False, "feat(sclaude): a change with a backup beside it"))
+    git(ws, "branch", "-q", "-D", "backup")
+
+    # A commit of its own that builds on another hand's is not rebuilt without
+    # it: nothing goes out, the workshop stays as it was, and the person is asked.
+    with open(os.path.join(live, "sclaude", "lib", "other.sh"), "w") as fh:
+        fh.write("echo other\n")
+    git(live, "add", "-A")
+    git(live, "commit", "-qm", "docs(other): another hand's work")
+    git(ws, "reset", "-q", "--hard", "main")
+    with open(os.path.join(ws, "sclaude", "lib", "other.sh"), "a") as fh:
+        fh.write("echo built on it\n")
+    git(ws, "commit", "-qam", "feat(sclaude): built on the other")
+    held = git(ws, "rev-parse", "HEAD")
+    before = git(origin, "rev-parse", "main")
+    with open(mark, "w") as fh:
+        fh.write(held + "\n")
+    sh("cmd_core_ready")
+    out = sh('workshop_after_session s1 --session-id s1 -n x p', answer="0")
+    check("foreign-needed-asks", "builds on commits not on sclaude's main yet" in out and "ASK" in out, True)
+    check("foreign-needed-not-published", git(origin, "rev-parse", "main"), before)
+    check("foreign-needed-workshop-kept", git(ws, "rev-parse", "HEAD"), held)
+    git(live, "reset", "-q", "--hard", "origin/main")
+    git(ws, "reset", "-q", "--hard", "origin/main")
+
     # The product's details hold it back unless the person says otherwise.
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
         fh.write("# seen on app/orders/checkout.tsx in PR #12\n")

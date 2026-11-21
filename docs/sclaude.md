@@ -1073,7 +1073,14 @@ covers lines it did not show. In the feature's history these are `red`,
 `origin/main`; for a maintainer it rebases onto it and squashes it into one
 commit (`squash-message`: the first commit that is not a review round leads,
 the rest are listed, the trailers merged) — main out of reach or a conflict
-is the question. It checks the change for the product's details
+is the question. Only the workshop's own commits go: one the live checkout's
+main holds (work not pushed yet, brought in by a rebase onto it, whatever
+that checkout stands on) or a branch checked out in another worktree holds
+(`workshop_own_commits`) is left out
+(`workshop_drop_foreign`), named under "left out" in the list, and stays
+unpublished where it was; a commit of the workshop's own that needs it is
+the question, the workshop as it was, and so is any such commit on the way
+to a pull request, whose branch is not rebuilt. It checks the change for the product's details
 (`workshop.py leaks`: the product's repository and folder names, the
 feature's slug and branch, the package's name, `#12`-like numbers and
 pull-request or issue references, and paths of the product's own files, in

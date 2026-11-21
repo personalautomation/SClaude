@@ -575,8 +575,76 @@ workshop_edge() {
 # change follows it.
 WORKSHOP_REOPEN_WORD="The person reopened this session for your change to sclaude in this feature's workshop, which sclaude did not publish. Look at what stopped it, change it in the workshop, commit, review it as your instructions say, and run \`sclaude core-ready\`; sclaude checks it again when you end the session. What stopped it:"
 
+# The workshop's own commits past <base>, oldest first: those no branch
+# checked out in another worktree holds. The workshop shares its repository
+# with the live checkout, so a rebase onto the checkout's main brings along
+# whatever is unpushed there — another hand's work, which is not this
+# workshop's to publish — main is held by the live checkout even while it
+# stands on another branch. A branch made inside the workshop (a backup, the
+# old name after a rename) is checked out nowhere and still the workshop's own.
+# Merges are left out: what they bring is on <base> or in the commits.
+#
+#   workshop_own_commits <ws> <base>
+workshop_own_commits() {
+  local ws="$1" base="$2" here
+  local -a G=(env -u GIT_CONFIG_COUNT git -C "$ws") others=()
+  here="$("${G[@]}" rev-parse --show-toplevel)" || return 1
+  mapfile -t others < <("${G[@]}" worktree list --porcelain | awk -v here="$here" '
+    /^worktree / { w = substr($0, 10) } /^branch / && w != here { print $2 }')
+  "${G[@]}" show-ref -q --verify refs/heads/main && others+=(refs/heads/main)
+  "${G[@]}" rev-list --reverse --no-merges HEAD --not "$base" "${others[@]}"
+}
+
+# The commits past <base> that are not the workshop's own (above), oldest
+# first: left where they are, unpublished, on the branch that holds them.
+#
+#   workshop_foreign_commits <ws> <base>
+workshop_foreign_commits() {
+  local ws="$1" base="$2" own
+  own="$(workshop_own_commits "$ws" "$base")" || return 1
+  env -u GIT_CONFIG_COUNT git -C "$ws" rev-list --reverse --no-merges HEAD --not "$base" \
+    | grep -vxF -f <(printf '%s\n' "$own") || true
+}
+
+# The workshop's branch built again on <base> from its own commits alone, so
+# another hand's unpushed work it was rebased onto stays out of what goes
+# public. The branch goes back to where it was on any failure — a commit of
+# its own that needs one of the others is a conflict, said in WORKSHOP_WHY.
+#
+#   workshop_drop_foreign <ws> <base>
+workshop_drop_foreign() {
+  local ws="$1" base="$2" head c foreign
+  local -a G=(env -u GIT_CONFIG_COUNT git -C "$ws") own=()
+  foreign="$(workshop_foreign_commits "$ws" "$base")"
+  [[ -n "$foreign" ]] || return 0
+  # Untracked files too: the rebuild resets the tree, and one standing where a
+  # tracked file is written would be lost.
+  if [[ -n "$("${G[@]}" status --porcelain)" ]]; then
+    WORKSHOP_WHY="it holds files not committed beside commits not made in it"
+    return 1
+  fi
+  mapfile -t own < <(workshop_own_commits "$ws" "$base")
+  if (( ${#own[@]} == 0 )); then
+    WORKSHOP_WHY="none of its commits are its own: another worktree's branch holds them all"
+    return 1
+  fi
+  head="$("${G[@]}" rev-parse HEAD)"
+  "${G[@]}" reset -q --hard "$base" || return 1
+  for c in "${own[@]}"; do
+    if ! "${G[@]}" cherry-pick --allow-empty --keep-redundant-commits "$c" >/dev/null 2>&1; then
+      "${G[@]}" cherry-pick --abort >/dev/null 2>&1
+      "${G[@]}" reset -q --hard "$head"
+      WORKSHOP_WHY="it builds on commits not on sclaude's main yet, which were not made in it: $(
+        "${G[@]}" log --no-walk=unsorted --format='%h %s' $foreign | paste -sd ';' | sed 's/;/; /g')"
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Brings the workshop up to sclaude's main: fetched, and for a maintainer
-# rebased onto it and squashed into one commit. Sets WORKSHOP_BASE, what the
+# rebased onto it and squashed into one commit — its own commits only
+# (workshop_drop_foreign). Sets WORKSHOP_BASE, what the
 # change is measured from, or WORKSHOP_WHY when it cannot.
 #
 #   workshop_prepare <tree>
@@ -593,6 +661,7 @@ workshop_prepare() {
     return 1
   fi
   if developer_is_maintainer; then
+    workshop_drop_foreign "$ws" origin/main || return 1
     if ! "${G[@]}" rebase -q origin/main >/dev/null 2>&1; then
       "${G[@]}" rebase --abort >/dev/null 2>&1
       WORKSHOP_WHY="it conflicts with sclaude's main; the session can rebase it there"
@@ -600,6 +669,12 @@ workshop_prepare() {
     fi
     WORKSHOP_BASE=origin/main
   else
+    # A pull request's branch is pushed as it stands and not rebuilt, so a
+    # commit of another hand in it is asked about rather than sent.
+    if [[ -n "$(workshop_foreign_commits "$ws" origin/main)" ]]; then
+      WORKSHOP_WHY="it holds commits not made in it, which are not on sclaude's main yet; the session can rebase its own onto origin/main"
+      return 1
+    fi
     WORKSHOP_BASE="$start"
   fi
   if developer_is_maintainer && (( $("${G[@]}" rev-list --count origin/main..HEAD) > 1 )); then
@@ -695,7 +770,14 @@ workshop_publish() {
   info "${BOLD}sclaude's change from this tree's workshop${OFF}"
   # --no-pager: printed straight to the terminal, a list longer than the screen
   # would stop publishing in less until somebody pressed q.
-  git --no-pager -C "$ws" log --format='     %h %s' "$(workshop_py get "$rec" start)..HEAD" --not origin/main 2>/dev/null
+  local mine left
+  mine="$(workshop_own_commits "$ws" origin/main 2>/dev/null | tac)"
+  [[ -n "$mine" ]] && git --no-pager -C "$ws" log --no-walk=unsorted --format='     %h %s' $mine 2>/dev/null
+  left="$(workshop_foreign_commits "$ws" origin/main 2>/dev/null | tac)"
+  if [[ -n "$left" ]]; then
+    info "  left out: $(wc -l <<< "$left") commit(s) not made in this workshop, still unpublished where they are:"
+    git --no-pager -C "$ws" log --no-walk=unsorted --format='     %h %s' $left 2>/dev/null
+  fi
   while :; do
     case "$step" in
       prep)

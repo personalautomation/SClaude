@@ -579,7 +579,7 @@ class Handler(object):
                 self.bot.edit(message_id, t("repo.pick"), menus.repos_keyboard())
         elif data_raw == "svc_widgets":
             with locked() as st:
-                st["widgets"] = st.get("widgets", True) is False
+                st["widgets"] = st.get("widgets") is not True
             log.info("widgets are %s", "on" if widgets.enabled() else "off")
             self.bot.edit(message_id, t("svc.title"), menus.services_keyboard())
         elif data_raw == "svc_lang":

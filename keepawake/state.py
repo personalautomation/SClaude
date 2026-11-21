@@ -322,8 +322,9 @@ def blank():
         # buttons' actions, and the context and feature its screen stands on.
         "menu_widget": {},
         # The settings' switch between widgets and the plain messages they
-        # replace; on unless turned off (widgets.enabled).
-        "widgets": True,
+        # replace; off unless turned on (widgets.enabled), and turned off
+        # again when Telegram refuses a widget (Bot.send_widget).
+        "widgets": False,
         # Which language the keyboard below the input box is set in. Empty
         # means it is not set at all. It cannot be set at every start: it only
         # arrives together with a message, and the daemon restarts both by

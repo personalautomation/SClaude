@@ -34,8 +34,9 @@ their own answer, each paid for in time and tokens. SClaude ships one.
   its timer and latest lines, which leaves one message with the whole account
   when it ends; the countdown to sleep with **Extend** and **Let it sleep**;
   the feature's card with where it stands in the cycle; and the whole menu,
-  which works with phone access off. Settings → Sending
-  chooses widgets + messages, or messages only.
+  which works with phone access off. Telegram has withdrawn widgets from
+  bots for now, so plain messages with buttons are the default; Settings →
+  Sending turns widgets back on once Telegram allows them again.
 - Answers in the language of your Telegram client.
 
 | the moment | the classic way: VPN + SSH | with the bot |

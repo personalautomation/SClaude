@@ -35,10 +35,16 @@ LABELS = "/*L*/{}"
 STALE = {"s": "o"}
 
 
+# What Telegram answers sendWidget with while it does not let bots send
+# widgets (it withdrew them after Bot API 10.4).
+REFUSED = "input_media_widget_not_allowed"
+
+
 def enabled():
     """Whether active things go to the chat as widgets: the settings' switch,
-    on unless turned off. The old path stays while moving over, frozen."""
-    return read().get("widgets", True) is not False
+    off unless turned on. Telegram withdrew widgets, so plain messages are the
+    path again; the widgets stay for when it brings them back."""
+    return read().get("widgets") is True
 
 
 def code(name, labels):

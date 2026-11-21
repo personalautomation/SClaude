@@ -422,7 +422,7 @@ one that holds now. A line the network kept is tried again on the next turn. The
 once nothing holds, someone typed, or no session is left; the "until what time?"
 prompt becomes the answer, or goes with its input box when the person leaves it.
 
-**Active things are moving to widgets.** Bot API 10.4 lets a message carry a
+**Active things can go as widgets** (off by default, below). Bot API 10.4 lets a message carry a
 small HTML widget whose state the bot changes silently (`editMessageWidgetData`)
 and which asks the bot on a tap (`widget_query`, answered with
 `answerWidgetQuery` within 15 seconds — always, a failed tap too). The daemon
@@ -468,7 +468,9 @@ account before anything that follows; not sent, nothing changes and the lines
 come back next turn. The ended widget's removal waits in the record
 (`notes/process.json` in the feature's channel, with the open process) and is
 tried every turn until done; a widget whose edit fails — deleted by hand — is
-sent again. Turned off, a new start goes as a message and ends the open widget.
+sent again. Turned off — by hand, or by Telegram refusing a widget — the open
+process ends at its next lines, which close its account (the review's keys
+move to it while the pass runs), and a new start goes as a message.
 
 The menu is the fourth (`menu_widget.py`, `widget_html/menu.html`): /menu or
 "Menu" in the main chat sends the whole menu as a widget, the last one taken
@@ -506,7 +508,12 @@ only when the card's first line and the note alone do not fit
 out of date by its state (`menus.retire`). ⚙️ Settings → 🧩 Sending has two
 values: **widgets + messages** — widgets where they replace a message, plain
 messages for the rest — and **messages only** (`widgets` in the state,
-`widgets.enabled`). The messages-only path is kept but no longer extended.
+`widgets.enabled`), the default. Telegram withdrew widgets from bots after
+Bot API 10.4 — `sendWidget` answers `input_media_widget_not_allowed` — so the
+messages are the working path again and the widgets are kept for when it
+brings them back: turned on while Telegram still refuses, the first refusal
+(`widgets.REFUSED`, seen by `Bot.send_widget`) turns the switch off again, so
+the sleep warning's next try, a turn later, goes as a message.
 
 While widgets are on and the bot is running (`bot_running`: its systemd unit
 is active), `bin/sclaude-notify --in` does not send a phase line

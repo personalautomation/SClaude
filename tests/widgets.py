@@ -113,7 +113,29 @@ try:
         check("a state over the limit with nothing to cut is refused", "accepted", "refused")
     except ValueError:
         pass
-    check("the switch is on unless turned off", widgets.enabled(), True)
+    check("the switch is off unless turned on", widgets.enabled(), False)
+
+    # Telegram refusing a widget turns the switch off, so the next try goes
+    # as a message; any other failure leaves it as it is.
+    from keepawake import botapi
+    real = botapi.Bot("t", 1)
+
+    def refuse(reason):
+        def call(method, **params):
+            exc = RuntimeError("HTTP Error 400: Bad Request")
+            exc.telegram = reason
+            raise exc
+        return call
+    with state.locked() as st:
+        st["widgets"] = True
+    real.call = refuse('{"description":"bad request: message is too long"}')
+    check("another refusal leaves widgets on", (real.send_widget("<b>", "{}", "c"), widgets.enabled()), (0, True))
+    real.call = refuse('{"description":"bad request: %s"}' % widgets.REFUSED)
+    check("refused widgets turn the switch off", (real.send_widget("<b>", "{}", "c"), widgets.enabled()), (0, False))
+
+    # The rest of the bench is about the widgets themselves.
+    with state.locked() as st:
+        st["widgets"] = True
 
     # --- the warning as a widget -------------------------------------------
     i18n.set_lang("en")
@@ -436,7 +458,7 @@ try:
             return Bot.send(self, text, keyboard)
 
         def unbutton(self, mid, kb=None):
-            pass
+            self.unbuttoned = getattr(self, "unbuttoned", []) + [mid]
 
     class Log(object):
         def warning(self, *a):
@@ -634,6 +656,64 @@ try:
     turn(bot)
     check("switched off, the next start ends the widget and is a message",
           (len(bot.widgets), len(bot.sent), processes.load(feat)), (1, 2, {}))
+    with state.locked() as st:
+        st["widgets"] = True
+
+    # Turned off while a process runs (Telegram refusing widgets does that):
+    # its next lines end it — one account, those lines last, its widget taken
+    # away — rather than send the widget again.
+    bot = TopicBot()
+    printed(("info", "🧪 Regression started: local"))
+    turn(bot)
+    with state.locked() as st:
+        st["widgets"] = False
+    printed(("warn", "part 2/13 failed"))
+    turn(bot)
+    check("switched off, a warning ends the open widget in one account",
+          (len(bot.widgets), len(bot.sent), bot.deletes, processes.load(feat)), (1, 1, [800], {}))
+    check_true("which ends with the warning",
+               "Regression started" in bot.sent[0][0] and bot.sent[0][0].endswith("part 2/13 failed"))
+    printed(("info", "🧪 Regression finished: local, green · 13/13"))
+    turn(bot)
+    check_true("and later lines are plain messages",
+               len(bot.sent) == 2 and "Regression finished" in bot.sent[1][0] and len(bot.widgets) == 1)
+
+    # The same during a review pass: its buttons move to the account.
+    bot = TopicBot()
+    with state.locked() as st:
+        st["widgets"] = True
+    printed(("info", "🔍 Local review started: PR #1, round 7"))
+    turn(bot)
+    check_true("the pass's widget holds the buttons", review_keys.load(feat).get("message_id") == 800)
+    with state.locked() as st:
+        st["widgets"] = False
+    printed(("info", "reading the diff"))
+    turn(bot)
+    check_true("switched off, the buttons move to the account",
+               bot.sent[-1][1] and review_keys.load(feat).get("message_id") == 700)
+    printed(("info", "🔍 Local review finished: PR #1, round 7"))
+    turn(bot)
+    check("the pass's end takes the moved buttons off, and its widget is gone",
+          (getattr(bot, "unbuttoned", []), review_keys.load(feat), 800 in bot.deletes), ([700], {}, True))
+
+    # Switched off, a start after the open process's last line: that line
+    # closes the account, the start is a message of its own.
+    bot = TopicBot()
+    with state.locked() as st:
+        st["widgets"] = True
+    printed(("info", "🧪 Regression started: local"))
+    turn(bot)
+    with state.locked() as st:
+        st["widgets"] = False
+    printed(("info", "part 13/13 passed"), ("info", "🔍 Local review started: PR #1, round 8"))
+    turn(bot)
+    check_true("the last line closes the account, the start goes alone",
+               len(bot.sent) == 2 and bot.sent[0][0].endswith("part 13/13 passed")
+               and "part 13/13" not in bot.sent[1][0] and "Local review started" in bot.sent[1][0])
+    check("and the widget is gone, nothing left open",
+          (800 in bot.deletes, processes.load(feat).get("open")), (True, None))
+    printed(("info", "🔍 Local review finished: PR #1, round 8"))
+    turn(bot)
     with state.locked() as st:
         st["widgets"] = True
 

@@ -11,7 +11,7 @@ import urllib.request
 
 from keepawake.i18n import STRINGS, current, t
 from keepawake.state import locked, read
-from keepawake import handling, menus, phone_access, topics
+from keepawake import handling, menus, phone_access, topics, widgets
 
 
 API = "https://api.telegram.org/bot%s/%s"
@@ -166,6 +166,15 @@ class Bot(object):
         except Exception as exc:
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
             log.warning("the widget did not send: %s %s", exc, getattr(exc, "telegram", ""))
+            if widgets.REFUSED in self.last_error:
+                # Telegram does not take widgets from bots now: the switch
+                # goes to messages only, so the caller's next try (the sleep
+                # warning retries every turn) goes as a plain message rather
+                # than failing for good. The person turns it back on in the
+                # settings once Telegram allows widgets again.
+                with locked() as st:
+                    st["widgets"] = False
+                log.warning("Telegram refuses widgets: sending messages only")
             return 0
 
     def widget_data(self, message_id, data):

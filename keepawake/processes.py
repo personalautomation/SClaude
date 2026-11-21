@@ -157,17 +157,18 @@ def account(rec):
     return "\n".join([first] + (["<i>… %d more</i>" % left] if left else []) + latest)
 
 
-def ended(bot, data, loud=False):
+def ended(bot, data, loud=False, keyboard=None):
     """The open process is over: its account sent now, before anything that
-    follows it, and its widget left for flush to take away. Whether the
-    account went; not sent, nothing is changed — the caller returns 0, the
-    group goes back, and a lost topic is made again."""
+    follows it, and its widget left for flush to take away. The account's
+    message id; 0 when it did not go, and nothing is changed — the caller
+    returns 0, the group goes back, and a lost topic is made again."""
     rec = data["open"]
-    if not bot.send(account(rec), quiet=not loud, thread=rec.get("thread") or 0):
-        return False
+    msg = bot.send(account(rec), keyboard=keyboard, quiet=not loud, thread=rec.get("thread") or 0)
+    if not msg:
+        return 0
     data.pop("open")
     data.setdefault("gone", []).append(rec["msg"])
-    return True
+    return msg
 
 
 def flush(bot, data):
@@ -196,6 +197,28 @@ def take(bot, channel, group, thread, loud, keyboard, keys=None, context=""):
         # The topic now: one made again after the person deleted it.
         rec["thread"] = thread
     start, icon = opening(group)
+    if rec and start < 0 and not widgets.enabled():
+        # Switched off while a process runs — or Telegram refused a widget,
+        # which turns the switch off: the process ends here, and its lines go
+        # as messages from now on. Kept open, a warning would send its widget
+        # again every turn, refused each time, and the feed would wait behind
+        # it. (A new start ends it below, as with widgets on.) The group is
+        # the process's own: it closes the account, its result too when it
+        # has one. The review's buttons, held by the widget, move to the
+        # account while the pass still runs; a phase line has already taken
+        # them off (notices).
+        add(rec, group)
+        held = keys.load(channel) if keys else {}
+        held = held if held.get("message_id") == rec["msg"] else {}
+        msg = ended(bot, data, loud, keys.keyboard(held["kind"], held.get("said", ""))
+                    if held else keyboard)
+        if not msg:
+            return 0
+        if held:
+            keys.save(channel, dict(held, message_id=msg))
+        flush(bot, data)
+        save(channel, data)
+        return -1
     result = None
     if rec and start < 0:
         add(rec, group)

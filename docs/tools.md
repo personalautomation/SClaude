@@ -533,9 +533,12 @@ messages:
   works with phone access off. What needs typing or the app's own screens stays
   with the app.
 
-Widgets work in Telegram for phones and Telegram Web. ⚙️ Settings → 🧩 Sending
-chooses between **widgets + messages** (widgets where they replace a message,
-messages for the rest; the default) and **messages only**.
+Telegram has withdrawn widgets from bots for now, so the bot sends plain
+messages with buttons by default. ⚙️ Settings → 🧩 Sending chooses between
+**messages only** (the default) and **widgets + messages** (widgets where they
+replace a message, messages for the rest) — for when Telegram brings widgets
+back; while it still refuses them, the bot goes back to messages by itself.
+Widgets work in Telegram for phones and Telegram Web.
 
 ### The bot as an app in Telegram, with no Tailscale on the phone
 

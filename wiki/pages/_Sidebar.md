@@ -26,6 +26,8 @@
   - [Switches](Using-Switches)
   - [What sclaude writes](Using-What-sclaude-writes-and-where)
 - [The config, key by key](Configuration)
+- [When something goes wrong](Troubleshooting)
+- [Glossary](Glossary)
 - [Gates and rules](Gates-and-Rules)
 - [Team setup](Team-Setup)
 - [Privacy in full](Privacy-in-Full)

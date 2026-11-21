@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 #
-# docs/config.md explains every key of a product's .sclaude/config.json — the
-# page the wiki's "The config, key by key" is built from. A key the code reads
-# and the page never names is a setting nobody can find out about, so this
-# fails on one:
+# What a user can set or run is explained in the guides the wiki is built
+# from. A setting or a command the code takes and no guide names is one
+# nobody can find out about, so this fails on one.
 #
+# docs/config.md — every key of a product's .sclaude/config.json:
 # - every key of sclaude/config.example.json (the names of environments and
 #   of database.local.env's variables are the product's own, so their
 #   attributes are checked instead of them);
@@ -13,7 +13,10 @@
 # - every choice in CHOICES (config_menu.py), with each of its values in the
 #   page's table of choices.
 #
-# Run it with: python3 tests/config-docs.py
+# docs/sclaude-guide.md — every command bin/sclaude dispatches, as
+# `sclaude <command>` (the internal ones, `_name`, aside).
+#
+# Run it with: python3 tests/user-docs.py
 import json
 import os
 import re
@@ -113,6 +116,18 @@ for key, choices in config_menu.CHOICES.items():
           ("### " + key) in page or re.search(r"^### .*\b%s\b" % re.escape(key), page, re.M))
     for value, _what in choices:
         check("choice %s: %s" % (key, value), ("`%s`" % value) in rows.get(key, ""))
+
+# --- the commands ---------------------------------------------------------------
+with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
+    src = fh.read()
+dispatch = src[src.index("    new)"):src.index("    -h|--help|help)")]
+commands = re.findall(r"^    ([a-z][a-z-]*)(?:\|[a-z-]+)*\)", dispatch, re.M)
+check("the commands were found", len(commands) > 20, commands)
+with open(os.path.join(ROOT, "docs", "sclaude-guide.md")) as fh:
+    guide = fh.read()
+for command in commands:
+    check("command %s in the guide" % command,
+          re.search(r"sclaude %s\b" % re.escape(command), guide) is not None)
 
 if failures:
     for name, detail in failures:

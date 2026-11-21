@@ -143,7 +143,8 @@ The checkout may live under any name. `install.sh` can be run as often as you
 like: it links sclaude's commands into `~/.local/bin`, the skills into
 `~/.claude/skills` and the status line into `~/.claude`, installs and enables
 sclaude's systemd units (launchd agents on macOS), and wires up this
-repository's git hooks. Re-run it after pulling a change to a systemd unit.
+repository's git hooks. A unit an update of sclaude changes is rewritten by the
+next sclaude command by itself.
 `~/.local/bin` has to be in `PATH` (it usually is). Without a working systemd
 on Linux it lays out the links, enables nothing, says what to do, and exits
 with an error.
@@ -241,3 +242,85 @@ services: your product's GitHub and deploys, and Telegram if you set the bot up.
 Then run `sclaude doctor`. It lists what the machine still lacks and the command
 that fixes each gap. Run inside a product, it also runs the checks the product
 asks for in `.sclaude/config.json`.
+
+## Updating and removing
+
+### Where updates come from
+
+sclaude updates itself from the `main` branch of **the repository your checkout
+was cloned from** (its `origin`), by the rule you chose at installation
+(`sclaude.update`: each start takes it, or says what is new for
+`sclaude update`, or never looks).
+
+> **Installed from a fork, sclaude takes nothing from this repository.** Your
+> checkout's `origin` is then the fork, so every update comes from the fork's
+> `main`: a fix or a new feature published here reaches you only once
+> somebody brings it into the fork (GitHub's "Sync fork", or
+> `git pull https://github.com/personalautomation/SClaude.git main` and a push
+> to the fork). The fixes your sessions make to sclaude go to the fork too,
+> not here. To stay on this repository's updates, clone this repository
+> itself; `sclaude propose` makes a fork for your pull requests by itself when
+> you cannot push here, and leaves `origin` where it is.
+
+A unit or agent the update changed is rewritten by the next sclaude command by
+itself.
+
+### Removing sclaude from a machine
+
+There is no uninstaller; these steps undo what `install.sh` did.
+
+1. **Finish or drop the features in progress** — `sclaude done <name>` after a
+   merge, `sclaude drop <name>` otherwise. Each removes the feature's worktree
+   (beside the product, `<product>-<feature>`) and its own database stack in
+   Docker.
+2. **Stop the background units.** On Linux and WSL:
+
+   ```bash
+   systemctl --user disable --now sclaude-watch.timer sclaude-proxy.socket sclaude-gate.socket
+   # with --extras, also:
+   systemctl --user disable --now keepawake.timer keepawake-linux.service \
+     keepawake-windows.service keepawake-telegram.service wsl-update.timer \
+     code-server-local.socket code-server.service
+   rm ~/.config/systemd/user/{sclaude,keepawake,wsl-update,code-server}*
+   systemctl --user daemon-reload
+   ```
+
+   On macOS, for each agent in `~/Library/LaunchAgents` whose name starts with
+   `sclaude.` or `keepawake`:
+
+   ```bash
+   launchctl bootout gui/$(id -u)/sclaude.watch   # and the others, by name
+   rm ~/Library/LaunchAgents/sclaude.*.plist ~/Library/LaunchAgents/keepawake*.plist
+   ```
+
+3. **Remove the links.** The commands in `~/.local/bin` that point into the
+   checkout (`sclaude`, `sclaude-notify`, `sclaude-watch`, `sclaude-proxy`,
+   `chrome-debug`, and with the extras `keepawake*`, `code-server-*`,
+   `wsl-update`), the skills in `~/.claude/skills` (`pr`, `sreview`,
+   `scontrib`, `sdemo`, `isleep`) and `~/.claude/statusline.py`.
+4. **Take sclaude out of Claude Code's settings.** In `~/.claude/settings.json`,
+   remove the hooks that run `skills/isleep/night.py`, and the status line if
+   you pointed it at `statusline.py`.
+5. **Remove the lid rule, if you added one**: `sudo rm
+   /etc/polkit-1/rules.d/49-keepawake.rules` on Linux, `sudo rm
+   /etc/sudoers.d/keepawake` on macOS. On WSL with the extras, delete
+   `C:\Users\<you>\.keepawake`.
+6. **Delete what it kept**: `~/.claude/sclaude/` (your cycle records),
+   `~/.config/sclaude/`, `~/.config/keepawake/` (the bot's token), and the
+   checkout itself.
+
+### Removing sclaude from a product
+
+What sclaude left in a product's repository:
+
+- the `.sclaude/` folder — `config.json`, `team/` and `people/` are committed,
+  `local/` never is;
+- `.vercelignore`, when sclaude wrote it;
+- a few lines in `.git/info/exclude` marked "Written by sclaude";
+- the refs `refs/sclaude/demo/*` and `refs/sclaude/dropped/*`;
+- on GitHub, the labels it added (`no-review`, `deployed-preview`,
+  `deployed-prod`) and the review workflow, if you added it from sclaude's
+  template.
+
+Commit the removal of the committed ones. The comments, board moves and commit
+trailers it wrote stay in the product's history as its record.

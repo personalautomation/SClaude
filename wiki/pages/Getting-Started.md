@@ -12,6 +12,11 @@ The installer asks how this machine takes updates from the public `main` and
 whether it sends fixes back; by default nothing is sent without your yes.
 `sclaude doctor` lists every gap with the command that fixes it.
 
+**Clone this repository, not a fork of it.** sclaude updates itself from the
+repository it was cloned from: installed from a fork, it takes nothing from
+here until somebody syncs the fork ([Where updates come
+from](Setup#where-updates-come-from)).
+
 ## Your first feature
 
 ```bash

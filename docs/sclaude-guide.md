@@ -17,13 +17,21 @@ sclaude sync <name>     # merge the latest main into a feature's branch
 sclaude news <name>     # what has happened on the pull request
 sclaude preview <name>  # deploy the branch to a preview
 sclaude rollback <name> # put production back to the release before this feature
+sclaude regression <name>       # run the checks steps 2 and 4 close on, by hand
 sclaude regression <name> prod  # run the production tests again; green (or no production tests) lifts a hold
+sclaude issue <name>    # open a GitHub issue for a feature that has none
+sclaude checks [pr]     # after a push, wait until the review check has appeared and every check finished
 sclaude replan <name>   # take a feature back to step 1 and plan it again
 sclaude parts <name> stop  # a feature built in parts ships with the parts built so far
 sclaude return <name> [reason]  # send a finished feature back to step 4
 sclaude reset <name>    # start the current step over, forgetting its conversation
 sclaude done <name>     # clean up after the merge: worktree and branches
 sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
+sclaude epilogue [name] # write the status into the issue when the epilogue broke off; no name lists what waits
+sclaude friction <name> # review what got in a step's way and fix sclaude (offered after each step)
+sclaude deferred        # the monthly review of the friction put off (offered by itself)
+sclaude review-report <name>  # the review's rounds, findings fixed or declined, cost and trend
+sclaude review-stats    # what review sessions cost in context, to tune when a round gets a fresh session
 sclaude propose         # send your commits to sclaude as a pull request
 sclaude workshop        # a session that changes sclaude with you, in a worktree of its own
 sclaude update          # take sclaude's latest main (updates on notify or off)
@@ -35,7 +43,7 @@ sclaude core-ready      # run by a session: its change there is reviewed; publis
 The tab sclaude runs in is named for the feature it is on, as its Telegram
 topic is: `<slug> · <repo>`.
 
-`sclaude --help` has the rest. In the menu, tick "show actions after choosing" to
+`sclaude --help` prints the same list. In the menu, tick "show actions after choosing" to
 get every action for a feature in one list instead of remembering commands.
 
 Before the menu, sclaude lists the branches in progress and offers to delete
@@ -385,7 +393,9 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DEV` | your name, instead of `sclaude.developer` or the one from your git email |
 | `SCLAUDE_NO_SYNC=1` | do not pull the latest sclaude before a command |
 | `SCLAUDE_NO_RELOAD=1` | do not switch to newer sclaude code after a long session |
+| `SCLAUDE_PANE=off` | run a session in the terminal you are in, never in a new tab |
 | `SCLAUDE_PANE_FOCUS=follow` | let a session's new tab take the focus; by default it stays on the tab you were in |
+| `SCLAUDE_PANE_WAIT` | how long to wait for a session's new tab to start before running it in place, in seconds (20) |
 | `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
 | `SCLAUDE_RETRO=off` | skip the retrospective |
 | `SCLAUDE_FRICTION_ASK=on` | ask before putting proposed CLAUDE.md rules off to the monthly review |
@@ -395,6 +405,10 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |
 | `SCLAUDE_DOCKER_DESKTOP` | where Docker Desktop is, when it is somewhere unusual |
 | `SCLAUDE_DB_WAIT` | how long a feature's own database may take to answer after its start reported a failure, in seconds (120) |
+| `SCLAUDE_DB_LOCK_WAIT` | how long a feature's start waits for another start of the same feature to finish resetting or filling its database, in seconds (900) |
+| `SCLAUDE_CHECKS_PERIOD` | how often `sclaude checks` reads the pull request's checks, in seconds (15) |
+| `SCLAUDE_CLASSIFY_MODEL` | the model that matches proposed rules to the ones already put off (`haiku`) |
+| `SCLAUDE_DEV_LOGIN_FILE` | the file whose first line is the address one-click sign-in uses, instead of `~/.claude/sclaude/dev-login` |
 
 ## What sclaude writes, and where
 

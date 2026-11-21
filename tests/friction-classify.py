@@ -34,6 +34,8 @@ CLAUDE_MD = """# Rules
 
 - **A condition is spelled out once, next to the code that checks it.** A comment
   elsewhere gives its gist and names that place.
+- Everybody else proposes a change on a branch of their own, which reaches main through a pull request.
+- Не пушить в main напрямую, только через запрос на слияние.
 """
 
 
@@ -99,7 +101,8 @@ def same(tmp):
 def covered(tmp):
     answer = json.dumps([{"n": 1, "verdict": "covered",
                           "quote": "A condition is spelled out once, next to the code that checks it."}])
-    rc, out, said = run(tmp, [row("2026-10-24", "feat", "claude-md-new", "Proposal: y")], answer)
+    rc, out, said = run(tmp, [row("2026-10-24", "feat", "claude-md-new",
+                                  "Proposal: spell each condition once, beside the code that checks it")], answer)
     check("covered: put off under a class of its own, not dropped",
           [r[4] for r in out], ["claude-md-already-stated"])
     check("covered: the row quotes CLAUDE.md", out[0][5].startswith("Already in CLAUDE.md (") if out else False, True)
@@ -113,6 +116,49 @@ def invented(tmp):
             row("2026-10-24", "feat", "claude-md-b", "Proposal: b")]
     rc, out, said = run(tmp, rows, answer, main_rows=[EARLIER])
     check("an invented class or quote counts as new", [r[4] for r in out], ["claude-md-a", "claude-md-b"])
+
+
+def unrelated(tmp):
+    # A quote CLAUDE.md does have, about something else: copied word for
+    # word, it passed for the proposal's rule and put a new rule off as stated.
+    answer = json.dumps([{"n": 1, "verdict": "covered",
+                          "quote": "A condition is spelled out once, next to the code that checks it."}])
+    rows = [row("2026-10-24", "feat", "claude-md-retired-swept",
+                "Proposal: when a page is retired, grep its path across comments and manuals")]
+    rc, out, said = run(tmp, rows, answer)
+    check("a quote about something else counts as new", [r[4] for r in out], ["claude-md-retired-swept"])
+    check("and no note calls it stated", any("already in CLAUDE.md" in n for n in said), False)
+
+
+def lead_word(tmp):
+    # Every row's text opens with "Proposal: ": a quote that says "proposes"
+    # shared that word with every proposal, and needed one more.
+    answer = json.dumps([{"n": 1, "verdict": "covered",
+                          "quote": "Everybody else proposes a change on a branch of their own"}])
+    rows = [row("2026-10-24", "feat", "claude-md-swept", "Proposal: when a page is retired, change its mentions")]
+    rc, out, said = run(tmp, rows, answer)
+    check("the lead word is not a shared one", [r[4] for r in out], ["claude-md-swept"])
+
+
+def unnamed_not_inherited(tmp):
+    # Proposals that name no class all get the same one: a refused quote of
+    # the second does not borrow the first one's.
+    answer = json.dumps([{"n": 1, "verdict": "covered",
+                          "quote": "A condition is spelled out once, next to the code that checks it."},
+                         {"n": 2, "verdict": "covered",
+                          "quote": "A condition is spelled out once, next to the code that checks it."}])
+    rows = [row("2026-10-24", "feat", "claude-md-proposal", "Proposal: spell a condition once, by the code checking it"),
+            row("2026-10-24", "feat", "claude-md-proposal", "Proposal: when a page is retired, grep its mentions")]
+    rc, out, said = run(tmp, rows, answer)
+    check("an unnamed proposal does not take another's quote", [r[4] for r in out],
+          ["claude-md-already-stated", "claude-md-proposal"])
+
+
+def any_script(tmp):
+    answer = json.dumps([{"n": 1, "verdict": "covered", "quote": "Не пушить в main напрямую, только через запрос на слияние."}])
+    rows = [row("2026-10-24", "feat", "claude-md-no-push", "Proposal: не пушить в main напрямую")]
+    rc, out, said = run(tmp, rows, answer)
+    check("a CLAUDE.md in another script is matched too", [r[4] for r in out], ["claude-md-already-stated"])
 
 
 def broken(tmp):
@@ -164,7 +210,7 @@ def batch(tmp):
                          {"n": 4, "verdict": "same", "class": "claude-md-c"}])
     rows = [row("2026-10-24", "feat", "claude-md-a", "Proposal: a"),
             row("2026-10-24", "feat", "claude-md-b", "Proposal: a, said again"),
-            row("2026-10-24", "feat", "claude-md-c", "Proposal: in CLAUDE.md"),
+            row("2026-10-24", "feat", "claude-md-c", "Proposal: a condition spelled once, by the code checking it"),
             row("2026-10-24", "feat", "claude-md-d", "Proposal: in CLAUDE.md, said again")]
     rc, out, said = run(tmp, rows, answer)
     check("batch: the second takes the first's class, the covered ones theirs", [r[4] for r in out],
@@ -325,7 +371,7 @@ def upstream_stamp_tree_rows(tmp):
 
 
 def main():
-    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person, not_a_rule,
+    for fn in (same, covered, invented, unrelated, lead_word, unnamed_not_inherited, any_script, broken, counted, no_material, batch, other_person, not_a_rule,
                follows_class, upstream, upstream_no_folder, upstream_stamp,
                upstream_stamp_branch_rows, glob_in_path,
                upstream_stamp_tree_rows):

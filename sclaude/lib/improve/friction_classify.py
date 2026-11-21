@@ -21,8 +21,8 @@ off (one example each) and CLAUDE.md, and says of each proposal:
     new      neither: it keeps its own class
 
 The answer is checked, not trusted: a "same" must name a class that is there,
-and a "covered" must quote CLAUDE.md word for word; either one that does not
-counts as "new". No row is dropped: a quote can match a sentence that only
+and a "covered" must quote CLAUDE.md word for word and share words with the
+proposal (SHARED_MIN); either one that does not counts as "new". No row is dropped: a quote can match a sentence that only
 looks like the rule, and a row left out would be one the monthly review never
 counts. Anything going wrong — no claude, a timeout, an answer that is not the
 JSON asked for — leaves every row as it came.
@@ -60,10 +60,56 @@ TIMEOUT = 60
 COVERED = "claude-md-already-stated"
 CLAUDE_MD_MAX = 60000
 QUOTE_MIN = 20
+# A "covered" quote shares at least this many words with its proposal
+# (shared_words). A quote copied word for word passed the check whatever
+# it said: a proposal to sweep a retired page's mentions went off as
+# already stated by a line about describing tables. A rule stated in other
+# words still names the same things. STOP is English: in another language
+# two of its filler words can still make a wrong quote pass. That takes
+# the model's mistake first and a coincidence after it; the check is there
+# for the plain miss, and a count of a CLAUDE.md's common words did not
+# tell filler from a rule's nouns (decided 2026-11-21, at the user's word).
+SHARED_MIN = 2
+STOP = set("""
+about above after again against also always another anything because been
+before being both cannot does doing down during each every from further have
+having here into itself just like more most must never none nothing once only
+other over same should since some still such than that their them then there
+these they this those through under until very were what when where which
+while whose will with within without would your
+""".split())
 
 
 def squash(text):
     return " ".join(text.split())
+
+
+def words(text):
+    """The words of <text> that say something, each cut to its first five
+    letters, so that "describe" and "description" are one. Any script: a
+    product's CLAUDE.md need not be in English."""
+    return {w[:5] for w in re.findall(r"[^\W\d_]\w+", text.lower())
+            if len(w) >= 4 and w not in STOP}
+
+
+def rule_of(text):
+    """The rule alone of a row's text, "Proposal: <rule> (<context>)" as
+    friction_proposals.rows writes it: the lead word is every row's, and
+    the context tells where the rule came from, not what it says."""
+    if text.startswith("Proposal: "):
+        text = text[len("Proposal: "):]
+    if text.endswith(")"):
+        depth = 0
+        for i in range(len(text) - 1, -1, -1):
+            depth += {")": 1, "(": -1}.get(text[i], 0)
+            if depth == 0:
+                text = text[:i] if i else text
+                break
+    return text
+
+
+def shared_words(quote, proposal):
+    return words(quote) & words(rule_of(proposal))
 
 
 def read_rows(path):
@@ -292,7 +338,10 @@ def main():
                 verdicts[item["n"]] = ("same", item["class"])
             elif v == "covered" and isinstance(item.get("quote"), str):
                 quote = squash(item["quote"])
-                if len(quote) >= QUOTE_MIN and quote in flat:
+                n = item["n"]
+                said = proposals[n - 1][5] if 1 <= n <= len(proposals) else ""
+                if len(quote) >= QUOTE_MIN and quote in flat \
+                        and len(shared_words(quote, said)) >= SHARED_MIN:
                     verdicts[item["n"]] = ("covered", quote)
 
     kept, notes = [], []
@@ -308,8 +357,9 @@ def main():
         if verdict and verdict[0] == "same" and verdict[1] not in classes:
             verdict = went.get(verdict[1], verdict)
         # One with no verdict of its own goes where an earlier one of its
-        # class went: the class it came with is the same rule's.
-        if not verdict and p[4] in went:
+        # class went: the class it came with is the same rule's. Not the
+        # class a proposal naming none gets: it holds unrelated rules.
+        if not verdict and p[4] in went and p[4] != DEFAULT_CLASS:
             verdict = went[p[4]]
         if verdict and verdict[0] == "covered":
             notes.append("already in CLAUDE.md, put off as %s: %s — \"%s\"" % (

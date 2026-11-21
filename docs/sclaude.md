@@ -2835,7 +2835,9 @@ haiku) reads the proposals, the classes already put off and `CLAUDE.md`, and
 says of each: the same rule as a class already there (it takes that class),
 a rule `CLAUDE.md` states (put off under `claude-md-already-stated`, the line
 quoted, for the monthly review to drop), or new. The answer is checked, not
-trusted — a class must exist, a quote must be `CLAUDE.md`'s word for word —
+trusted — a class must exist, a quote must be `CLAUDE.md`'s word for word
+and share at least two words with the proposal, so that a real line about
+something else does not put a new rule off as stated —
 no row is dropped, and any failure leaves the rows as they came. The call is
 capped at a minute: it stands between a fix session and the review of its
 fixes.

@@ -49,7 +49,7 @@ both = [
     "  Drawn from #160: --diff-merges= (2.31)\n",
     "  and --porcelain (2.41).\n",
     "\n",
-    "2026-10-09 proposal (claude-md-fix-every-call-site): Fix every call.\n",
+    "2026-10-09 proposal (claude-md-fix-every-call-site): Fix every call site of a changed function.\n",
 ]
 got = fp.rows(both, "myapp", "45-x", "review")
 check("two-rows", len(got or []), 2)
@@ -188,13 +188,17 @@ try:
     with open(log, "w") as fh:
         fh.writelines(both)
     with open(os.path.join(wt, "CLAUDE.md"), "w") as fh:
-        fh.write("- Main moves only by merging a pull request, never by a push.\n")
+        # Each line states one proposal's rule in its words: a quote of a
+        # line about something else is refused (SHARED_MIN).
+        fh.write("- Main moves only by merging a pull request, never by a push.\n"
+                 "- A git option names the git version that brought it.\n"
+                 "- Fix every call site of a changed function in the same commit.\n")
     stub_bin = os.path.join(tmp, "stub-bin")
     os.makedirs(stub_bin, exist_ok=True)
     with open(os.path.join(stub_bin, "claude"), "w") as fh:
         fh.write("#!/bin/sh\necho '%s'\n" % json.dumps(
-            [{"n": i, "verdict": "covered", "quote": "Main moves only by merging a pull request"}
-             for i in (1, 2, 3)]))
+            [{"n": 1, "verdict": "covered", "quote": "A git option names the git version that brought it."},
+             {"n": 2, "verdict": "covered", "quote": "Fix every call site of a changed function"}]))
     os.chmod(os.path.join(stub_bin, "claude"), 0o755)
     out = defer(asking=False, extra={"SCLAUDE_FRICTION_CLASSIFY": "on",
                                      "PATH": stub_bin + ":" + os.environ["PATH"]})

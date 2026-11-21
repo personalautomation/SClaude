@@ -336,7 +336,9 @@ or a pr's session and the next of its own, which took up one broken off),
 the time between two places given to the first check or person on that way
 (what it waited on), a conversation resumed with nothing between counted as
 one stay of several sittings, and the friction reviews and workshop passes as
-ways of their own. A status session says in its row what it is about
+ways of their own — each friction review a pass of its own, labelled with its own verdict,
+also when several follow one step session resumed round after round and so
+share its key. A status session says in its row what it is about
 (`about`, set by `run_status`): before the merge it is the preview's, red or
 written again green, and plays on the epilogue's copy beside the preview: a
 step aside from wherever the run or the menu wrote it, never a deviation,

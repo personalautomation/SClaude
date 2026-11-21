@@ -385,6 +385,7 @@ what is already there. The details are in [Installation](docs/setup.md#installat
 |---|---|
 | [Setting up](docs/setup.md) | the environment sclaude is built for, what is required and what is optional, what your review workflow has to write, and the installation |
 | [Using sclaude](docs/sclaude-guide.md) | every command, and a feature from start to finish |
+| [The product's config](docs/config.md) | everything a product's config sets, what each setting does and what leaving it out means |
 | [How the cycle is kept in line](docs/cycle.md) | what closes each step, what is refused, the gates, the rollback, what is measured, the decisions a product may hand to sclaude |
 | [For a team](docs/team.md) | one copy for everybody, the product's config, layered rules, who changes the orchestrator |
 | [Privacy](docs/privacy.md) | what leaves your machine, what stays, what listens |

@@ -43,6 +43,7 @@ REBUILD = "Rebuild from"
 DOCS = [
     ("docs/setup.md", "Setup", "Setting up", False, ""),
     ("docs/sclaude-guide.md", "Using-sclaude", "Using sclaude", True, "Using-"),
+    ("docs/config.md", "Configuration", "The product's config, key by key", False, ""),
     ("docs/cycle.md", "Gates-and-Rules", "How the cycle is kept in line", False, ""),
     ("docs/team.md", "Team-Setup", "For a team, in detail", False, ""),
     ("docs/privacy.md", "Privacy-in-Full", "Privacy: what leaves your machine", False, ""),

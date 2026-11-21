@@ -32,7 +32,7 @@ the product checks its part too.
 `.sclaude/config.json` offers to write one. It reads the tests from
 `package.json`, the manuals and migrations from the layout, and the board's
 columns and date fields from the repository's GitHub project, and shows it all
-for confirmation before anything is written. `sclaude/config.example.json`
+for confirmation before anything is written. [The product's config](config.md)
 explains every key, and `sclaude config` shows the same explanations beside your
 values. The committed file is what the team recommends; a choice you make in
 `sclaude config` stays on your machine, in `.sclaude/local/config.json` outside

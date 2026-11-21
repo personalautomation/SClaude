@@ -145,7 +145,7 @@ cd <your product> && sclaude new
 | | |
 |---|---|
 | **How it works** | [The cycle](The-Cycle) · [Big features in parts](Big-Features-in-Parts) · [Limits in code](Limits-in-Code) · [Fewer tokens](Fewer-Tokens) · [Feedback loops](Feedback-Loops) · [Metrics](Metrics-and-Replay) · [For a team](For-a-Team) · [The phone](Working-from-the-Phone) |
-| **Guide** | [Setting up](Setup) · [Using sclaude](Using-sclaude) · [A feature, start to finish](Using-A-feature-start-to-finish) · [Gates and rules](Gates-and-Rules) · [Team setup](Team-Setup) · [The tools](Tools) · [Contributing](Contributing) |
+| **Guide** | [Setting up](Setup) · [Using sclaude](Using-sclaude) · [A feature, start to finish](Using-A-feature-start-to-finish) · [The config, key by key](Configuration) · [Gates and rules](Gates-and-Rules) · [Team setup](Team-Setup) · [The tools](Tools) · [Contributing](Contributing) |
 | **Inside** | [How sclaude works, and why](Inside-sclaude) · [How keepawake works, and why](Inside-keepawake) |
 | **See it** | [Videos and decks](Videos-and-Decks) · [The process map](https://personalautomation.github.io/SClaude/presentations/bpmn_diagrams.html) · [Landing page](https://personalautomation.github.io/SClaude/) |
 

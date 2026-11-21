@@ -193,7 +193,7 @@ developer_is_maintainer() {
 #   sclaude.leaks       ask      a change that may name the product is shown,
 #                                and goes out on the person's yes
 #                       auto     it is shown, and goes out without the question
-#                       off      it never goes out; a session rewords it
+#                       off      as ask: the person's send, after seeing the lines
 #
 # Unset, or set to a word not listed: `ask`, for both. For the update that
 # means the question itself, at the next start with a terminal

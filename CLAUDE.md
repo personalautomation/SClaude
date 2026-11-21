@@ -622,7 +622,10 @@ breaks the other silently — grep before you edit:
   `project_demo_mode`, which `<if:demo>` in `sclaude/prompts/code.md` and
   `demo_refresh` in `demo.sh` follow) are listed in `CHOICES` in
   `sclaude/lib/core/config_menu.py`, explained in `sclaude/config.example.json`,
-  read by `project_ship_mode`/`project_stage_regression` in
+  explained for users in `docs/config.md` (every key of the config: a key
+  the example, its README or a `project_get` names, and every value in
+  `CHOICES`, or `tests/config-docs.py` fails), read by
+  `project_ship_mode`/`project_stage_regression` in
   `sclaude/lib/core/project.sh` and by `setting` in `sclaude/lib/flow/process_config.py`. The
   part name `smoke` is treated as `e2e` by `regression_command` and is what
   `sclaude/prompts/code.md` tells step 2 to tag for. `tests/project.py`,
@@ -851,7 +854,7 @@ the video, who it fits, a four-line start, and the table of the guides. It
 names nothing technical beyond that — no command reference, no settings, no
 paths. How to use the tools is in the guides it lists: `docs/setup.md`
 (environment, installation), `docs/sclaude-guide.md` (the commands, a feature
-start to finish), `docs/cycle.md` (gates, refusals, rollback, metrics, the
+start to finish), `docs/config.md` (every key of a product's config), `docs/cycle.md` (gates, refusals, rollback, metrics, the
 decisions a product hands to sclaude), `docs/team.md`, `docs/privacy.md`,
 `docs/tools.md` (the skills and the other tools) and
 `docs/presentations/README.md`. A change a user meets goes into the guide that

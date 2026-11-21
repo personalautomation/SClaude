@@ -454,6 +454,10 @@ def _sync_way(rows, now=None, cut=None):
 # part's way, not the feature's, and are not played on the detailed map.
 
 PARTS_STEP = {"code": "p_code"}
+# A friction row's pass (`_friction_passes`): its key names the step session
+# it follows, and one such session is followed by as many reviews as its
+# rounds log something — a review step's session resumed round after round.
+FPASS = "_fpass"
 # A row's place on another map than its own, set by history for the costs
 # (process_costs._session_place): a part's sessions cost on the parts map.
 ON = "_on"
@@ -654,12 +658,75 @@ def _short(at):
     return when.strftime("%d %b %H:%M") if when else ""
 
 
+def _friction_passes(rows):
+    """Mark each friction row with its pass (FPASS) and say whose key each
+    pass is under: {pass: key}. A key is the step session the reviews follow
+    (`<step>-<n>`), and a session resumed round after round — a review step's
+    — is followed by a review after every round that logged something. Each
+    of those is a pass of its own, named like the conversations are: by the
+    session that reviewed (its `open` row), the key for the first. A new one
+    begins where the log is looked at again (`empty`, f_log → f_empty) after
+    the last one ended — finished, or put off with no session (`deferred`);
+    a review held or cut off stays one pass until it is reviewed at last. A
+    look that found the log empty is no review and stays apart (its `empty`
+    row and the edge written right after it are one look), so a pass starts
+    at its own look, and an empty look plays no pass. A hold is always a
+    review owed (friction.sh never holds a re-read): a pass of its own. A
+    re-read (`sclaude friction`) looks at no log but is a review too: its
+    way into the review after one ended, or after an empty look, begins a
+    pass of its own."""
+    owner, current, done, busy, mine = {}, {}, set(), set(), {}
+    after_look = {}
+    for r in rows:
+        if r["what"] == EDGE:
+            if _map_of(_edge(r)[0]) != "friction" or not r.get("key"):
+                continue
+            key, again = r["key"], _edge(r) == ("f_log", "f_empty")
+        elif r["what"].startswith("friction.") and r["what"] != "friction.":
+            key, again = r["what"].split(".", 1)[1], r["op"] == "empty"
+        else:
+            continue
+        cur = current.get(key)
+        # A look that found the log empty opens with its `empty` row: whatever
+        # came before is over, a hold too (its entries were read under another
+        # key). A hold taken up looks with the edge alone, and stays its pass.
+        # Left as it is, at the person's decision: a hold read under another
+        # key and followed by a look that finds new entries joins that look's
+        # review — the rows cannot tell it from a hold taken up, and telling
+        # them apart would need a row of its own for a hold read elsewhere.
+        if cur is None or again and (cur in done or r["op"] == "empty"
+                                     or cur not in busy and not after_look.get(key)):
+            cur = current[key] = len(mine)
+            mine[cur] = []
+        elif r["what"] == EDGE and _edge(r)[1] == "f_review" \
+                and (cur in done or cur not in busy and not after_look.get(key)):
+            cur = current[key] = len(mine)
+            mine[cur] = []
+        after_look[key] = again
+        mine[cur].append(r)
+        if r["op"] in ("finish", "deferred"):
+            done.add(cur)
+        if r["op"] != "empty" and (r["what"] != EDGE or _edge(r)[1] not in FRICTION_QUIET):
+            busy.add(cur)
+    for group in mine.values():
+        key = group[0].get("key") or group[0]["what"].split(".", 1)[1]
+        name = key
+        if key in owner.values():
+            name = next((r["session"] for r in group if r["op"] == "open" and r.get("session")),
+                        "%s %s" % (key, group[0]["at"]))
+        owner[name] = key
+        for r in group:
+            r[FPASS] = name
+    return owner
+
+
 def history(state, lines, here=None, transcripts=None, pass_rows=None):
     """The feature's way through the maps, for the page to play, and what
     each place took (`metrics`) when the sessions' transcripts are given:
     a function from a session id to claude_usage.read's summary, or None."""
     # Copies: a part's rows are marked with their place for the costs.
     rows = [dict(r) for r in history_rows(lines)]
+    fowner = _friction_passes(rows)
     places = _Places()
     friction, workshop, regression, syncs = {}, {}, {}, {}
     # A feature built in parts: each part's rows, where the parts stand
@@ -681,8 +748,8 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         # session: its pass begins where it is reviewed at last, which may be
         # rounds later, so the place a held try gave it is taken back. One
         # never reviewed stands where it was last held (after the rows). One
-        # already reviewed keeps its place: a hold after it (a re-read) is no
-        # new pass.
+        # already reviewed keeps its place: a later hold is another review's
+        # pass (`_friction_passes`), so this guards only rows out of order.
         if key in reviewed:
             return
         places.list[:] = [p for p in places.list if p.get("pass") != ["friction", key]]
@@ -725,14 +792,15 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                     places.detour("workshop", session, at)
                 workshop[session].append(r)
             elif on == "friction" and r.get("key"):
-                if r["key"] not in friction:
-                    friction[r["key"]] = []
+                fp = r[FPASS]
+                if fp not in friction:
+                    friction[fp] = []
                 if _edge(r) == ("f_rules", "f_away"):
-                    unplace(r["key"], at)
-                elif not quiet.get(r["key"]) and _edge(r)[1] not in FRICTION_QUIET:
-                    quiet[r["key"]] = True
-                    places.detour("friction", r["key"], at)
-                friction[r["key"]].append(r)
+                    unplace(fp, at)
+                elif not quiet.get(fp) and _edge(r)[1] not in FRICTION_QUIET:
+                    quiet[fp] = True
+                    places.detour("friction", fp, at)
+                friction[fp].append(r)
             elif on == "regression" and r.get("stage") in STAGE_NODE:
                 key = last_run.get(r["stage"])
                 if key is None:
@@ -781,6 +849,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                 # its conversation took place.
                 places.leave(what, at)
         elif head == "friction" and rest:
+            rest = r[FPASS]
             if rest not in friction:
                 friction[rest] = []
             # Its pass begins at the first row that is more than a log
@@ -1089,17 +1158,21 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                                           (" · " + ends[-1]) if ends else "", " · the whole" if whole else ""),
             "steps": _parts_way(rs, j == 0, pon and last,
                                 now_iso if going else None, unseen(rs))})
-    for key, rs in friction.items():
-        if not quiet.get(key):
+    # The state keeps one record per key: it speaks for the key's last pass.
+    latest = {fowner.get(fp, fp): fp for fp in friction if quiet.get(fp)}
+    for fp, rs in friction.items():
+        if not quiet.get(fp):
             continue
+        key = fowner.get(fp, fp)
         verdict = next((r.get("verdict") for r in rs if r["op"] == "verdict"), "")
         if any(r["op"] == "deferred" for r in rs):
             verdict = "put off, no session"
-        index[("friction", key)] = len(passes["friction"])
+        index[("friction", fp)] = len(passes["friction"])
         passes["friction"].append({
             "label": "%s · %s%s" % (_short(rs[0]["at"]), key, (" · " + verdict) if verdict else ""),
             "steps": _edged(_friction_way([x for x in rs if x["what"] != EDGE], workshop_sessions,
-                                          now_iso if process_position._open((process_position._runs((state.get("friction") or {}).get(key)) or [None])[-1])
+                                          now_iso if latest.get(key) == fp and process_position._open(
+                                              (process_position._runs((state.get("friction") or {}).get(key)) or [None])[-1])
                                           else None,
                                           unseen(rs)),
                             rs, "f_trip", process_model.FRICTION_EDGES, labels)})

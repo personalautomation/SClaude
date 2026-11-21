@@ -945,6 +945,87 @@ with tempfile.TemporaryDirectory() as _t:
     _vs = json.loads(_cli.stdout or "{}").get("visits", [])
     check("process.py history stands where the project's map goes on",
           [v["n"] for v in _vs if v.get("here")] == ["handoff"], _cli.stdout[-300:] + _cli.stderr[-300:])
+# One review session resumed round after round shares its friction key: each
+# round that logged something is followed by a review of its own, and the
+# one after the second changes sclaude. Each review is a pass, so the change
+# stands beside the review that made it, not between the rounds.
+def _round(t0, t1, key="review-1"):
+    return [{"at": at(t0), "what": "steps.review", "op": "open", "session": "r"},
+            {"at": at(t1), "what": "steps.review", "op": "end", "session": "r"},
+            {"at": at(t1), "what": "edge", "op": "review review_run", "by": "session"}]
+def _look(t, key="review-1"):
+    return [{"at": at(t), "what": "friction." + key, "op": "empty"},
+            {"at": at(t), "what": "edge", "op": "f_log f_empty", "key": key},
+            {"at": at(t), "what": "edge", "op": "f_empty f_none", "key": key}]
+def _friction(t0, t1, who, key="review-1", change=False):
+    rows = [{"at": at(t0), "what": "edge", "op": "f_log f_empty", "key": key},
+            {"at": at(t0), "what": "edge", "op": "f_empty f_rules", "key": key},
+            {"at": at(t0), "what": "edge", "op": "f_rules f_review", "key": key},
+            {"at": at(t0), "what": "friction." + key, "op": "open", "session": who}]
+    if change:
+        rows += [{"at": at(t0), "what": "edge", "op": "w_ask w_open", "session": who},
+                 {"at": at(t0), "what": "edge", "op": "w_open w_change", "session": who},
+                 {"at": at(t1), "what": "workshop", "op": "ready", "session": who},
+                 {"at": at(t1), "what": "workshop", "op": "main", "session": who}]
+    return rows + [{"at": at(t1), "what": "friction." + key, "op": "finish", "session": who},
+                   {"at": at(t1), "what": "friction." + key, "op": "verdict", "verdict": "lifted" if change else "kept"}]
+_rounds = (_round("09:00", "09:10") + _friction("09:11", "09:20", "f1")
+           + _round("09:21", "09:30") + _look("09:30")
+           + _round("09:31", "09:40") + _friction("09:41", "09:50", "f2", change=True)
+           + [{"at": at("09:51"), "what": "steps.review", "op": "open", "session": "r"}])
+_got = process.history({}, _rounds, "review")
+check("deviations: a change to sclaude by the second review of one key stands beside it",
+      not any(v.get("off") for v in _got["visits"]), str([v.get("off") for v in _got["visits"] if v.get("off")]))
+check("history: each review under one key is a pass of its own, named by its verdict",
+      [p["label"].split(" · ", 1)[1] for p in _got["passes"]["friction"]] == ["review-1 · kept", "review-1 · lifted"],
+      str([p["label"] for p in _got["passes"]["friction"]]))
+# A round whose log held only rules is put off with no session (friction.sh
+# writes `deferred`, no open, no finish): a pass of its own after a review,
+# and a review after it is a pass of its own again.
+def _put_off(t, key="review-1"):
+    return [{"at": at(t), "what": "edge", "op": "f_log f_empty", "key": key},
+            {"at": at(t), "what": "edge", "op": "f_empty f_rules", "key": key},
+            {"at": at(t), "what": "friction." + key, "op": "deferred"},
+            {"at": at(t), "what": "edge", "op": "f_rules f_classify", "key": key},
+            {"at": at(t), "what": "edge", "op": "f_classify f_defer", "key": key}]
+_got = process.history({}, _round("09:00", "09:10") + _friction("09:11", "09:20", "f1")
+                       + _round("09:21", "09:30") + _put_off("09:30")
+                       + _round("09:31", "09:40") + _friction("09:41", "09:50", "f2", change=True)
+                       + [{"at": at("09:51"), "what": "steps.review", "op": "open", "session": "r"}], "review")
+check("history: a review put off between two reviews of one key is a pass between them",
+      [p["label"].split(" · ", 1)[1] for p in _got["passes"]["friction"]]
+      == ["review-1 · kept", "review-1 · put off, no session", "review-1 · lifted"]
+      and not any(v.get("off") for v in _got["visits"]),
+      str([p["label"] for p in _got["passes"]["friction"]]) + str([v.get("off") for v in _got["visits"] if v.get("off")]))
+# A round held for the person after one put off waits on its own: the put
+# off stays where it ran, and the hold is a pass of its own.
+_got = process.history({}, _round("09:00", "09:10") + _put_off("09:10") + _round("09:11", "09:20")
+                       + [{"at": at("09:20"), "what": "edge", "op": "f_log f_empty", "key": "review-1"},
+                          {"at": at("09:20"), "what": "edge", "op": "f_empty f_rules", "key": "review-1"},
+                          {"at": at("09:20"), "what": "friction.review-1", "op": "held"},
+                          {"at": at("09:20"), "what": "edge", "op": "f_rules f_away", "key": "review-1"},
+                          {"at": at("09:21"), "what": "steps.review", "op": "open", "session": "r"}], "review")
+check("history: a hold after a put-off review of one key waits on its own",
+      [p["label"].split(" · ", 1)[1] for p in _got["passes"]["friction"]] == ["review-1 · put off, no session", "review-1"]
+      and process.process_history._short(at("09:10")) in _got["passes"]["friction"][0]["label"],
+      str([p["label"] for p in _got["passes"]["friction"]]))
+# An empty look after a review plays no way inside it, and a re-read by hand
+# (no look at the log) is a review of its own, wherever it comes.
+_got = process.history({}, _round("09:00", "09:10") + _put_off("09:10") + _look("09:30")
+                       + _round("09:31", "09:40") + _friction("09:41", "09:50", "f1") + _look("10:00")
+                       + [{"at": at("10:05"), "what": "edge", "op": "f_rules f_review", "key": "review-1"},
+                          {"at": at("10:05"), "what": "friction.review-1", "op": "open", "session": "g"},
+                          {"at": at("10:10"), "what": "friction.review-1", "op": "finish", "session": "g"},
+                          {"at": at("10:11"), "what": "steps.review", "op": "open", "session": "r"}], "review")
+_ways = [[x["n"] for x in p["steps"]] for p in _got["passes"]["friction"]]
+check("history: an empty look plays no way, a re-read is a pass of its own",
+      len(_ways) == 3 and not any("f_none" in w for w in _ways) and _ways[0][-1] == "f_defer"
+      and _ways[2][-1] != "f_defer", str(_ways))
+# A look's `empty` row and its edge are one look, whatever second each got.
+_one = _look("09:00")
+_one[1] = dict(_one[1], at=at("09:00").replace(":00+", ":01+"))
+check("history: an empty look is one look across a second's turn",
+      len(set(process.process_history._friction_passes([dict(r) for r in _one]))) == 1)
 odd = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c"},
                            {"at": at("09:30"), "what": "steps.code", "op": "end", "session": "c"},
                            {"at": at("10:00"), "what": "steps.plan", "op": "open", "session": "p"}], "plan")["visits"]
@@ -1017,11 +1098,23 @@ _again = process.history({}, [
     {"at": at("09:00"), "what": "friction.review-5", "op": "open", "session": "f"},
     {"at": at("09:10"), "what": "friction.review-5", "op": "finish", "session": "f", "outcome": "fixed"},
     {"at": at("09:20"), "what": "steps.review", "op": "open", "session": "r1"}] + _held("09:30", "review-5"), "review")
-check("history: a hold after a review of the same key takes nothing back",
-      [v.get("n") or v["pass"][0] for v in _again["visits"]].count("friction") == 1
-      and [v.get("n") or v["pass"][0] for v in _again["visits"]].index("friction")
-      < [v.get("n") or v["pass"][0] for v in _again["visits"]].index("review"),
+# A hold is never a re-read (friction.sh holds only a fresh log): after a
+# review of the same key it is another review owed, waiting where it was
+# held, and the first keeps its place.
+_seq = [v.get("n") or v["pass"][0] for v in _again["visits"]]
+check("history: a hold after a review of the same key is a review of its own, the first kept",
+      _seq.count("friction") == 2 and _seq.index("friction") < _seq.index("review") < len(_seq) - 1 - _seq[::-1].index("friction"),
       str([v.get("n") or v.get("pass") for v in _again["visits"]]))
+# A hold whose entries another key's review read never ends under its own
+# key; the empty look after it and a re-read after that are not the hold's.
+_rows = [dict(r) for r in _held("09:10", "review-1") + _look("09:30")
+         + [{"at": at("10:05"), "what": "edge", "op": "f_rules f_review", "key": "review-1"},
+            {"at": at("10:05"), "what": "friction.review-1", "op": "open", "session": "g"},
+            {"at": at("10:10"), "what": "friction.review-1", "op": "finish", "session": "g"}]]
+process.process_history._friction_passes(_rows)
+check("history: an empty look ends a hold, and a re-read after it is a pass of its own",
+      len({r["_fpass"] for r in _rows}) == 3 and _rows[0]["_fpass"] != _rows[-1]["_fpass"],
+      str([(r["op"], r["_fpass"]) for r in _rows]))
 # A review cut off (opened, never finished) and held later is placed where it
 # is reviewed at last, as one held from the start is.
 _cut = process.history({}, [

@@ -25,6 +25,7 @@
   - [Environments and databases](Using-Environments-and-databases)
   - [Switches](Using-Switches)
   - [What sclaude writes](Using-What-sclaude-writes-and-where)
+- [The config, key by key](Configuration)
 - [Gates and rules](Gates-and-Rules)
 - [Team setup](Team-Setup)
 - [Privacy in full](Privacy-in-Full)

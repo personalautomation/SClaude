@@ -1419,6 +1419,33 @@ def main():
             finally:
                 shutil.rmtree(broken, ignore_errors=True)
 
+    # A refusal goes to the log of the tree CLAUDE_PROJECT_DIR is in, found
+    # from inside it too, but never out of a repository nested in that tree:
+    # the workshop is one, and hooks run there by hand wrote their probes into
+    # the feature's log as its friction.
+    nested = tempfile.mkdtemp(prefix="hooks-friction-")
+    try:
+        tree = os.path.join(nested, "tree")
+        subprocess.run(["git", "init", "-q", tree], check=True)
+        os.makedirs(os.path.join(tree, ".sclaude", "local", "feature"))
+        os.makedirs(os.path.join(tree, "sub"))
+        workshop = os.path.join(tree, ".sclaude", "local", "workshop")
+        subprocess.run(["git", "init", "-q", workshop], check=True)
+        log = os.path.join(tree, ".sclaude", "local", "feature", "friction.log")
+        nested_cases = ((workshop, False), (os.path.join(tree, "sub"), True))
+        for where, want in nested_cases:
+            if os.path.exists(log):
+                os.remove(log)
+            run("forbidden-commands.py", "gh pr merge 1", step="review", cwd=where,
+                env={"CLAUDE_PROJECT_DIR": where})
+            got = os.path.exists(log) and "gh pr merge 1" in open(log).read()
+            if got != want:
+                failures.append(("friction", "refusal from %s" % os.path.relpath(where, tree),
+                                 "logged" if want else "not logged",
+                                 "logged" if got else "not logged"))
+    finally:
+        shutil.rmtree(nested, ignore_errors=True)
+
     # collect-denials.py drops what the policy bans on purpose, by the command
     # the call ran: a refusal of a Vercel read the hook allows is friction and
     # stays, and a step's own ban (gh pr create on step 2) is deliberate.
@@ -1430,7 +1457,7 @@ def main():
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
         len(const("collect-denials.py", "OWN_MARKERS")) + 1 + len(compound_cases) + len(branch_cases) + \
-        len(denial_cases) + len(broken_cases)
+        len(denial_cases) + len(broken_cases) + len(nested_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))
     print("%d/%d passed" % (total - len(failures), total))

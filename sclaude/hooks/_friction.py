@@ -39,8 +39,12 @@ def log_path(start=None):
     ones, with someone else's step in the field, and the next review had to work
     out from the timestamps that these were not friction.
 
-    We do still walk up the tree: it costs nothing, and a worktree's root stays
-    the root even if the hook is one day called from somewhere inside.
+    We do still walk up the tree, so that a worktree's root stays the root if
+    the hook is one day called from somewhere inside it, but no further than
+    the first repository's root: the workshop is a checkout of its own nested
+    inside a feature's tree, and a review's subagent that ran the hooks by hand
+    there, with CLAUDE_PROJECT_DIR set to the workshop, walked out of it into
+    the feature's log and wrote its probes there as the feature's friction.
     """
     root = start or os.environ.get("CLAUDE_PROJECT_DIR")
     if not root:
@@ -51,7 +55,7 @@ def log_path(start=None):
         if os.path.isdir(candidate):
             return os.path.join(candidate, "friction.log")
         parent = os.path.dirname(here)
-        if parent == here:
+        if parent == here or os.path.exists(os.path.join(here, ".git")):
             return None
         here = parent
 

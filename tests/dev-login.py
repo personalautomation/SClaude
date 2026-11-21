@@ -26,6 +26,8 @@ from urllib.parse import parse_qs, urlsplit
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 PROXY = os.path.join(ROOT, "bin", "sclaude-proxy")
+# The first line of skills/sdemo/deeplink.js, by which the proxy finds it in a page.
+PROXY_HEAD = re.search(r'DEMO_SCRIPT_HEAD = "(.*)"', open(PROXY).read()).group(1)
 
 failures = []
 total = 0
@@ -628,6 +630,23 @@ def check_proxy(root, wt, dport, login_file):
         status, headers, body = request(port, host, tail + "/")
         check("demo: the page is served", (status.split(" ", 1)[1], body),
               ("200 OK", "<h1>the demo</h1>"))
+        # A page recorded with an older player goes out with the current one.
+        write(os.path.join(recorded, "index.html"),
+              "<h1>old</h1><script>const D = \"// A place in a demo's video, in the page's address\";\n"
+              "// A place in a demo's video, in the page's address OLD</script>")
+        _, _, body = request(port, host, tail + "/")
+        current = demo.deeplink_script()
+        check("demo: a page goes out with the current deeplink.js in place of the one written in",
+              (current.startswith(PROXY_HEAD), "OLD" in body,
+               "const D = \"" + PROXY_HEAD + "\";\n" + current + "</script>" in body),
+              (True, False, True))
+        whole = os.path.join(wt, demo.DEMO_DIR, "index.html")
+        write(whole, "<h1>all</h1><script>// A place in a demo's video, in the page's address OLD</script>")
+        _, _, body = request(port, host, "/__sclaude/demo/f1/")
+        check("demo: the feature's page goes out with the current deeplink.js too",
+              ("OLD" in body, "<script>" + current + "</script>" in body), (False, True))
+        os.remove(whole)
+        write(os.path.join(recorded, "index.html"), "<h1>the demo</h1>")
         status, headers, _ = request(port, host, tail)
         check("demo: without the slash, sent under it",
               (status.split(" ", 1)[1], headers.get("location")), ("303 See Other", tail + "/"))

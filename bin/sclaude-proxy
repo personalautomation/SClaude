@@ -939,6 +939,14 @@ async def own_page(target, host, headers=None):
 DEMO_PREFIX = "/__sclaude/demo/"
 DEMO_DIR = ".sclaude/local/demo"
 DEMO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# Both demo pages carry skills/sdemo/deeplink.js inline, written in when the
+# demo was recorded (play.mjs, write_feature_page in demo.py). A page goes out
+# with the current file in its place — from the file's first line to the end
+# of its <script> — so a demo recorded before a change to the player plays
+# with the change.
+DEMO_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..",
+                           "skills", "sdemo", "deeplink.js")
+DEMO_SCRIPT_HEAD = "// A place in a demo's video, in the page's address"
 DEMO_KINDS = {".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8",
               ".webm": "video/webm", ".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8"}
 # A video goes out a piece at a time: a range left open (bytes=N-, what a
@@ -986,6 +994,21 @@ def latest_demo(wt):
     return None
 
 
+def demo_page(text):
+    # The last one: the script ends both pages, and the demo's own text
+    # before it (a caption) may quote the line.
+    start = text.rfind(DEMO_SCRIPT_HEAD)
+    end = text.find("</script>", start)
+    if start < 0 or end < 0:
+        return text
+    try:
+        with open(DEMO_SCRIPT, encoding="utf-8") as fh:
+            script = fh.read().replace("</", "<\\/")
+    except OSError:
+        return text
+    return text[:start] + script + text[end:]
+
+
 def demo_file(path, wanted=""):
     parts = path[len(DEMO_PREFIX):].split("/")
     # The page names its videos relative to itself: under the slash.
@@ -996,7 +1019,7 @@ def demo_file(path, wanted=""):
         found = feature(parts[0])
         try:
             with open(os.path.join(found[0], DEMO_DIR, "index.html"), "rb") as fh:
-                return respond("200 OK", fh.read().decode("utf-8", "replace"))
+                return respond("200 OK", demo_page(fh.read().decode("utf-8", "replace")))
         except (OSError, TypeError):
             return respond("404 Not Found", page("No demo", "<h1>No demo of this feature</h1>", "🎬"))
     if len(parts) != 3 or not DEMO_ID.match(parts[1]):
@@ -1008,6 +1031,12 @@ def demo_file(path, wanted=""):
     if not found or not kind or not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", name):
         return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     file = os.path.join(found[0], DEMO_DIR, demo, name)
+    if name.endswith(".html"):
+        try:
+            with open(file, "rb") as fh:
+                return respond("200 OK", demo_page(fh.read().decode("utf-8", "replace")))
+        except OSError:
+            return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     try:
         size = os.path.getsize(file)
         span = RANGE.match(wanted.strip())

@@ -264,7 +264,11 @@ breaks the other silently — grep before you edit:
   for the process map's link (`demo` of `page` in `sclaude/lib/flow/process_page.py`). The script's
   helpers (`d.say`, `d.click`…) are spelled out for the session in
   `skills/sdemo/SKILL.md`. `tests/dev-login.py` checks the two sides of the
-  directory and the address.
+  directory and the address. Both pages carry `deeplink.js` inline, and the
+  proxy puts the current file in its place as a page goes out (`demo_page`),
+  finding it by the file's first line (`DEMO_SCRIPT_HEAD`): reword that line
+  and old pages keep the player they were recorded with; the same test
+  checks the swap.
 - The demo's comment on the issue is headed by `DEMO`, declared in
   `sclaude/lib/github/issue_comments.py` and imported by `skills/sdemo/demo.py`,
   which writes it only for sclaude (`SCLAUDE_SESSION`, set by

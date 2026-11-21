@@ -10,8 +10,13 @@
 // corner, and a full-screen button that puts the video and the copy button
 // on the screen together: the browser's own full screen shows the video
 // alone, and the person tells Claude about a place mostly from there. On
-// the screen it pauses on a click and takes the keys as a video's own full
-// screen does: space or k, the arrows or j and l, m, f.
+// the screen it takes the keys as a video's own full screen does: space or
+// k, the arrows or j and l, m, f. A click on the picture plays and pauses,
+// on the page and on the screen alike.
+//
+// Play in a row, a checkbox put into the page's <h1> (on by default, kept
+// in localStorage): a video that ends starts the next one, on the page and
+// on the screen.
 //
 // 📍 then a click on the frame puts a point in the address too: p=<x>,<y>,
 // in per cent of the video's own frame from its top left corner — not of the
@@ -70,12 +75,21 @@ cursor:text;user-select:text;-webkit-user-select:text;touch-action:auto}
 background:rgba(0,0,0,.78);color:#fff;font:600 16px/1.4 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .25s;
 cursor:text;user-select:text;-webkit-user-select:text}
 .vw .cap.on{opacity:1;pointer-events:auto}
-.vw:fullscreen{background:#000;display:flex;flex-direction:column;width:100%;max-width:none;margin:0}
-.vw:fullscreen video{flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;object-fit:contain;border-radius:0}
-.vw:fullscreen .vs{flex:none;padding:8px 16px 12px}
-.vw:-webkit-full-screen{background:#000;display:flex;flex-direction:column;width:100%;height:100%}
-.vw:-webkit-full-screen video{flex:1;min-height:0;width:100%;height:auto;max-height:none;object-fit:contain}
-.vw:-webkit-full-screen .vs{flex:none;padding:8px 16px 12px}`;
+/* Full screen is the stage's, with the video's wrapper moved into it: see enter(). */
+.vstage{display:none}
+.vstage:fullscreen{display:flex;background:#000;width:100%;height:100%}
+.vstage:-webkit-full-screen{display:flex;background:#000;width:100%;height:100%}
+.vstage .vw{flex:1;min-width:0;display:flex;flex-direction:column;width:100%;max-width:none;margin:0}
+.vstage .vw video{flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;object-fit:contain;border-radius:0}
+.vstage .vw .vs{flex:none;padding:8px 16px 12px}
+/* Play in a row: the checkbox in the page's heading, and its copy on the
+   buttons over a video in full screen, where the heading is not in view. */
+label.inrow{display:inline-flex;align-items:center;gap:5px;margin-left:14px;vertical-align:middle;
+font:400 13px/1 system-ui,sans-serif;color:inherit;opacity:.8;cursor:pointer;user-select:none;white-space:nowrap}
+label.inrow input{margin:0;cursor:pointer}
+.vw .vb .nx{display:none}
+.vstage .vw .vb .nx{display:inline-block}
+.vw .vb .nx.on{background:rgba(37,99,235,.85)}`;
   document.head.appendChild(css);
 
   const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
@@ -166,23 +180,101 @@ cursor:text;user-select:text;-webkit-user-select:text}
     toast.timer = setTimeout(() => toast.classList.remove("on"), 2200);
   }
 
-  const full = () => document.fullscreenElement || document.webkitFullscreenElement;
+  // Full screen goes to one stage for the page, with the video's wrapper
+  // moved into it and a placeholder of its size left in the page. The next
+  // video played in a row takes the wrapper's place on the stage: the
+  // browser lets a page ask for full screen only on a click, and the end of
+  // a video is none, so the element on the screen stays the same.
+  const stage = document.createElement("div");
+  stage.className = "vstage";
+  document.body.appendChild(stage);
+  const held = document.createElement("div");
+  const screenEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  // The video's wrapper on the screen, or what else is (a video alone).
+  const full = () => {
+    const f = screenEl();
+    return f === stage ? stage.firstElementChild : f;
+  };
+  // Each wrapper's buttons and caption follow whether it is on the screen;
+  // a swap on the stage is no fullscreenchange, so it tells them itself.
+  const syncs = [];
+  function onStage(wrap) {
+    if (stage.firstElementChild === wrap) return;
+    offStage();
+    held.style.height = wrap.offsetHeight + "px";
+    wrap.replaceWith(held);
+    stage.appendChild(wrap);
+    for (const f of syncs) f();
+  }
+  function offStage() {
+    const wrap = stage.firstElementChild;
+    if (wrap && held.parentNode) held.replaceWith(wrap);
+    for (const f of syncs) f();
+  }
+  function enter(wrap) {
+    const go = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (!go) {
+      // An iPhone puts only a video on the whole screen.
+      const video = wrap.querySelector("video");
+      if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+      return;
+    }
+    onStage(wrap);
+    const asked = go.call(stage);
+    if (asked && asked.catch) asked.catch(() => { if (!screenEl()) offStage(); });
+  }
   function toggle(wrap) {
-    if (full()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    const go = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-    if (go) return go.call(wrap);
-    // An iPhone puts only a video on the whole screen.
-    const video = wrap.querySelector("video");
-    if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    if (screenEl()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    enter(wrap);
+  }
+  for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
+    document.addEventListener(ev, () => { if (screenEl() !== stage) offStage(); });
+
+  // Play in a row: once a video ends the next one on the page starts, in
+  // full screen as out of it. The next is the next in the page that has a
+  // video to play and is not folded away in a closed <details> (the
+  // feature's earlier versions). On by default; the choice is remembered.
+  const ROW_KEY = "sclaude-demo-in-row";
+  let inRow = true;
+  try { inRow = localStorage.getItem(ROW_KEY) !== "0"; } catch {}
+  const rowViews = [];
+  function setRow(on) {
+    inRow = on;
+    try { localStorage.setItem(ROW_KEY, on ? "1" : "0"); } catch {}
+    for (const f of rowViews) f();
+  }
+  const hasSource = (v) => v.getAttribute("src") || v.querySelector("source");
+  const playable = (v) => !v.closest("details:not([open])") && hasSource(v);
+  // The row's controls only where there is a next video; one folded away
+  // counts, since its version can be opened.
+  const many = [...document.querySelectorAll("video[data-v]")].filter(hasSource).length > 1;
+  // In the page's order, the one on the stage counted where its placeholder is.
+  const spot = (v) => (stage.contains(v) ? held : v);
+  function nextOf(video) {
+    const all = [...document.querySelectorAll("video[data-v]")].sort((a, b) => a === b ? 0 :
+      spot(a).compareDocumentPosition(spot(b)) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    return all.slice(all.indexOf(video) + 1).find(playable) || null;
+  }
+  const PRESS_PLAY = "▶ Press play to go on";
+  function playNext(video) {
+    const next = nextOf(video);
+    if (!next) return;
+    const wrap = next.closest(".vw");
+    if (screenEl() === stage) onStage(wrap);
+    else wrap.scrollIntoView({block: "center", behavior: "smooth"});
+    next.currentTime = 0;
+    // A browser may refuse to play with sound when no click started it; a
+    // pause the person made before it began is no refusal.
+    next.play().catch((e) => { if (e.name === "NotAllowedError") say(wrap, PRESS_PLAY, 6000); });
   }
 
   const flip = (video) => (video.paused ? video.play().catch(() => {}) : video.pause());
-  function say(wrap, text) {
+  function say(wrap, text, ms = 1200) {
     const toast = wrap.querySelector(".toast");
     toast.textContent = text;
     toast.classList.add("on");
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => toast.classList.remove("on"), 1200);
+    toast.timer = setTimeout(() => toast.classList.remove("on"), ms);
   }
 
   // The steps on a strip under the video. The browser draws no chapters on
@@ -483,7 +575,18 @@ cursor:text;user-select:text;-webkit-user-select:text}
     pin.className = "pin";
     pin.title = "Point at a place in the frame: it goes into the link";
     pin.textContent = "📍";
-    bar.append(pin, link, big);
+    const nx = document.createElement("button");
+    nx.type = "button";
+    nx.className = "nx";
+    nx.textContent = "⏭";
+    const nxView = () => {
+      nx.classList.toggle("on", inRow);
+      nx.title = "Play in a row: " + (inRow ? "on — the next video starts when this one ends" : "off");
+    };
+    nxView();
+    rowViews.push(nxView);
+    nx.addEventListener("click", () => setRow(!inRow));
+    bar.append(...(many ? [pin, link, nx, big] : [pin, link, big]));
     const pick = document.createElement("div");
     pick.className = "pick";
     const dot = document.createElement("div");
@@ -506,17 +609,45 @@ cursor:text;user-select:text;-webkit-user-select:text}
     });
     link.addEventListener("click", () => copy(video, link));
     big.addEventListener("click", () => toggle(wrap));
-    video.addEventListener("dblclick", (e) => { e.preventDefault(); toggle(wrap); });
-    // The wrapper on the screen is not the browser's own full screen of a
-    // video, so a click on the picture pausing and playing goes with it:
-    // Chrome does it only for a video that is itself in full screen; Firefox
-    // plays on a click anywhere, so the click acts only when the browser did
-    // not. Clicks on Chrome's control bar do not reach the page; the strip at
-    // the bottom is left alone for a browser whose do.
+    video.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      // The double click's first click flipped playback: taken back, or
+      // never made if it is still waiting, so the video goes to full screen,
+      // or leaves it, playing or paused as it was. Taken back after the move
+      // to the stage, or once back on the page, since either move would cut
+      // a play() under way short.
+      const back = !video.flipping && Date.now() - (video.flipped || 0) < 1000;
+      clearTimeout(video.flipping);
+      video.flipping = 0;
+      video.flipped = 0;
+      const left = toggle(wrap);
+      if (!back) return;
+      // The exit's promise may come before its fullscreenchange: put back here.
+      const home = () => { offStage(); flip(video); };
+      if (left && left.then) left.then(home, home);
+      else flip(video);
+    });
+    // A click on the picture pauses and plays, on the page as on the screen:
+    // Chrome does it only for a video that is itself in full screen, which
+    // the wrapper is not; Firefox plays on a click anywhere, so the click
+    // acts only when the browser did not. Clicks on Chrome's control bar do
+    // not reach the page; the strip at the bottom is left alone for a
+    // browser whose do. On the page a tap is left to a phone's browser,
+    // which shows its controls on one. A double click's second click is the
+    // full screen's; dblclick takes the first one's flip back.
     video.addEventListener("click", (e) => {
-      if (full() !== wrap || video.getBoundingClientRect().bottom - e.clientY < 48) return;
+      // A click of its own forgets an earlier one's flip; a double click's
+      // second click leaves it for dblclick.
+      if (e.detail <= 1) video.flipped = 0;
+      if (e.detail > 1 || video.getBoundingClientRect().bottom - e.clientY < 48) return;
+      if (full() !== wrap && e.pointerType === "touch") return;
       const was = video.paused;
-      setTimeout(() => { if (video.paused === was) flip(video); }, 0);
+      video.flipping = setTimeout(() => {
+        video.flipping = 0;
+        if (video.paused !== was) return;
+        flip(video);
+        video.flipped = Date.now();
+      }, 0);
     });
     const sync = () => {
       const on = full() === wrap;
@@ -538,6 +669,7 @@ cursor:text;user-select:text;-webkit-user-select:text}
       cap.flip = setTimeout(() => { if (!String(getSelection())) flip(video); }, 300);
     });
     sync();
+    syncs.push(sync);
     steps(video, wrap, cap);
     wrap.addEventListener("pointerenter", () => { hovered = wrap; });
     wrap.addEventListener("pointerleave", () => { if (hovered === wrap) hovered = null; });
@@ -553,6 +685,7 @@ cursor:text;user-select:text;-webkit-user-select:text}
       if (!video.paused) mark(video);
     });
     video.addEventListener("play", () => {
+      if (toast.textContent === PRESS_PLAY) toast.classList.remove("on");
       wrap.classList.remove("picking");
       video.pending = null;
       if (video.point) { video.point = null; place(video); }
@@ -570,6 +703,11 @@ cursor:text;user-select:text;-webkit-user-select:text}
     });
     for (const ev of ["pause", "seeked", "play"]) video.addEventListener(ev, () => mark(video, true));
     video.addEventListener("loadedmetadata", () => place(video));
+    // Only a video played to its end goes on: one moved to its end on pause
+    // (a link to its last frame, the keys, the strip) stays where it was put.
+    video.addEventListener("seeking", () => { if (video.paused) video.sought = true; });
+    video.addEventListener("play", () => { video.sought = false; });
+    video.addEventListener("ended", () => { if (inRow && !video.sought) playNext(video); });
     new ResizeObserver(() => place(video)).observe(video);
   }
 
@@ -580,8 +718,26 @@ cursor:text;user-select:text;-webkit-user-select:text}
   document.addEventListener("fullscreenchange", () => {
     const el = document.fullscreenElement;
     if (!el || el.tagName !== "VIDEO" || !el.parentNode.classList.contains("vw")) return;
-    el.parentNode.requestFullscreen().catch(() => {});
+    // The stage first, the wrapper after: moving the video out of the page
+    // while it is the one on the screen would end the full screen.
+    const wrap = el.parentNode;
+    stage.requestFullscreen().then(() => onStage(wrap), () => {});
   });
+
+  // The checkbox, in the page's heading, where there is more than one video.
+  const heading = document.querySelector("h1");
+  if (heading && many) {
+    const label = document.createElement("label");
+    label.className = "inrow";
+    label.title = "When a video ends, the next one starts — in full screen too";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.addEventListener("change", () => setRow(box.checked));
+    label.append(box, "Play in a row");
+    heading.appendChild(label);
+    rowViews.push(() => { box.checked = inRow; });
+    box.checked = inRow;
+  }
 
   function open() {
     const {v, t, p} = parse();

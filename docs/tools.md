@@ -111,8 +111,8 @@ terminal only — with:
   video's own frame from its top left corner, black bars left out, so the same
   on any screen) and copies the link at once; the link also ends with
   `&u=<path>`, the product's page the video shows at that second; 🔗 copies it without a point, and
-  ⛶ goes full screen with these buttons still on it (a click on the picture
-  pauses there, and ✕ or Esc leaves). Send the link to Claude
+  ⛶ goes full screen with these buttons still on it (✕ or Esc leaves).
+  A click on the picture plays and pauses, on the page and in full screen. Send the link to Claude
   with what to change there: `demo.py at <link>` (which `/sdemo`, step 2
   and every fix session know to run) names the scenario and the step at that second and cuts out the
   frame with the point marked, for the session to look at.
@@ -127,6 +127,11 @@ terminal only — with:
   always): space or K play and pause, ← → or J L five seconds, `[` `]` the
   step before or after, `,` `.` a frame on pause, `<` `>` the speed (kept
   for the next visit), M the sound, F full screen. ⛶'s tooltip lists them.
+- **Play in a row**, a checkbox in the page's heading, on by default: when a
+  video ends the next one starts, on the page and in full screen alike; a
+  video folded away (an earlier version) is passed over. In full screen ⏭
+  turns it on and off. The choice is kept for the next visit. An iPhone's
+  own full-screen player stops at the end of its video.
 
 Each feature has one demo page, `/__sclaude/demo/<feature>/`, with every demo
 it ever had, as versions: a full demo and the deltas recorded before it — a

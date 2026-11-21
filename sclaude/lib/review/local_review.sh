@@ -185,8 +185,14 @@ local_review_run() {
   # A pull request read in blocks (review_blocks.sh): the journal counts
   # the block's runs apart, and its first read reads its files whole.
   local -x SCLAUDE_REVIEW_BLOCK="" SCLAUDE_REVIEW_READ=""
+  # What a GitHub run on this head left unopened (review_github_followup in
+  # review_gate.sh): "<base> <run> <attempt>", and the files in
+  # LOCAL_REVIEW_FILES. One pass over their changes, recorded as that run's
+  # (SCLAUDE_REVIEW_FOLLOWS, record in local_review.py).
+  local follow="${LOCAL_REVIEW_FOLLOW:-}"
+  local -x SCLAUDE_REVIEW_FOLLOWS="$follow"
   local block="" first=""
-  if declare -F blocks_active >/dev/null && blocks_active "$wt"; then
+  if [[ -z "$follow" ]] && declare -F blocks_active >/dev/null && blocks_active "$wt"; then
     block="$(blocks_id "$wt")"
     SCLAUDE_REVIEW_BLOCK="$block"
     python3 "$LIB/review/local_review.py" first "$journal" "$head" "$pr" 2>/dev/null && first=1
@@ -217,7 +223,7 @@ local_review_run() {
     fi
     SCLAUDE_REVIEW_READ="${first:+first}"
   fi
-  if [[ -z "$first" ]] && python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
+  if [[ -z "$first" && -z "$follow" ]] && python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
     python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
@@ -226,7 +232,13 @@ local_review_run() {
   # range again.
   last="$(python3 "$LIB/review/local_review.py" since "$journal" "$head" "$pr" 2>/dev/null || true)"
   local merges="" since_last=""
-  if [[ -n "$first" ]]; then
+  if [[ -n "$follow" ]]; then
+    base="${follow%% *}"
+    local -a files=()
+    mapfile -t files <<<"${LOCAL_REVIEW_FILES:-}"
+    local quoted; quoted="$(printf "'%s' " "${files[@]//\'/\'\\\'\'}")"
+    scope="only these files, which the automatic review on GitHub over the commits since the last review did not open: ${quoted% }. What the branch's own commits in that range changed in them, each commit read whole: \`git log --first-parent --no-merges -p $base..$head -- ${quoted% }\`"
+  elif [[ -n "$first" ]]; then
     # A block's first read: its own files whole, its criteria, its place
     # among the other blocks — or, the last, the seams.
     base="$(blocks_base "$wt")"
@@ -277,6 +289,8 @@ local_review_run() {
   fi
 
   local earlier began new more cap pass=1 round retried="" caught_up="" read_by=""
+  # A follow-up is itself the reading of what was left: none after it.
+  [[ -n "$follow" ]] && caught_up=1
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
   answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears

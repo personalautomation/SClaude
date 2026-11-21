@@ -13,7 +13,8 @@
 #   * the development: the pull request's diff up to its first round, per
 #     file, and the time from its first commit to that round;
 #   * the rounds: the review's journal (JOURNAL in local_review.py), a row a
-#     pass, GitHub's runs among them, in order of time;
+#     pass, GitHub's runs among them, in order of time; what a GitHub run
+#     opened, from its job's log kept beside it (review_log.py);
 #   * the fixes: `git diff` from one round's head to the next one's (the last
 #     to the tree's HEAD), each hunk placed by its line in the newer version,
 #     so a place keeps its spot as the file grows around it;
@@ -180,6 +181,10 @@ def rounds_of(tree, pr):
                     "more": bool(done[-1].get("more")) if done else False, "stopped": not done,
                     "sessions": [r["session"] for r in done if r.get("session")],
                     "spent": [r["session"] for r in rows if r.get("spent") and r.get("session")],
+                    # A GitHub run's conversation, kept from its job's log
+                    # (review_log.py): what it opened, as a session's.
+                    "logs": [(r["log"], r.get("root")) for r in rows
+                             if r.get("source") == "github" and r.get("log") and r["log"] != "gone"],
                     "seq": j + 1, "bseq": count[block] if block is not None else None})
     # A GitHub run on a head read the whole pull request: every round on
     # that head is GitHub's, whatever a local pass beside it opened.
@@ -751,8 +756,8 @@ def lineage(rounds, fixes, threads):
     A chain closes at the first round after its last fix or thread that
     read it whole and found nothing there: every thread of it settled, the
     round neither stopped nor cut short at its cap (`more`), all its files
-    that are still there opened (a GitHub run, which leaves no transcript
-    here, taken as read; a file the fixes removed asks no reading),
+    that are still there opened (a GitHub run whose log is not kept here
+    taken as read; a file the fixes removed asks no reading),
     and no thread of that round on its lines — unless that round's own
     fixing then lands on it, which keeps it going. After that a change there is
     something new and starts an icicle of its own — except a thread on the
@@ -854,7 +859,7 @@ RANK = {"part": 1, "diff": 2, "whole": 3}
 READ_WHOLE = 2000  # lines the Read tool gives without a limit
 
 
-def seen_files(tree, sessions, paths, lines=None):
+def seen_files(tree, sessions, paths, lines=None, logs=()):
     """The files of the pull request a round's passes opened — read (Read,
     Grep), named in a command (git diff -- it, cat, sed), or shown as a diff
     header in a command's output — in the passes' transcripts and their
@@ -862,63 +867,67 @@ def seen_files(tree, sessions, paths, lines=None):
     how far: "whole" (a Read of all of it: no offset or limit, the file
     within what one Read gives, by `lines`), "diff" (its changes shown) or
     "part" (a slice, a search, a name in a command). None when no pass left
-    a transcript here (a GitHub run): what it read is not known. A pass that
-    found nothing in a file it never opened says nothing about it."""
+    a transcript here: what it read is not known. A GitHub run's
+    conversation is read from its job's log (`logs`, (file, checkout) pairs
+    review_log.py keeps), its paths taken from the checkout it ran in. A pass
+    that found nothing in a file it never opened says nothing about it."""
     folder = os.path.join(claude_usage.ROOT, claude_usage.project_name(tree))
     found, any_read = {}, False
     wanted = set(paths)
-    root = tree.rstrip("/") + "/"
+    here = tree.rstrip("/") + "/"
 
     def saw(p, how):
         if RANK[how] > RANK.get(found.get(p), 0):
             found[p] = how
+    sources = []
     for sid in sessions:
-        files = [os.path.join(folder, sid + ".jsonl")]
+        sources.append((os.path.join(folder, sid + ".jsonl"), here))
         try:
             sub = os.path.join(folder, sid, "subagents")
-            files += [os.path.join(sub, n) for n in os.listdir(sub) if n.endswith(".jsonl")]
+            sources += [(os.path.join(sub, n), here) for n in os.listdir(sub) if n.endswith(".jsonl")]
         except OSError:
             pass
-        for path in files:
-            try:
-                fh = open(path, encoding="utf-8")
-            except OSError:
-                continue
-            any_read = True
-            with fh:
-                for line in fh:
-                    if '"tool_use"' not in line and '"tool_result"' not in line:
+    sources += [(os.path.join(tree, f), (r or "").rstrip("/") + "/") for f, r in logs if f and r]
+    for path, root in sources:
+        try:
+            fh = open(path, encoding="utf-8")
+        except OSError:
+            continue
+        any_read = True
+        with fh:
+            for line in fh:
+                if '"tool_use"' not in line and '"tool_result"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                content = (e.get("message") or {}).get("content")
+                if not isinstance(content, list):
+                    continue
+                for b in content:
+                    if not isinstance(b, dict):
                         continue
-                    try:
-                        e = json.loads(line)
-                    except ValueError:
-                        continue
-                    content = (e.get("message") or {}).get("content")
-                    if not isinstance(content, list):
-                        continue
-                    for b in content:
-                        if not isinstance(b, dict):
-                            continue
-                        if b.get("type") == "tool_use":
-                            # The file tools name a file by its absolute path.
-                            inp = b.get("input") or {}
-                            text = json.dumps(inp, ensure_ascii=False).replace(root, "")
-                            whole = None
-                            if b.get("name") == "Read" and not inp.get("offset") and not inp.get("limit"):
-                                whole = str(inp.get("file_path") or "").replace(root, "")
-                            for p in wanted:
-                                if p in text and named(p, text):
-                                    # Its change counts as read only where a diff of it
-                                    # was shown (DIFF_HEADER, below): a command naming
-                                    # git diff may print counts or names alone.
-                                    saw(p, "whole" if p == whole and (lines or {}).get(p, 0) <= READ_WHOLE else "part")
-                        elif b.get("type") == "tool_result":
-                            c = b.get("content")
-                            c = c if isinstance(c, str) else " ".join(
-                                x.get("text") or "" for x in c or [] if isinstance(x, dict))
-                            for p in DIFF_HEADER.findall(c):
-                                if p in wanted:
-                                    saw(p, "diff")
+                    if b.get("type") == "tool_use":
+                        # The file tools name a file by its absolute path.
+                        inp = b.get("input") or {}
+                        text = json.dumps(inp, ensure_ascii=False).replace(root, "")
+                        whole = None
+                        if b.get("name") == "Read" and not inp.get("offset") and not inp.get("limit"):
+                            whole = str(inp.get("file_path") or "").replace(root, "")
+                        for p in wanted:
+                            if p in text and named(p, text):
+                                # Its change counts as read only where a diff of it
+                                # was shown (DIFF_HEADER, below): a command naming
+                                # git diff may print counts or names alone.
+                                saw(p, "whole" if p == whole and (lines or {}).get(p, 0) <= READ_WHOLE else "part")
+                    elif b.get("type") == "tool_result":
+                        c = b.get("content")
+                        c = c if isinstance(c, str) else " ".join(
+                            x.get("text") or "" for x in c or [] if isinstance(x, dict))
+                        for p in DIFF_HEADER.findall(c):
+                            if p in wanted:
+                                saw(p, "diff")
     return found if any_read else None
 
 
@@ -1206,7 +1215,9 @@ def build(tree):
     for r in rounds:
         sessions = r["sessions"]
         # A stopped pass said nothing that counts: it read nothing either.
-        how = {} if r["stopped"] else seen_files(tree, sessions, paths, r["lines"]) if r.get("source") != "github" else None
+        # A GitHub run whose log is not kept here read what is not known.
+        how = {} if r["stopped"] else seen_files(tree, sessions, paths, r["lines"], r["logs"]) \
+            if r.get("source") != "github" or r["logs"] else None
         r["seen"] = None if how is None else sorted(how)
         r["how"] = how
     for k, h in enumerate(fixes):
@@ -1277,6 +1288,7 @@ def build(tree):
         r["cost"] = round(costs[i], 2) if i in costs else None
         r.pop("sessions", None)
         r.pop("spent", None)
+        r.pop("logs", None)
     hands = hands_of(tree, rounds, threads)
     # The review blocks the pull request is read in, when it is: each
     # changed file is in one, and the page groups the columns by them.

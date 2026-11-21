@@ -122,6 +122,16 @@ the network. Each of those reruns the review once the limit resets, stops step 4
 the review to this machine — never to a fixing session. It also reads the code-review skill's own result line,
 for findings that reached no thread.
 
+Once a run has answered, sclaude keeps the review's conversation from its job's
+log: it shows on the review map which files the run opened, and the files the
+commits since the last review changed that the run never opened are read by
+one short pass on this machine. Nothing more is needed for it than the full
+output. The run's answer comes from its last result's structured output:
+`found`, `resolved` (a list), `unthreaded`, `full_rerun` and `complete`, as the reference
+workflow's JSON schema names them; where its delta began, from the
+`base_sha` of the `.claude-review/open-findings.json` it hands the review
+(the journal's previous head when there is none).
+
 ## Installation
 
 ```bash

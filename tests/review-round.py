@@ -1268,7 +1268,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # out) and says what it was asked.
     def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
                     auto=False, exited=False, entry=False, skippable=True, open_count=3, known="",
-                    stubs=""):
+                    stubs="", unread=None):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -1281,12 +1281,28 @@ echo "watcher=[$SESSION_WATCHER]"
             json.dump({"steps": {"review": review}} if review else {}, fh)
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
+        # A head to follow up (review_github_followup reads HEAD).
+        if not os.path.isdir(os.path.join(wt, ".git")):
+            for cmd in (["git", "init", "-q"], ["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
+                                                "commit", "-q", "--allow-empty", "-m", "head"]):
+                subprocess.run(cmd, cwd=wt, capture_output=True)
+        # What the GitHub run on the head did not open (local_review.py's
+        # github-unread), for the pass that follows it up; none by default.
+        fake_journal = os.path.join(fake, "review/local_review.py")
+        if unread is None:
+            if os.path.exists(fake_journal):
+                os.remove(fake_journal)
+        else:
+            with open(fake_journal, "w") as fh:
+                fh.write("import sys\ncmd = sys.argv[1]\n"
+                         "if cmd == 'github-unread':\n    print(%r)\n    sys.exit(0)\n"
+                         "sys.exit(0 if cmd == 'github-sync' else 1)\n" % unread)
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(["review_close_gate", "review_back_edge", "review_leave_run", "review_enough_close", "review_session_since",
-                                "review_stuck_say", "review_report_unshown"])
+                                "review_stuck_say", "review_report_unshown", "review_github_followup"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
-                 'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
+                 'local_review() { echo "REVIEWED${LOCAL_REVIEW_FOLLOW:+ FOLLOW=$LOCAL_REVIEW_FOLLOW FILES=$LOCAL_REVIEW_FILES}" >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
                  'local_review_count() { echo COUNTED >&2; echo %s; }\nlocal_review_done() { %s; }\n'
                  'review_report() { echo REPORT; }\nreview_fallback_switch() { echo QUOTA; return 1; }\n'
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
@@ -1318,6 +1334,20 @@ echo "watcher=[$SESSION_WATCHER]"
     check("entry-dirty-to-session", "RC=1" in out and "EDGE review_close review" in out, True)
     out, left = enough_gate("", "clean", 0, mode="github", entry=True)
     check("entry-github-clean-closes", "REVIEWED" not in out and "RC=0" in out, True)
+    # A GitHub run whose delta left files unopened: one pass here reads them,
+    # as that run's, and what it finds is the session's; nothing found, the
+    # gate asks the pull request again and closes. Once a head.
+    out, left = enough_gate("", "clean", 0, mode="github", unread="abc 12 1\nb.py")
+    check("followup-runs", "REVIEWED FOLLOW=abc 12 1 FILES=b.py" in out, True)
+    check("followup-edge", "EDGE review_close review_run files the review in Actions did not open" in out, True)
+    check("followup-nothing-closes", "RC=0" in out and "EDGE review_run review_close nothing found" in out, True)
+    check("followup-once", out.count("REVIEWED"), 1)
+    out, left = enough_gate("", "clean", 2, mode="github", unread="abc 12 1\nb.py")
+    check("followup-found-to-session", "RC=1" in out and "leaves 2 finding(s) open" in out, True)
+    out, left = enough_gate("", "clean", 0, mode="github", unread="abc 12 1")
+    check("followup-nothing-unread", "REVIEWED" not in out and "RC=0" in out, True)
+    out, left = enough_gate("now", "clean", 0, mode="github", unread="abc 12 1\nb.py")
+    check("followup-not-after-search-ended", "FOLLOW=" not in out, True)
     out, left = enough_gate("", "dirty", 0, mode="github", entry=True, skippable=False)
     check("entry-own-session-not-skipped", "RC=1" in out and "the step's own session" in out, True)
     check("entry-own-session-no-quota-wait", "QUOTA" not in out, True)

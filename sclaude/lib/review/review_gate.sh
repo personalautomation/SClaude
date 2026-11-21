@@ -33,6 +33,52 @@ review_leave_run() {
   cycle_edge "$wt" review_run review_close "$@"
 }
 
+
+# The files a review run on GitHub did not open, read here: after the run on
+# this head has answered, its log (review_log.py) says what it opened, and a
+# delta that left some of the files its commits changed unopened has them
+# read by one pass on this machine, as a review here follows up its own
+# (unread in local_review.py). Once a head: the pass is journaled as the
+# run's (followed). Prints the pass's count of what is open; 1 when nothing
+# was to read, or the log could not tell.
+#
+#   review_github_followup <wt> <pr> <edges>
+review_github_followup() {
+  local wt="$1" pr="$2" edges="$3" journal head got
+  journal="$(review_journal "$wt")"
+  head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
+  python3 "$LIB/review/local_review.py" followed "$journal" "$head" "$pr" 2>/dev/null && return 1
+  # GitHub stores a job's log as the job ends, and may not give it whole for
+  # a little while after: a minute of looks, then the map asks again later.
+  if ! python3 "$LIB/review/local_review.py" github-sync "$wt" "$pr" 6 2>/dev/null; then
+    warn "  The review's runs or their logs could not be read: what the automatic review opened is not known, and files it may have skipped are not read here." >&2
+    return 1
+  fi
+  local rc=0
+  got="$(python3 "$LIB/review/local_review.py" github-unread "$wt" "$journal" "$head" "$pr" 2>/dev/null)" || rc=$?
+  # 4: no run of the workflow reviewed this head — the gate says why itself.
+  [[ "$rc" -eq 4 ]] && return 1
+  if [[ "$rc" -ne 0 ]]; then
+    warn "  What the automatic review on GitHub opened is not known (its job's log is not here, or the branch was rewritten): files it may have skipped are not read here." >&2
+    return 1
+  fi
+  [[ "$got" == *$'\n'* ]] || return 1
+  local follow="${got%%$'\n'*}" files="${got#*$'\n'}"
+  echo "" >&2
+  info "  The automatic review on GitHub did not open $(wc -l <<<"$files") file(s) the commits since the last review changed: reading their changes here." >&2
+  [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_close review_run sclaude "files the review in Actions did not open" >&2
+  # Its stdout is the count: what else is said goes to stderr.
+  local count
+  count="$(LOCAL_REVIEW_FOLLOW="$follow" LOCAL_REVIEW_FILES="$files" local_review "$wt" "$pr")" || count="failed"
+  if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+    warn "  That pass did not complete; its log: $(local_review_file "$wt" .log). The review in Actions stands as it answered." >&2
+    [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not complete" >&2
+    return 1
+  fi
+  [[ "$count" -eq 0 && "$edges" -eq 1 ]] && cycle_edge "$wt" review_run review_close sclaude "nothing found" >&2
+  echo "$count"
+}
+
 # Where a feature stands as step 4 opens, by the ways its history wrote:
 # `out` before the step (the pull request just opened, or nothing written),
 # `gate` where an entry was left in the gate, `session` at the session —
@@ -124,7 +170,7 @@ review_close_gate() {
   # A pull request too big for one review is cut into blocks first, once
   # (review_blocks.sh): read in blocks, it is read here.
   declare -F blocks_ensure >/dev/null && blocks_ensure "$wt" "$pr"
-  local local_due=0
+  local local_due=0 followed_head=""
   [[ "$(project_review_mode "$wt")" == "local" ]] && local_due=1
   if [[ -n "$entry" && -n "${REVIEW_KNOWN_COUNT:-}" ]]; then
     local_due=0
@@ -178,6 +224,29 @@ review_close_gate() {
               return 1
             fi ;;
         esac
+      fi
+    fi
+    # The review in Actions answered a head, reading a delta it did not open
+    # all of: those files are read here first, once a head — unless the
+    # person ended the search, which looks for nothing new.
+    # Not on a head the pull request does not carry (nothing to post on), a
+    # review skipped on purpose or a word that could not be read. A red check
+    # does not hold it: the session goes on from the next head, and the next
+    # run reads only the commits after this one — what this delta skipped
+    # would be read by nobody.
+    if [[ "$local_due" -eq 0 && "$word" != pending && "$word" != unfinished && "$word" != unknown \
+          && "$word" != unreviewed && "$word" != *"not pushed"* && "$word" != *"still names"* ]] \
+        && [[ "$followed_head" != "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]] \
+        && [[ "$(project_review_mode "$wt")" == github && -z "$(review_enough "$wt")" ]]; then
+      followed_head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+      local fcount
+      if fcount="$(review_github_followup "$wt" "$pr" "$edges")"; then
+        if [[ "$fcount" -gt 0 ]]; then
+          back_from=review_run
+          word="open: the review on this machine leaves $fcount finding(s) open"
+          break
+        fi
+        continue
       fi
     fi
     # The review in Actions handed back before it finished, and nothing else

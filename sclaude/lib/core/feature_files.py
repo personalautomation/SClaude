@@ -47,6 +47,7 @@ FILES = [
     ("review-unfinished.head", "the head the review on GitHub was run again on once by itself after it did not finish; a second unfinished run on it asks the person, and `<head> go-on` once they chose on the way in to go on with it unreviewed, so the close right after does not ask again (taken once) (review_close_gate)"),
     ("review-fallback", "GitHub's review could not run (Claude's limit, no Actions minutes, a runner without network): the feature is reviewed on this machine (review_fallback_set, FALLBACK_FILE)"),
     ("review-blocks.json", "the cut of a pull request too big for one review into review blocks (blocks_file, FEATURE_BLOCKS in review_blocks.py, BLOCKS_FILE in pr_context.py)"),
+    ("review-logs", "a review run on GitHub's conversation, one file a run and attempt, kept from its job's log once it has answered: what it opened, for the review map and for the pass that reads what it did not open (LOG_DIR in review_log.py)"),
     ("review-rounds.jsonl", "the review's journal, one line per run wherever it ran (review_journal, JOURNAL in local_review.py)"),
     ("local-review<suffix>", "a review run on this machine: -unposted.json "
                              "findings GitHub would not take yet, -answer.md the last answer, -refused.md every answer it refused, -blocks.md the cut's answer, .log its stderr"),

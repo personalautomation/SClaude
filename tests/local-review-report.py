@@ -84,6 +84,32 @@ try:
     runs = review_report.local_runs(wt)
     check("passes-one-run", ([r["start"].hour for r in runs], runs[-1]["seconds"]),
           ([10, 11, 12], 540.0))
+    # A GitHub run's findings posted as a comment, told from its log, are
+    # found ones too: the round carries them for the found column.
+    unthreaded_journal = os.path.join(feature, "unthreaded.jsonl")
+    with open(unthreaded_journal, "w") as fh:
+        fh.write(json.dumps({"at": "2026-10-15T13:00:00+00:00", "seconds": 300, "head": "h9",
+                             "source": "github", "run": 5, "attempt": 1}) + "\n")
+        fh.write(json.dumps({"told": True, "run": 5, "attempt": 1, "log": "gone", "unthreaded": 2}) + "\n")
+    saved_journal = review_report.JOURNAL
+    review_report.JOURNAL = os.path.relpath(unthreaded_journal, wt)
+    try:
+        gh_runs = review_report.local_runs(wt)
+    finally:
+        review_report.JOURNAL = saved_journal
+    check("unthreaded-carried", [r["unthreaded"] for r in gh_runs], [2])
+    check("unthreaded-in-round", [g["unthreaded"] for g in review_report.rounds([], gh_runs)], [2])
+    # A rerun of the run counts in place of its earlier attempt.
+    with open(unthreaded_journal, "a") as fh:
+        fh.write(json.dumps({"at": "2026-10-15T13:00:00+00:00", "seconds": 300, "head": "h9",
+                             "source": "github", "run": 5, "attempt": 2}) + "\n")
+        fh.write(json.dumps({"told": True, "run": 5, "attempt": 2, "log": "gone", "unthreaded": 1}) + "\n")
+    review_report.JOURNAL = os.path.relpath(unthreaded_journal, wt)
+    try:
+        gh_runs = review_report.local_runs(wt)
+    finally:
+        review_report.JOURNAL = saved_journal
+    check("unthreaded-rerun-in-place", [r["unthreaded"] for r in gh_runs], [1])
     # A pass's cost is Claude Code's own account in its transcript, under the
     # worktree's directory; a run's is the sum of its passes that have one,
     # and a pass with no session or no transcript is not priced.

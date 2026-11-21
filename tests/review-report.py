@@ -275,10 +275,11 @@ with tempfile.TemporaryDirectory() as wt:
     check("heading-groups", [w for w in ("── find", "── fix", "── result") if w in text],
           ["── find", "── fix", "── result"])
     # The review's time and cost; the workflow's review is not priced, and
-    # the run still going has not finished either.
+    # the run still going has not finished either — nor said what it found:
+    # waiting, not zeros.
     check("find", [rows[k][1:6] for k in "1234"],
           [["12m", "—", "4", "0", "0"], ["22m", "—", "3", "2", "1"],
-           ["7m", "—", "3", "2", "1"], ["w", "w", "0", "0", "0"]])
+           ["7m", "—", "3", "2", "1"], ["w", "w", "w", "w", "w"]])
     # Session 2 answered three runs: a label each, no row of its sum.
     check("fix-session", [rows[k][6] for k in "1234"], ["1", "2.1", "2.2", "2.3"])
     # A launch on the run it began after; the one running now has not

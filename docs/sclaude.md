@@ -494,8 +494,10 @@ command, or shown as a diff header in a command's output; a round that never
 opened a place's files is drawn, until one does, as a dashed outline of
 its width faintly filled, and once a later round read it as a thin stem
 (`STEM`, reached through a short `neck`) — as are the rows a place bridges
-to the place above it, in that place's colour — and a
-GitHub run, with no transcript here, counts as having read everything. A
+to the place above it, in that place's colour. A GitHub run's
+conversation is read from its job's log, which sclaude keeps once the run
+has answered (`review_log.py`, the journal's `log`); a run whose log
+GitHub no longer gives counts as having read everything. A
 file a round's head does not have is in its `absent` (`absent_files`, the
 end's in `absentEnd`): a removed file's hunk keeps its path (`+++ /dev/null`
 in `hunks`), a chain needs only its files still there opened to close, and

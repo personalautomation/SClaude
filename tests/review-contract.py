@@ -94,6 +94,19 @@ if schema:
     check("schema-requires-complete", "complete" in parsed.get("required", []), True)
     check("schema-complete-is-boolean",
           (parsed.get("properties", {}).get("complete") or {}).get("type"), "boolean")
+    # What review_log.py reads of the run's answer from its job's log.
+    for key in ("found", "resolved", "full_rerun", "complete"):
+        check("schema-has-%s" % key, key in parsed.get("required", []), True)
+        check("doc-names-%s" % key, "`%s`" % key in section, True)
+
+# Where the run's delta began, which review_log.py reads from the file the
+# workflow hands the review.
+check("template-base-sha", "base_sha:" in template and ".claude-review/open-findings.json" in template, True)
+check("doc-base-sha", "`base_sha`" in section and "open-findings.json" in section, True)
+
+# The run's conversation in its job's log, which review_log.py reads.
+check("template-full-output", "show_full_output: true" in template, True)
+check("doc-full-output", "show_full_output:\ntrue" in section or "show_full_output: true" in section, True)
 
 # It parses as YAML, when PyYAML is there to say so.
 try:

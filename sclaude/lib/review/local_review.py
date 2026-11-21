@@ -440,6 +440,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     # issue's summary lists it among the feature's sessions.
     if os.environ.get("SCLAUDE_REVIEW_SESSION"):
         row["session"] = os.environ["SCLAUDE_REVIEW_SESSION"]
+
     tag(row)
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -458,6 +459,13 @@ def tag(row):
     if os.environ.get("SCLAUDE_REVIEW_BLOCK"):
         row["block"] = os.environ["SCLAUDE_REVIEW_BLOCK"]
         row["read"] = os.environ.get("SCLAUDE_REVIEW_READ") or "delta"
+    # A pass reading what a GitHub run left unopened (SCLAUDE_REVIEW_FOLLOWS,
+    # "<base> <run> <attempt>"), recorded or spent: the same run's, one round
+    # with it in the report and on the map, which group rows by base, head
+    # and run.
+    follows = os.environ.get("SCLAUDE_REVIEW_FOLLOWS", "").split()
+    if len(follows) == 3 and follows[1].isdigit() and follows[2].isdigit():
+        row.update({"base": follows[0], "run": int(follows[1]), "attempt": int(follows[2]), "followup": True})
 
 
 def block_now():
@@ -494,16 +502,21 @@ def rows(journal, with_spent=False, pr=None, local_only=False, block=None):
     before the journal named one); with <local_only>, the passes here alone,
     each a conversation to price; with <block>, that review block's alone
     (review_blocks.py). The one reader of the file; the report reads it
-    through here."""
+    through here. A GitHub run's row takes what a later `told` row says of
+    it (github_logs), which appends rather than rewrite a row another
+    writer may be appending beside; owed() alone marks a row in place."""
     if str(pr) in ("", "null", "None"):
         pr = None
-    out = []
+    out, told = [], {}
     try:
         with open(journal, encoding="utf-8") as fh:
             for line in fh:
                 try:
                     row = json.loads(line)
                 except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("told") and row.get("run"):
+                    told[(row["run"], row.get("attempt") or 1)] = row
                     continue
                 if isinstance(row, dict) and row.get("head") and row.get("at") \
                         and (with_spent or not row.get("spent")) \
@@ -513,6 +526,10 @@ def rows(journal, with_spent=False, pr=None, local_only=False, block=None):
                     out.append(row)
     except OSError:
         pass
+    for row in out:
+        said = told.get((row.get("run"), row.get("attempt") or 1)) if row.get("source") == "github" else None
+        if said:
+            row.update({k: v for k, v in said.items() if k not in ("told", "run", "attempt")})
     return out
 
 
@@ -537,20 +554,132 @@ def github_runs(journal, runs, pr=""):
     new = [r for r in runs if not r.get("running") and r.get("id") and r.get("head")
            and (r.get("conclusion") or "").lower() == "success"
            and (r["id"], r.get("attempt") or 1) not in have]
-    if not new:
+    if new:
+        os.makedirs(os.path.dirname(journal), exist_ok=True)
+        with open(journal, "a", encoding="utf-8") as fh:
+            for r in new:
+                row = {"at": r["start"].isoformat(timespec="seconds"), "seconds": int(r["seconds"]),
+                       "head": r.get("head"), "source": "github", "run": r["id"],
+                       "attempt": r.get("attempt") or 1}
+                # The attempt's own start: a rerun keeps its run's `at`.
+                if r.get("began"):
+                    row["began"] = r["began"].isoformat(timespec="seconds")
+                if pr:
+                    row["pr"] = str(pr)
+                fh.write(json.dumps(row) + "\n")
+    github_logs(journal)
+
+
+def github_logs(journal, tries=1):
+    """The workflow's runs in the journal told what each did, from its job's
+    log (review_log.py), in a `told` row after it that rows() reads into
+    it: `log` and `root` for the review map's reads, the run's base (as its
+    log names it, else the head of its pull request reviewed before it, by
+    time), and its answer
+    as a local pass records it — `new`, `resolved`, `unthreaded` (findings it
+    could not post as threads, which the report counts), `read` (`first` for the
+    pull request's first run and a whole rerun, `delta` otherwise),
+    `complete`. Once a run: `log` is the kept file, or `gone` when GitHub
+    no longer has it; a log not whole yet is asked again next time.
+    Appended, never rewritten: a pass here appends its row meanwhile."""
+    tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(journal)))))
+    every = sorted(rows(journal), key=lambda e: e["at"])
+    # A run told before `unthreaded` was kept is told again from the log it
+    # kept, without asking GitHub.
+    todo = [r for r in every if r.get("source") == "github" and r.get("run")
+            and ("log" not in r or (r["log"] != "gone" and "unthreaded" not in r))]
+    if not todo:
         return
-    os.makedirs(os.path.dirname(journal), exist_ok=True)
-    with open(journal, "a", encoding="utf-8") as fh:
-        for r in new:
-            row = {"at": r["start"].isoformat(timespec="seconds"), "seconds": int(r["seconds"]),
-                   "head": r.get("head"), "source": "github", "run": r["id"],
-                   "attempt": r.get("attempt") or 1}
-            if pr:
-                row["pr"] = str(pr)
-            fh.write(json.dumps(row) + "\n")
+    import review_log  # noqa: E402 — only when a run is to be read
+    for row in todo:
+        if "log" in row:
+            try:
+                with open(os.path.join(tree, row["log"]), encoding="utf-8") as fh:
+                    said = review_log.summary([json.loads(line) for line in fh if line.strip()])
+            except (OSError, ValueError):
+                said = None
+            if said is None:
+                continue
+            said["log"], code = row["log"], 0
+        else:
+            said, code = review_log.fetch(tree, row["run"], row.get("attempt") or 1, tries)
+        if code == 3:
+            told = {"log": "gone"}
+        elif said is not None:
+            # The run's own base when its log names it; else the head of
+            # its pull request reviewed before it.
+            # A base equal to the run's head is kept: the run read nothing new
+            # (a rerun on a head already marked); github_unread passes it over
+            # for the newest other run on the head, and alone it answers no paths.
+            if "base" in said:
+                base = said["base"]
+            else:
+                before = [e["head"] for e in every if e["at"] < row["at"] and e["head"] != row["head"]
+                          and (not row.get("pr") or not e.get("pr") or str(e["pr"]) == str(row["pr"]))]
+                base = before[-1] if before else None
+            told = {"log": said["log"], "root": said["root"], "complete": said["complete"],
+                    "read": "first" if said["full_rerun"] or not base else "delta"}
+            if base:
+                told["base"] = base
+            if said["found"] is not None:
+                told["new"] = said["found"]
+            if said["resolved"] is not None:
+                told["resolved"] = said["resolved"]
+            told["unthreaded"] = said.get("unthreaded") or 0
+        else:
+            continue
+        told.update({"told": True, "run": row["run"], "attempt": row.get("attempt") or 1})
+        with open(journal, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(told) + "\n")
 
 
-def unread(cwd, base, head, sessions):
+def followed(journal, head, pr=""):
+    """Whether the files a GitHub run on <head> did not open were read
+    here already (a pass with `followup`)."""
+    return any(r["head"] == head and r.get("followup") for r in rows(journal, pr=pr or None))
+
+
+UNKNOWN = "unknown"
+
+
+def github_unread(cwd, journal, head, pr=""):
+    """The files the commits since the last review changed that the
+    newest workflow run on <head> other than a rerun that read nothing (one
+    alone answers no paths) did not open, as unread() tells them of a pass
+    here, with the run's base and its id: (paths, base, run, attempt), no
+    paths for a run that read the whole pull request. None when no run of
+    the workflow reviewed <head>; UNKNOWN when one did and it cannot be said
+    — its log is not kept here, or the branch was rewritten since its base."""
+    ran = [r for r in rows(journal, pr=pr or None) if r["head"] == head and r.get("source") == "github"]
+    if not ran:
+        return None
+    # A run that read nothing (its base its head: a rerun on a head already
+    # marked) settles nothing an earlier run on the head left unopened.
+    read = [r for r in ran if r.get("base") != head]
+    if not read:
+        return [], "", ran[-1]["run"], ran[-1].get("attempt") or 1
+    ran = read
+    # The newest run on the head other than one that read nothing counts —
+    # a whole rerun among them: an older attempt's log says nothing of what
+    # a rerun opened. A rerun keeps its run's `at`
+    # (review_runs dates a run by its creation): by the attempt's own start,
+    # `began`, and the attempt for rows written before it was kept.
+    r = max(ran, key=lambda x: (x.get("began") or x["at"], x.get("attempt") or 1))
+    if r.get("log") in (None, "gone"):
+        return UNKNOWN
+    if r.get("read") != "delta" or not r.get("base"):
+        return [], "", r["run"], r.get("attempt") or 1
+    # A branch rewritten since: the range is not the run's delta any more.
+    try:
+        if subprocess.run(["git", "-C", cwd, "merge-base", "--is-ancestor", r["base"], head],
+                          capture_output=True, timeout=30).returncode != 0:
+            return UNKNOWN
+    except (OSError, subprocess.SubprocessError):
+        return UNKNOWN
+    return unread(cwd, r["base"], head, "", [(r["log"], r.get("root"))]), r["base"], r["run"], r.get("attempt") or 1
+
+
+def unread(cwd, base, head, sessions, logs=()):
     """What a pass over the commits since the last review was to read and
     did not open: the files the branch's own commits changed in the range
     (merges brought the rest, reviewed elsewhere), still there at the head,
@@ -558,7 +687,8 @@ def unread(cwd, base, head, sessions):
     (review_map.seen_files, as the review map tells a file read). A pass
     reading a range picks what it opens, and a fix's change to a file it
     passes over would go unread by every pass after it. Nothing when the
-    conversation left no transcript here: what it read is not known."""
+    conversation left no transcript here: what it read is not known. A
+    GitHub run's is read from its job's log (`logs`, as seen_files takes)."""
     try:
         listed = subprocess.run(["git", "-C", cwd, "log", "--first-parent", "--no-merges", "--name-only",
                                  "--format=", "%s..%s" % (base, head)],
@@ -574,7 +704,7 @@ def unread(cwd, base, head, sessions):
     if not changed:
         return []
     import review_map  # noqa: E402 — the map's own reader, only when needed
-    seen = review_map.seen_files(cwd, [x for x in sessions.split(",") if x], changed)
+    seen = review_map.seen_files(cwd, [x for x in sessions.split(",") if x], changed, logs=logs)
     if seen is None:
         return []
     return [p for p in changed if p not in seen]
@@ -595,7 +725,8 @@ def owed(journal):
             row = json.loads(lines[i])
         except ValueError:
             continue
-        if "spent" in row:
+        # A spent pass reviewed nothing; a `told` row is a GitHub run's.
+        if "spent" in row or row.get("told"):
             continue
         row["more"] = True
         lines[i] = json.dumps(row, ensure_ascii=False)
@@ -651,6 +782,37 @@ def main(argv):
         return record(*args)
     if cmd == "spent" and len(args) in (5, 6, 7):
         return spent(*args)
+    if cmd == "followed" and len(args) in (2, 3):
+        return 0 if followed(*args) else 1
+    if cmd == "github-unread" and len(args) in (3, 4):
+        # The paths, one a line, after a line "<base> <run> <attempt>";
+        # exit 4 when no run reviewed the head, 3 when one did and what it
+        # opened is not known (1 is a crash's).
+        got = github_unread(*args)
+        if got is None:
+            return 4
+        if got == UNKNOWN:
+            return 3
+        paths, base, run, attempt = got
+        print("%s %s %s" % (base, run, attempt))
+        for path in paths:
+            print(path)
+        return 0
+    if cmd == "github-sync" and len(args) == 3:
+        # The workflow's finished runs on <branch> into the journal, as the
+        # report adds them, each told from its log — waiting up to <tries>
+        # looks for one not whole yet (review_github_followup).
+        cwd, pr, tries = args
+        import review_report  # noqa: E402 — the report's reader of the runs
+        branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+                                capture_output=True, text=True, timeout=10).stdout.strip()
+        runs = review_report.review_runs(cwd, branch, review_report.pr_created(cwd, pr))
+        if runs is None:
+            return 1
+        journal = os.path.join(cwd, JOURNAL)
+        github_runs(journal, runs, pr)
+        github_logs(journal, int(tries))
+        return 0
     if cmd == "unread" and len(args) == 4:
         for path in unread(*args):
             print(path)

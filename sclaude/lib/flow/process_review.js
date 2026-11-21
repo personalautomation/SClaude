@@ -1139,7 +1139,7 @@ const reviewMap = (() => {
       // The round that checks it: the first after its last fix or thread
       // that opened its files still there. A round that never opened them
       // found nothing there by not looking (review_map.py's seen; unknown
-      // for a GitHub run, which leaves no transcript here, and taken as
+      // for a GitHub run whose log is not kept here, and taken as
       // read): the icicle goes on through it — still to be checked.
       const opened = (k) => !rounds[k].seen || p.files.every((f) => gone(k, f) || rounds[k].seen.includes(f));
       let v = p.lastR + 1;

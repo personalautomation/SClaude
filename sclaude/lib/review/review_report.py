@@ -389,7 +389,7 @@ def review_runs(cwd, branch, since=None):
         began = began if began and began >= a else a
         seconds = (b - began).total_seconds() if b and b > began else 0.0
         if running or seconds >= SKIP_SECONDS:
-            out.append({"start": a, "seconds": seconds, "running": running,
+            out.append({"start": a, "began": began, "seconds": seconds, "running": running,
                         "head": r.get("headSha") or None, "id": r.get("databaseId"),
                         "attempt": r.get("attempt") or 1, "conclusion": r.get("conclusion") or "",
                         "source": "github"})
@@ -431,6 +431,15 @@ def local_runs(cwd, since=None, root=None, pr=None):
         # run of its range, or as a run of its own, with nothing found.
         costs = [c for c in (pass_cost(cwd, s, root) for s in r.pop("sessions")) if c is not None]
         r["cost"] = sum(costs) if costs else None
+        # Findings a run on GitHub could only post as a comment: found all
+        # the same, with no thread to count them by.
+        # A rerun's attempt counts in place of the one before it.
+        last = {}
+        for row in r["rows"]:
+            key = row.get("run") if row.get("source") == "github" else id(row)
+            if key not in last or (row.get("attempt") or 1) >= (last[key].get("attempt") or 1):
+                last[key] = row
+        r["unthreaded"] = sum(int(row.get("unthreaded") or 0) for row in last.values())
         del r["rows"]
     return out
 
@@ -518,7 +527,8 @@ def rounds(found, runs):
     if runs:
         out = [{"at": r["start"], "seconds": r.get("seconds"), "running": r["running"],
                 "cost": r.get("cost"), "head": r.get("head"), "threads": [],
-                "stopped": bool(r.get("stopped")), "block": r.get("block")}
+                "stopped": bool(r.get("stopped")), "block": r.get("block"),
+                "unthreaded": r.get("unthreaded") or 0}
                for r in runs]
         for t in found:
             i = 0
@@ -871,6 +881,7 @@ def main():
     people = sessions(cwd, since)
 
     total = len(found)
+    unthreaded = sum(g.get("unthreaded", 0) for g in groups)
     fixed, nofix, opened = count(found, "fixed"), count(found, "no fix"), count(found, "open")
     near_all = sum(1 for t in found if t["near_fix"])
     repeats = [t for t in found if t["repeat"]]
@@ -878,7 +889,7 @@ def main():
     # recorded answer said nothing: both left out of the trend — a stopped
     # pass read as "the last round found nothing", converging.
     done = [g for g in groups if not g["running"] and not g.get("stopped")]
-    per_round = [len(g["threads"]) for g in done]
+    per_round = [len(g["threads"]) + g.get("unthreaded", 0) for g in done]
     columns = []
     # The runs whose findings are still being decided: a fix going on them,
     # or findings nobody has begun. Read for the share acted on below.
@@ -917,7 +928,10 @@ def main():
         table, totals = [], {"ftook": [], "fcost": [], "xtook": [], "xcost": []}
         for i, g in enumerate(groups):
             ts = g["threads"]
-            counts = (len(ts), sum(1 for t in ts if t["near_fix"]), sum(1 for t in ts if t["repeat"]))
+            # Found is every finding, a thread or not: one posted as a comment
+            # (unthreaded) was found as much as one on a line.
+            counts = (len(ts) + g.get("unthreaded", 0), sum(1 for t in ts if t["near_fix"]),
+                      sum(1 for t in ts if t["repeat"]))
             # Declined is the fix's decision, as it reads the findings.
             result = (count(ts, "no fix"), count(ts, "fixed"), count(ts, "open"))
             # A stopped round is no finished one for the phone's brief either:
@@ -954,8 +968,12 @@ def main():
             # thread stands now.
             if session == WAIT or i in pending:
                 result = (WAIT,) * 3
+            # A run still going has not said what it found: what it posted so
+            # far, or nothing yet, read as its count — zeros as "found
+            # nothing". The total counts every thread there is.
+            shown = (WAIT,) * 3 if g["running"] else counts
             table.append((g["at"].astimezone().strftime("%m-%d %H:%M") if g["at"] else "",
-                          ftook, fcost) + counts + (session, xtook, xcost) + result)
+                          ftook, fcost) + shown + (session, xtook, xcost) + result)
         # The last round is yellow while anything is open: it is where the
         # review stands, and review_close_gate says no more of it.
         last = len(table) - 1 if opened else None
@@ -986,7 +1004,7 @@ def main():
             if key == "fcost":
                 return review_cost([g for g, (c, _) in zip(groups, cells) if c != WAIT])
             return show(sum(known)) if known else ""
-        print(row(("", column("ftook", hours), column("fcost", dollars), len(found), near_all,
+        print(row(("", column("ftook", hours), column("fcost", dollars), len(found) + unthreaded, near_all,
                    len(repeats), "", column("xtook", hours), column("xcost", dollars),
                    nofix, fixed, opened), rnd="total", blk="" if blocks else None))
         print("")
@@ -1013,12 +1031,15 @@ def main():
     settled = [t for t in found
                if t["fate"] != "open" and t["round"] not in unsettled][-ACTED_ON_SAMPLE:]
     acted = (count(settled, "fixed") / float(len(settled))) if settled else None
-    if found:
+    if found or unthreaded:
         left = sum(1 for t in found if t["left_open"])
         line = "  Fixed %d of %d (%s) · without a fix %d (%s)" % (
             fixed, total, pct(fixed, total), nofix, pct(nofix, total))
         if left:
             line += ", %d waiting for you to resolve on GitHub" % left
+        if unthreaded:
+            # Their fix is the session's, with no thread to tell how it ended.
+            line += " · %d more posted as a comment, outside these shares" % unthreaded
         if acted is not None:
             line += " · acted on %d%% of the last %d" % (round(acted * 100), len(settled))
         if any(g["running"] for g in groups):

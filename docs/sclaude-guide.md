@@ -220,7 +220,8 @@ resolves it on GitHub itself. The
 report after each round has a row per review run, in the order of the cycle:
 `find` — what the run found and what it cost, the pass on this machine as
 Claude Code accounts for it (`—` for GitHub's review, which sclaude cannot
-price); `fix` — the session that fixed those findings, its time and cost, and
+price), findings GitHub's review could only post as a comment counted with
+the threads; `fix` — the session that fixed those findings, its time and cost, and
 what it declined; and `result` — fixed, waiting. When the pull request is
 read in review blocks, a `block` column after the round's number says which
 block the run read and its round there — `3.7`, block 3's seventh round, as
@@ -284,7 +285,12 @@ sclaude. The review on GitHub is treated the same way when it hands back
 before it finished (its findings check says "review did not finish"): no
 session opens for it; it runs again once by itself, and if that does not
 finish either you are asked whether to go on with the head unreviewed — `n`
-runs it again, `[g]` ticked does so by itself. While a review session works in its own tab, the
+runs it again, `[g]` ticked does so by itself. A review on GitHub that read
+only the commits since the last one and never opened some of the files they
+changed has those files read by one short pass on this machine, before any
+session opens; what it finds goes to the session with the rest, and on the
+review map that round shows which files it read. With the search ended, no
+such pass runs. While a review session works in its own tab, the
 terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`
 too; `[s]` said then ends the search, so after that session sclaude asks
 whether to check its fixes — or checks them, with `[g]` ticked.

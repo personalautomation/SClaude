@@ -5,11 +5,7 @@
 # pass over the seams.
 #
 # The state keeps where the review stands — `blocks.total` (the blocks and
-# the seams, 0 when the pull request is read whole), `blocks.current`,
-# `blocks.base` (the commit the review reads from, when it is not where the
-# branch left main: nothing writes it now; it is left in the one feature
-# joined after its first part was reviewed under the scheme before, and goes
-# with blocks_base's reading of it once that review closes);
+# the seams, 0 when the pull request is read whole), `blocks.current`;
 # the cut itself is review-blocks.json beside it, there while blocks are read
 # and taken off after the seams. Meanwhile the review runs on this machine
 # (project_review_mode): a review in Actions reads the whole pull request and
@@ -53,19 +49,9 @@ blocks_label() {
 }
 blocks_total() { state_get "$1/.sclaude/local/feature/state.json" blocks.total 2>/dev/null || true; }
 
-# The commit the review reads from: where the branch left main — or the one
-# recorded, `blocks.base`, which only the one feature joined after its first
-# part was reviewed under the scheme before still has. At the user's decision
-# it stays until that review closes, so the part is not read again; then the
-# state read and the field go, and this is the merge-base alone.
+# The commit the review reads from: where the branch left main.
 blocks_base() {
-  local wt="$1" base
-  base="$(state_get "$wt/.sclaude/local/feature/state.json" blocks.base 2>/dev/null || true)"
-  if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git -C "$wt" cat-file -e "$base^{commit}" 2>/dev/null; then
-    echo "$base"
-  else
-    git -C "$wt" merge-base origin/main HEAD 2>/dev/null
-  fi
+  git -C "$1" merge-base origin/main HEAD 2>/dev/null
 }
 
 # The cut, once, as step 4 starts on a pull request: nothing when the
@@ -82,9 +68,9 @@ blocks_ensure() {
   local wt="$1" pr="$2" state="$1/.sclaude/local/feature/state.json"
   local total base lines from size file try faults="" n seen
   [[ -n "$pr" && "$pr" != null ]] || return 0
-  # The pull request this belongs to, claimed the first time one is seen —
-  # with the base parts_join left, decided or not: another pull request
-  # (one merged, reopened) starts afresh, with neither.
+  # The pull request this belongs to, claimed the first time one is seen,
+  # decided or not: another pull request (one merged, reopened) starts
+  # afresh.
   seen="$(state_get "$state" blocks.pr 2>/dev/null || true)"
   if [[ -n "$seen" && "$seen" != null && "$seen" != "$pr" ]]; then
     blocks_clear "$wt"
@@ -151,9 +137,8 @@ blocks_ensure() {
 }
 
 # What a pull request decided before left, taken out whole — the cut beside
-# the state, the blocks' kept records and the base — for the new one to be
-# decided afresh: a pull request opened after a merged one reads from main,
-# however the merged one was merged.
+# the state and the blocks' kept records — for the new one to be
+# decided afresh.
 #
 #   blocks_clear <wt>
 blocks_clear() {

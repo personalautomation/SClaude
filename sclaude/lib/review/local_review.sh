@@ -249,9 +249,7 @@ local_review_run() {
     # already read whose files they changed.
     [[ -n "$block" ]] && scope+="$(blocks_touched "$wt" "$base" "$head")"
   else
-    # From where the branch left main — or, for a feature whose first parts
-    # were reviewed in pull requests of their own, from where they left it
-    # (blocks_base): what was reviewed there is not read again.
+    # From where the branch left main.
     if declare -F blocks_base >/dev/null; then base="$(blocks_base "$wt")"
     else base="$(git -C "$wt" merge-base origin/main "$head" 2>/dev/null)"; fi
     [[ -n "$base" ]] || return 1

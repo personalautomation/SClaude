@@ -320,7 +320,6 @@ esac
     check("joined-state", (st["parts"].get("done"), st.get("branch"), st.get("step")), (True, "feat/t", "pr"))
     check("joined-ranges", (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")),
           ("%s..%s" % (base, tip1), "%s..%s" % (tip1, tip2)))
-    check("joined-reads-from-main", (st.get("blocks") or {}).get("base"), None)
     out, rc = run_bash('parts_open "%s" || echo ONE; parts_joining "%s" || echo JOINED; step_label pr "%s"' % (spath, spath, wt),
                        wt, bin_dir)
     check("after-the-join-one-feature", (out.split()[:2], "part" in out.splitlines()[-1]), (["ONE", "JOINED"], False))
@@ -366,7 +365,6 @@ esac
           [0, 0])
     check("synced-ranges", (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")),
           ("%s..%s" % (base, old1), "%s..%s" % (old1, lg2)))
-    check("synced-reads-from-main", (st.get("blocks") or {}).get("base"), None)
     check("synced-on-the-features-branch", (git("branch", "--show-current", cwd=wt), st.get("branch")), ("lg", "lg"))
     write_state(joined)
     git("switch", "-q", "feat/t", cwd=wt)

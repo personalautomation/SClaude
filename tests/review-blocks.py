@@ -368,31 +368,29 @@ try:
     sh('blocks_clear "%s"' % wt)
     with open(state) as fh:
         check("blocks-clear-takes-the-cut", (os.path.exists(cut), json.load(fh).get("blocks")), (False, {}))
-    # The base parts_join left belongs to the first pull request seen after
-    # it, decided small or not; another one starts without it.
+    # The first pull request seen is claimed and decided; another one
+    # starts afresh.
     small = 'project_get() { echo 99999; }; history_add() { :; }\n'
+    based = small + 'blocks_base() { echo %s; }\n' % base
     with open(state, "w") as fh:
-        json.dump({"pr": 10, "blocks": {"base": base}}, fh)
-    sh(small + 'blocks_ensure "%s" 10' % wt)
+        json.dump({"pr": 10}, fh)
+    sh(based + 'blocks_ensure "%s" 10' % wt)
     with open(state) as fh:
-        check("the-joins-base-kept-for-the-first-pr", json.load(fh)["blocks"], {"base": base, "pr": 10, "total": 0})
-    sh(small + 'blocks_ensure "%s" 11' % wt)
+        check("the-first-pr-claimed-and-decided", json.load(fh)["blocks"], {"pr": 10, "total": 0})
+    sh(based + 'blocks_ensure "%s" 11' % wt)
     with open(state) as fh:
-        got = json.load(fh)["blocks"]
-        check("another-pr-starts-without-it", (got.get("base"), got.get("pr")), (None, 11))
-    # Review off: nothing decided, the pull request claimed all the same.
-    with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-        json.dump({"review": "off"}, fh)
+        check("another-pr-starts-afresh", json.load(fh)["blocks"], {"pr": 11, "total": 0})
+    # Review off: nothing decided, the pull request claimed all the same —
+    # with a base at hand, so that only the review's setting stops it.
+    off = based + 'project_get() { [[ "$1" == review ]] && echo off || echo 99999; }\n'
     with open(state, "w") as fh:
-        json.dump({"pr": 12, "blocks": {"base": base}}, fh)
-    sh(small + 'blocks_ensure "%s" 12; blocks_ensure "%s" 13' % (wt, wt))
+        json.dump({"pr": 12, "blocks": {}}, fh)
+    sh(off + 'blocks_ensure "%s" 12; blocks_ensure "%s" 13' % (wt, wt))
     with open(state) as fh:
         check("review-off-still-claims-the-pr", json.load(fh)["blocks"], {"pr": 13})
-    with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-        json.dump({"review": "github"}, fh)
     # A new pull request is decided afresh: the old one's cut does not hold it.
     with open(state, "w") as fh:
-        json.dump({"pr": 8, "blocks": {"total": 3, "current": 3, "pr": 7, "base": base, "1": {"steps": {}}}}, fh)
+        json.dump({"pr": 8, "blocks": {"total": 3, "current": 3, "pr": 7, "1": {"steps": {}}}}, fh)
     review_blocks.save(cut, good)
     out = sh('project_get() { echo 99999; }; blocks_base() { echo %s; }; blocks_ensure "%s" 8; echo DONE' % (base, wt))
     with open(state) as fh:
@@ -405,7 +403,7 @@ try:
     with open(jj, "w") as fh:
         fh.write(json.dumps({"at": "2026-11-12T10:00:00", "head": base, "pr": "9", "block": "1", "read": "first"}) + "\n")
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     stub = 'review_journal() { echo %s; }; review_enough() { :; }; ' % jj
     head = git(wt, "rev-parse", "HEAD")
     check("a-changed-block-is-stale",
@@ -424,11 +422,11 @@ try:
           sh(done + stub + 'local_review_done "%s" && echo DONE || echo PENDING' % wt).strip().splitlines()[-1], "PENDING")
     feed = 'ask_feed() { echo "FEED $*"; }; history_add() { :; }; '
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     out = sh(stub + feed + 'project_get() { echo 99999; }; blocks_next "%s" t; echo END' % wt)
     check("a-fresh-block-closes-quietly", ("not read whole" in out, "FEED say 🧱 Block 1/3 of PR #9 reviewed." in out), (False, True))
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     review_blocks.save(cut, good)
     out = sh(stub + feed + 'project_get() { echo 1; }; blocks_next "%s" t; echo END' % wt)
     with open(state) as fh:
@@ -437,7 +435,7 @@ try:
                json.load(fh)["blocks"]["current"]), (2, True, 2))
     # The seams' close is told to the topic, as each block's is.
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 3, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 3, "pr": 9}}, fh)
     review_blocks.save(cut, good)
     out = sh(stub + feed + 'project_get() { echo 1; }; blocks_next "%s" t; echo END' % wt)
     check("the-seams-closing-tell-the-topic",
@@ -529,7 +527,7 @@ try:
         fh.write("#!/bin/sh\necho RAN >> %s/claude.log\ncat %s\n" % (tmp, answer))
     os.chmod(os.path.join(bindir, "claude"), 0o755)
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     split_sh = ('PATH=%s:$PATH; LOCAL_REVIEW_MODEL=m; local_review_file() { echo %s/split$2; }; '
                 'blocks_base() { echo %s; }; history_add() { echo "HISTORY $*"; }; ask_feed() { echo "FEED $*"; }; '
                 % (bindir, tmp, base))
@@ -552,7 +550,7 @@ try:
     # inside it: nothing the split says may land there.
     review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     # (history_add and ask_feed write to their files; the stubs above echo.)
     out = sh(split_sh + 'history_add() { :; }; ask_feed() { :; }; project_get() { echo 55; }; said="$(blocks_split "%s" %s 2>/dev/null)"; echo "STDOUT=[$said]"' % (wt, merged))
     check("a-split-says-nothing-on-stdout", [l for l in out.splitlines() if l.startswith("STDOUT=")], ["STDOUT=[]"])
@@ -562,7 +560,7 @@ try:
     # read; a failed session is no fault to mend and marks nothing.
     review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     with open(os.path.join(bindir, "claude"), "w") as fh:
         fh.write("#!/bin/sh\nn=$(cat %s/calls 2>/dev/null || echo 0); n=$((n+1)); echo $n > %s/calls\n"
                  "echo \"$2\" > %s/prompt$n\n[ \"$FAIL\" = all ] && exit 1\n[ $n = 1 ] && exit 1\ncat %s\n"
@@ -572,7 +570,7 @@ try:
           ("SPLIT" in out, "did not hold" in open(os.path.join(tmp, "prompt2")).read()), (True, False))
     review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     sh(split_sh + 'export FAIL=all; project_get() { echo 55; }; blocks_split "%s" %s' % (wt, merged))
     check("sessions-that-failed-mark-nothing", "tried" in review_blocks.load(cut), False)
     with open(answer, "w") as fh:
@@ -587,7 +585,7 @@ try:
     with open(os.path.join(bindir, "claude"), "w") as fh:
         fh.write("#!/bin/sh\necho '{' > %s\ncat %s\n" % (cut, answer))
     with open(state, "w") as fh:
-        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9}}, fh)
     out = sh(split_sh + 'project_get() { echo 55; }; blocks_split "%s" %s || echo AS-IT-IS' % (wt, merged))
     check("a-crash-of-the-check-is-said-and-marks-nothing",
           ("Checking the split of block 1 failed" in out, "AS-IT-IS" in out, "does not hold" in out,

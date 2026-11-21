@@ -97,8 +97,7 @@ run_step() {
   # anything below asks which branch, which pull request. A plan split after
   # step 2 began is taken up here too, its work so far becoming part 1. The
   # whole accepted and the parts not yet one branch — a run cut off after the
-  # Accept, or a feature whose first parts were reviewed in pull requests of
-  # their own — they become one first (parts_join), which goes on itself.
+  # Accept — they become one first (parts_join), which goes on itself.
   [[ "$step" == code ]] && { parts_capture "$wt" || return 0; }
   if [[ "$step" == code || "$step" == pr || "$step" == review ]] && parts_open "$state"; then
     if parts_joining "$state"; then

@@ -89,7 +89,6 @@ FIELDS = [
     ("blocks.current", (FEATURE,), "the review block being read"),
     ("blocks.label_before", (FEATURE,), "yes or no: the pull request carried no-review before the cut, as GitHub said; the seams leave the label on only on yes"),
     ("blocks.pr", (FEATURE,), "the first pull request seen since the node was emptied, decided or not: it owns the cut; another empties the node"),
-    ("blocks.base", (FEATURE,), "the commit the review reads from, when it is not where the branch left main: written by nothing now, left in the one feature joined after its first part was reviewed under the scheme before; goes once that review closes"),
     ("blocks.<k>.steps", (FEATURE,), "what step 4 held while block k was read, kept when the next began"),
 
     # --- a reopened feature ----------------------------------------------------

@@ -193,6 +193,20 @@ PLANNING = [
     ("sed --in-place --follow-symlinks 's/a/b/' " + SCRATCH + "/p/a", DENY),
     ("sed -i 's/a/b/' " + SCRATCH + "/p/a && rm -rf src", DENY),
     ("ls | xargs sed -i 's/a/b/' " + SCRATCH + "/p/a", DENY),
+    # A variable set to the scratchpad reaches only what it names: not a
+    # second file in the tree, not a value from elsewhere, not a chain that
+    # may skip the assignment, not a single-quoted name bash takes literally.
+    ("S=" + SCRATCH + "/p; sed -i 's/a/b/' $S/a.md src/a.ts", DENY),
+    ("S=src; sed -i 's/a/b/' $S/a.md", DENY),
+    ("S=" + SCRATCH + "/p || true; sed -i 's/a/b/' $S/a.md", DENY),
+    ("S=$(pwd); sed -i 's/a/b/' $S/a", DENY),
+    ("S=" + SCRATCH + "/p; sed -i 's/a/b/' '$S/a.md'", DENY),
+    ("S=" + SCRATCH + "/p; S=src; sed -i 's/a/b/' $S/a.md", DENY),
+    ("S=" + SCRATCH + "/p && cp $S/a.md src/a.md", DENY),
+    ("false && S=" + SCRATCH + "/p; sed -i 's/a/b/' $S/a.md", DENY),
+    ("false && F=" + SCRATCH + "/p/a; echo x > $F", DENY),
+    ("S=" + SCRATCH + "/p | sed -i 's/a/b/' $S/a.md", DENY),
+    ("S=" + SCRATCH + "/p; sed -i 's/a/b/' $S/../../../home/x", DENY),
     ("echo x >> src/a.sclaude/local/feature/friction.log; ls", DENY),
     ("echo x >> ../other/.sclaude/local/feature/friction.log; ls", DENY),
     # The log in a chain: the other links are still judged.
@@ -269,6 +283,20 @@ PLANNING = [
     ("sed -i 's/a/b/' " + SCRATCH + "/p/a.md", ALLOW),
     ("sed -i.bak -e 's/a/b/' " + SCRATCH + "/p/a.md && cat " + SCRATCH + "/p/a.md", ALLOW),
     ("sed -ni '1p' " + SCRATCH + "/p/a.md", ALLOW),
+    # The same through a variable set to the scratchpad earlier in the
+    # command, as a redirection already may: a live planning session fetched
+    # a comment into `$S/…`, edited it with sed -i there and was refused.
+    ("S=" + SCRATCH + "/p; sed -i 's/a/b/' $S/a.md", ALLOW),
+    # An assignment that opens the command surely runs, so a `;` after it
+    # skips nothing; it used to be refused all the same.
+    ("F=" + SCRATCH + "/a; true; cat > $F", ALLOW),
+    ("cd x; S=" + SCRATCH + "/p; ls || true; sed -i 's/a/b/' $S/a.md", ALLOW),
+    ("ls && S=" + SCRATCH + "/p && sed -i 's/a/b/' $S/a.md", ALLOW),
+    ("S=" + SCRATCH + "/p && cp docs/a.md \"$S/a.md\"", ALLOW),
+    ("S=" + SCRATCH + "/p; gh api repos/o/r/issues/comments/1 --jq .body > $S/b.md; "
+     "diff <(cat $S/a.md) $S/b.md >/dev/null && echo UNCHANGED; "
+     "sed -i 's/one/two/' ${S}/b.md; grep -c two $S/b.md && "
+     "gh api -X PATCH repos/o/r/issues/comments/1 -F body=@$S/b.md --jq .html_url", ALLOW),
     # An append to the log in a chain, and mkdir of its folder before it:
     # live sessions lost entries to both.
     ("echo 'a; b' >> .sclaude/local/feature/friction.log; ls -la ~/.npm", ALLOW),
@@ -356,7 +384,7 @@ PLANNING = [
     ("F=" + SCRATCH + "/a cat > $F", DENY),
     ("cat > $F && F=" + SCRATCH + "/a", DENY),
     ("false || F=" + SCRATCH + "/a && cat > $F", DENY),
-    ("F=" + SCRATCH + "/a; true; cat > $F", DENY),
+    ("false && F=" + SCRATCH + "/a; cat > $F", DENY),
     ("x | F=" + SCRATCH + "/a && cat > $F", DENY),
     ("F=" + SCRATCH + "/a && cat > $F/../../../../home/u/f", DENY),
     ("echo x > " + SCRATCH + "/../../home/u/myapp/f.ts", DENY),

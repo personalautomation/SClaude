@@ -606,35 +606,54 @@ def assigned_target(target, tokens):
 
     So, strictly: NAME is assigned exactly once in the whole command, as a
     command of its own (`F=x cat > $F` is a prefix, and bash expands the
-    redirection before that assignment applies), at the start of a chain of
-    `&&` that reaches the redirection (a `;` only right after the assignment).
-    Any `||`, `|` or `;` elsewhere before the redirection would let it run
-    with the assignment skipped or in a subshell, and `$F` would then be
-    whatever the environment holds. Between the two, nothing sets NAME
+    redirection before that assignment applies), followed by `&&` or `;` (a
+    `|` or `&` after it runs it in a subshell). The assignment surely runs
+    before the redirection: either only `;` stands before it, in which case
+    anything may stand between the two (a live session's `S=…; gh … > $S/a;
+    diff …; sed -i … $S/a` was refused for the `;` in the middle), or
+    nothing but `&&` stands from the start of the command to the
+    redirection. `false && F=x; cat > $F` runs the redirection with the
+    assignment skipped, and `$F` is then whatever the environment holds.
+    Between the two, nothing sets NAME
     again: `export F=…`, `read F`, `printf -v F`, `F+=…` (RESETTERS); a bare
     word that only happens to be the name (`--json` for `json=…`) is not that. The value, and
     whatever follows the variable in the target, hold no `$` or backtick: a
     substitution is not a literal. Anything else is None, and stays a write.
     """
-    match = VARIABLE_TARGET.match(target)
-    if not match or tokens is None:
+    if tokens is None:
         return None
-    name = match.group(1) or match.group(2)
-    tail = target[match.end():]
-    if "$" in tail or "`" in tail:
-        return None
-    # Line breaks after `&&` continue the chain; tokenize() reads each as `;`.
-    kept = []
-    for token in tokens:
-        if not (token == ";" and kept and kept[-1] == "&&"):
-            kept.append(token)
-    tokens = kept
-    redirect = None
     for i, token in enumerate(tokens):
         if token.endswith(">" + target) or (
                 token == target and i and tokens[i - 1] in (">", ">>", "&>", "&>>")):
-            redirect = i
-            break
+            return assigned_value(target, tokens, i)
+    return None
+
+
+def assigned_value(word, tokens, use):
+    """The literal path `word`, which starts with `$NAME` and stands at
+    tokens[use], is sure to be there, or None — by assigned_target()'s rules.
+
+    The redirection was the only place this was read, and a live planning
+    session set a scratchpad path in a variable, redirected into it, then ran
+    `sed -i … $S/file` on the same file and was refused: the refusal it got
+    names this form as one that passes. cp and sed -i operands are read here
+    too (resolved_words()).
+    """
+    match = VARIABLE_TARGET.match(word)
+    if not match:
+        return None
+    name = match.group(1) or match.group(2)
+    tail = word[match.end():]
+    if "$" in tail or "`" in tail:
+        return None
+    # Line breaks after `&&` continue the chain; tokenize() reads each as `;`.
+    kept, redirect = [], None
+    for i, token in enumerate(tokens):
+        if i == use:
+            redirect = len(kept)
+        if not (token == ";" and kept and kept[-1] == "&&"):
+            kept.append(token)
+    tokens = kept
     if redirect is None:
         return None
     separators = ("|", "||", "&&", ";", "&")
@@ -647,9 +666,11 @@ def assigned_target(target, tokens):
     after = tokens[at + 1] if at + 1 < len(tokens) else None
     if after not in ("&&", ";"):
         return None
-    for i, token in enumerate(tokens[:redirect]):
-        if token in separators and token != "&&" and i != at + 1:
-            return None
+    before = [t for t in tokens[:at] if t in separators]
+    between = [t for t in tokens[at + 2:redirect] if t in separators]
+    if not all(t == ";" for t in before) and (
+            after != "&&" or any(t != "&&" for t in before + between)):
+        return None
     head = None
     for token in tokens[at + 1:redirect]:
         if token in separators:
@@ -665,6 +686,47 @@ def assigned_target(target, tokens):
     if not value or "$" in value or "`" in value:
         return None
     return value + tail
+
+
+def single_quoted(command, name):
+    """Does `$NAME` stand inside single quotes anywhere in the command?
+
+    tokenize() drops the quotes, so `'$S/a'` comes out as the same word as
+    `$S/a`; bash takes the first as a literal name in the current directory.
+    """
+    line = readable(command) or strip_heredocs(command)
+    quote, i = None, 0
+    pattern = re.compile(r"\$(?:" + re.escape(name) + r"(?![A-Za-z0-9_])|\{"
+                         + re.escape(name) + r"\})")
+    while i < len(line):
+        c = line[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            elif pattern.match(line, i):
+                return True
+        elif c == "\\":
+            i += 1
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        i += 1
+    return False
+
+
+def resolved_words(command, tokens, words, start):
+    """The words, each `$NAME…` replaced by the literal assigned_value() is
+    sure of; `start` is where words[0] stands in tokens. A word it cannot be
+    sure of stays as it is, and literal_scratch() refuses it."""
+    out = []
+    for offset, word in enumerate(words):
+        value = None
+        match = VARIABLE_TARGET.match(word)
+        if match and not single_quoted(command, match.group(1) or match.group(2)):
+            value = assigned_value(word, tokens, start + offset)
+        out.append(value or word)
+    return out
 
 
 def writes(command):
@@ -734,21 +796,23 @@ def writes(command):
     # ban on that: `setsid rm`, `command rm`, `timeout 5 rm`, `nice npm install`
     # — verified, all four went through, whereas a bare `rm -rf` was rejected.
     # The parsing is now shared.
-    chains, current = [], []
+    chains, current, starts = [], [], []
     # A sclaude core command is refused for a reason of its own (SCLAUDE_REASON),
     # but only when nothing else in the chain writes: the rest is still read.
     core = False
-    for token in tokens:
+    for i, token in enumerate(tokens):
         if token in ("|", "||", "&&", ";", "&"):
             if current:
                 chains.append(current)
             current = []
             continue
+        if not current:
+            starts.append(i)
         current.append(token)
     if current:
         chains.append(current)
 
-    for raw in chains:
+    for raw, start in zip(chains, starts):
         words = strip_wrappers(raw)
         if not words:
             continue
@@ -768,8 +832,12 @@ def writes(command):
                 and makes_only_allowed(name, raw[len(raw) - len(rest):]):
             # This command alone, like the reading flags above.
             continue
+        # A variable set to a literal earlier in the command is read as that
+        # literal, as for a redirection (assigned_value()).
         if name in ("cp", "sed") and not behind_xargs \
-                and writes_only_scratch(name, raw[len(raw) - len(rest):]):
+                and writes_only_scratch(name, resolved_words(
+                    command, tokens, raw[len(raw) - len(rest):],
+                    start + len(raw) - len(rest))):
             # This command alone, like mkdir and touch above.
             continue
         if name in WRITERS:

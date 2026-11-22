@@ -309,7 +309,7 @@ cmd_resume() {
   [[ -n "$cleanup_left" ]] || workshop_pending "$wt"
 
   if [[ "$step" == "done" ]]; then
-    echo "Feature '$slug' has been through every step."
+    echo "Feature '$slug' is through its session steps."
     # A sync's friction review left open after the steps holds the run as one
     # between steps does (sync_with_main): it comes first.
     local dkey; dkey="$(friction_pending "$fstate" || true)"

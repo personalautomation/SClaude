@@ -5,8 +5,9 @@
 # A session's last message is printed once it is closed, and that message is
 # not the plan: step 1 ends with a report about it. Guarded here:
 #
-#   * after step 1 the approved plan is printed whole, and printed again after
-#     a replan even when its text is the same;
+#   * after step 1 the approved plan is named with its size — criteria and
+#     lines — not printed whole, and named again after a replan even when its
+#     text is the same;
 #   * after a later session nothing is printed while .sclaude/local/feature/plan.md is the
 #     plan printed last;
 #   * a later session that changed the plan gets only the change printed —
@@ -90,8 +91,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # --- step 1 prints the approved plan -------------------------------------
     out = report(wt, "plan", "# Plan\n\n- do it")
-    check("plan-headline", "Approved plan" in out, True)
-    check("plan-body-indented", "  # Plan\n" in out and "  - do it\n" in out, True)
+    check("plan-headline", "Approved plan: .sclaude/local/feature/plan.md · 0 acceptance criteria · " in out, True)
+    check("plan-body-not-printed", "do it" in out, False)
     # The topic gets the fact, not a path to a file it cannot open.
     check("plan-approved-told", fed(), "Plan approved\n")
 
@@ -113,6 +114,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # --- a replan prints the plan again, even unchanged ----------------------
     out = report(wt, "plan", "# Plan\n\n- do it")
     check("replan-prints-again", "Approved plan" in out, True)
+    # The criteria counted, a struck one too: it keeps its identifier.
+    out = report(wt, "plan", "# Plan\n\n## Acceptance criteria\n\n- [ ] AC1. One.\n- [ ] ~~AC2. Two.~~\n")
+    check("plan-criteria-counted", "· 2 acceptance criteria · " in out and "AC1. One" not in out, True)
 
     # --- a feature from before the record: silent, then tracked -------------
     os.remove(os.path.join(wt, ".sclaude/local/feature", "plan.printed"))

@@ -81,6 +81,7 @@ means exactly what it says.
 | `keepawake/widgets.py`, `keepawake/widget_html/` | HTML widgets (Bot API 10.4): the templates, their state within Telegram's 1024 bytes, the switch between them and plain messages |
 | `keepawake/asks.py` | sclaude's questions on the phone and what becomes of their messages |
 | `keepawake/topics.py` | a topic per feature: its record, naming it, deleting it with the feature |
+| `keepawake/tg_journal.py` | the journal of a feature's topic: what the bot and `sclaude-notify` sent, edited and deleted there, and what the person typed, pressed and tapped, one JSON line each in the feature's tree |
 | `keepawake/card_view.py` | the feature's card in its topic |
 | `keepawake/sessions.py` | the steps' sessions: which claude runs where, the list of features |
 | `keepawake/repos.py` | the repositories the bot knows and their features |
@@ -421,6 +422,25 @@ answer or warning takes every earlier one away, so the chat shows at most the
 one that holds now. A line the network kept is tried again on the next turn. The question about forgotten holders goes
 once nothing holds, someone typed, or no session is left; the "until what time?"
 prompt becomes the answer, or goes with its input box when the person leaves it.
+
+**A feature's topic keeps a journal** (`keepawake/tg_journal.py`), since
+Telegram keeps no history the machine can read back. Every call about the
+topic — from the bot (`Bot.call`) or from `sclaude-notify` (its sends and
+deletions, with `--in`) — and every update from it (the daemon's loop) is one
+JSON line in `.sclaude/local/feature/telegram-log.jsonl`: when, which way,
+what (`sendMessage`, `editMessageText`, `deleteMessage`, `sendWidget`,
+`editMessageWidgetData`, `answerWidgetQuery`, a message typed, a button
+pressed, a widget tapped), the topic and the message, the text or caption,
+the buttons' labels, a widget's data, the files' names, and whether Telegram
+took it, with its words when it did not. None of how sclaude talks to
+Telegram is kept: no token, no address, no chat id, no field of a payload named
+like a key, a hash, a signature or the widget's init data, no widget's HTML
+(its size only), no file's bytes. An edit or a deletion names only its
+message: the topic is found in the bot's record of the topic's messages. The
+file is in the feature's tree, out of git, and goes with the tree; a message in
+the main chat, and the topic's deletion after the tree is gone, have no
+feature to go to and are not kept. The retrospective reads it beside the
+terminal for what was said twice or said for nothing.
 
 **Active things can go as widgets** (off by default, below). Bot API 10.4 lets a message carry a
 small HTML widget whose state the bot changes silently (`editMessageWidgetData`)

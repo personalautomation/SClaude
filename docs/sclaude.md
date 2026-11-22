@@ -785,7 +785,9 @@ decided in: step 2 and step 4 both add it to the `User request` comment
 (`### Added during development`, `### Added during review`) and note it in the
 plan. A criterion that has to change is the person's decision: the session
 proposes the wording, and on their yes rewords it in the plan, under the same
-identifier. Once a review decision changed a criterion and only the code knew:
+identifier. Step 2 asks it in the question that settles the change and, on the
+yes, rewrites that line in the issue's criteria comment itself — the person is
+there, so nothing waits for a later question. Once a review decision changed a criterion and only the code knew:
 the automatic QA ticked the old wording. Then the change was noted in the plan
 and left to the person to carry into the issue, and nobody did, with the same
 result. So as the review closes, before QA, sclaude adds a criterion new in the
@@ -1767,8 +1769,16 @@ never offered, as with `off`) from the main repository, and if
 the branch added migrations, the project's promote command first — whether one
 is needed sclaude determines by whether the branch touches the migrations
 directory. The chain breaks off at the first error, so that a promote that did
-not go through does not drag a deploy along with it. The production regression
-follows, and a red one rolls production back (see "Production rollback").
+not go through does not drag a deploy along with it. Each command but a `cd`
+is shown short — its first lines, every line that says something failed, and
+its last — and written whole to `.sclaude/local/feature/logs/ship/`, whose path
+the screen names (`block_quiet.py`): a pull's diffstat and a push hook's checks
+once filled the screen around the one line that mattered. With a terminal
+here the command runs on a terminal of its own, which the keys typed reach, so
+one that asks only on a terminal still asks; with none it is piped, as before,
+and reads the input sclaude was given. A line it leaves without its newline,
+a question, is shown at once. The production
+regression follows, and a red one rolls production back (see "Production rollback").
 A ship that fails is looked into at once, time being dear there: production
 keeps the release it had — a deploy switches it whole — but when the
 promote began, the old code may stand on the new migrations, so production's
@@ -2440,8 +2450,13 @@ sclaude prints it before a review session opens on findings, and whenever
 `sclaude checks` returns on a review run in the session's tab: it writes
 `review-checked` (its exit code, the head, the time), and the review's
 status line in sclaude's tab (`review_pane_keys`) prints the report by it
-and sends it to the topic. A session that took up its next rounds itself
-once left the terminal without a table for three rounds.
+when a round finished since the last table — the session's own commits
+and resolved threads are not one, and printed the same rows again with the
+fix still under way. A session that took up its next rounds itself once left
+the terminal without a table for three rounds. The topic hears a round's
+numbers once, as its fix session closes: the table printed after a pass that
+left findings stays in the terminal, since the session's start says them
+there already.
 
 **What a round cost is in two parts.** `find cost` is the review run's own
 cost: each pass on this machine is a headless session sclaude names, and

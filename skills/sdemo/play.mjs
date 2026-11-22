@@ -14,6 +14,8 @@
 //
 //   export default {
 //     title: "…", viewport: "desktop" | "phone",   (a scenario may set its own)
+//     timezone: "Asia/Tokyo",   (the browser's zone; a scenario may set its own;
+//                                the machine's when left out, and in a live play)
 //     kind: "main" | "delta", change: "…",   (a delta: only what changed)
 //     scenarios: [{
 //       title: "…", as: "<email>", path: "/start",
@@ -602,6 +604,9 @@ async function signIn(context, s) {
 // The viewport a scenario plays at: its own, else the demo's, else desktop.
 const viewportOf = (s, demo) =>
   VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop";
+// The browser's time zone: the scenario's, else the demo's, else the
+// machine's (none given) — a person seen on a page from somewhere else.
+const zoneOf = (s, demo) => s.timezone || demo.timezone || null;
 
 async function scenario(browser, demo, s, i, contexts) {
   // A scenario may set its own viewport: the same path shown on a desktop and
@@ -616,8 +621,9 @@ async function scenario(browser, demo, s, i, contexts) {
   if (!context) {
     // Live, the window is the person's and keeps its own size: the phone's
     // emulation (scale, touch) would not even start with no viewport.
+    const zone = zoneOf(s, demo);
     context = await browser.newContext(LIVE ? { viewport: null }
-      : { ...size, recordVideo: { dir: OUT, size: size.viewport } });
+      : { ...size, ...(zone ? { timezoneId: zone } : {}), recordVideo: { dir: OUT, size: size.viewport } });
     await context.addInitScript(OVERLAY);
     if (LIVE) {
       await context.exposeBinding("__sdemoCtl", (_src, cmd) => {
@@ -732,7 +738,10 @@ function localTime() {
 function sig(s, demo) {
   const look = Array.isArray(s.look) ? s.look : s.look ? [s.look] : [];
   return createHash("sha1").update(JSON.stringify([s.title, s.as, s.path || "/", viewportOf(s, demo),
-    s.shows || "", look, s.why || "", String(s.steps), s.voice ?? null, byHandOf(s)])).digest("hex").slice(0, 16);
+    s.shows || "", look, s.why || "", String(s.steps), s.voice ?? null, byHandOf(s),
+    // The browser's zone, only when one is set: a recording made without
+    // it keeps the signature it had.
+    ...(zoneOf(s, demo) ? [zoneOf(s, demo)] : [])])).digest("hex").slice(0, 16);
 }
 
 // The scenarios taken from the earlier recording (--keep-from), by index:

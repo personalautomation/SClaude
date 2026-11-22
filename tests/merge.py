@@ -119,7 +119,14 @@ if ready_src:
            "^(ready|excused)$" in deploy,
            '[[ "$ready" == excused ]]' in offer_body,
            offer_body.count("$clean")),
-          (True, True, True, 3))
+          (True, True, True, 4))
+    # QA accepted here a moment ago: its pass and its ticked criteria are not
+    # said again over the merge; criteria listed only when one is not ticked.
+    check("merge-says-qa-once",
+          ('"${QA_ACCEPT_SAID:-}" == "$pr"' in offer_body, '"${QA_TICKED_SAID:-}" != "$issue"' in offer_body,
+           "grep -q '^☐' <<<\"$criteria\"" in offer_body,
+           'QA_ACCEPT_SAID="$pr"' in deploy and "QA_ACCEPT_SAID" not in open(os.path.join(ROOT, "sclaude", "lib", "github", "board.sh")).read()),
+          (True, True, True, True))
     check("readiness-in-one-graphql-call",
           ("gh pr view" in view, view.count("gh api graphql"), "viewerCanUpdate}}}" in view),
           (False, 1, True))

@@ -4566,6 +4566,17 @@ try:
         _ledger = state.topic_ledger(77)
         check("sclaude-notify records its message where the bot reads",
               open(_ledger).read() if os.path.exists(_ledger) else None, "4321\n")
+        # And keeps what it sent in the feature's journal of its topic:
+        # the text, the message Telegram gave it, and nothing of how.
+        _jpath = os.path.join(_wt, ".sclaude/local/feature", "telegram-log.jsonl")
+        _jlines = open(_jpath).read().splitlines() if os.path.exists(_jpath) else []
+        _jone = json.loads(_jlines[0]) if _jlines else {}
+        check("sclaude-notify journals its message in the feature",
+              (len(_jlines), _jone.get("method"), _jone.get("thread"), _jone.get("sent"),
+               _jone.get("text"), _jone.get("ok")),
+              (1, "sendMessage", 77, 4321, "<b>hello</b>", True))
+        check("the journal keeps no token, chat or address",
+              [w for w in ("t:k", "chat_id", "127.0.0.1", "api.telegram") if w in (_jlines or [""])[0]], [])
         # In the topic the text stands alone: the topic is the feature.
         _srv.wait(timeout=10)
         _sent = urllib.parse.parse_qs(_srv.stderr.read().strip().splitlines()[-1])

@@ -196,6 +196,14 @@ run_block() {
           | sed -E 's/[.,;:!?]+$//' | tail -1 > "$SCLAUDE_VERCEL_URL_FILE.tmp" \
           && [[ -s "$SCLAUDE_VERCEL_URL_FILE.tmp" ]] && mv "$SCLAUDE_VERCEL_URL_FILE.tmp" "$SCLAUDE_VERCEL_URL_FILE"
         rm -f "$seen" "$SCLAUDE_VERCEL_URL_FILE.tmp"
+      elif [[ -n "${SCLAUDE_BLOCK_LOG:-}" && "$cmd" != cd\ * ]]; then
+        # Shown short, whole in the log (block_quiet.py), on a terminal of its
+        # own when there is one here: a pull's diffstat and a push hook's checks once filled the
+        # screen around the one line that mattered. A `cd` stays here, where
+        # the commands after it run.
+        mkdir -p "$(dirname "$SCLAUDE_BLOCK_LOG")" 2>/dev/null || true
+        echo "== $cmd" >> "$SCLAUDE_BLOCK_LOG" 2>/dev/null || true
+        python3 "$LIB/ship/block_quiet.py" "$SCLAUDE_BLOCK_LOG" "$cmd" || exit 1
       else
         eval "$cmd" || exit 1
       fi

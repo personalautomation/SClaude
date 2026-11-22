@@ -315,6 +315,11 @@ merge_offer() {
     say "${DIM}It $clean${OFF}"
     say "${DIM}The review is what this rests on.${OFF}"
     prompt="Merge it now?"
+  elif [[ "$qa_checked" -eq 1 && "${QA_ACCEPT_SAID:-}" == "$pr" ]]; then
+    # Said a moment ago, as this pull request was handed over for the merge
+    # (QA_ACCEPT_SAID, remind_prod).
+    say "${DIM}PR #$pr $clean${OFF}"
+    prompt="Merge it now?"
   elif [[ "$qa_checked" -eq 1 ]]; then
     say "${BOLD}QA passed issue #$issue — it is in '$QA_DONE'.${OFF}"
     say "${DIM}PR #$pr $clean${OFF}"
@@ -348,10 +353,20 @@ merge_offer() {
     criteria="$(python3 "$LIB/cycle/acceptance.py" --status "$issue" "${REPO:-.}" 2>/dev/null || true)"
   fi
   if [[ -n "$criteria" ]]; then
-    echo ""
-    say "Acceptance criteria in issue #$issue:"
-    while IFS= read -r line; do say "  $line"; done <<<"$criteria"
     unticked="$(python3 "$LIB/cycle/acceptance.py" --unticked "$issue" "${REPO:-.}" 2>/dev/null || true)"
+    # Each criterion by name only when one is not ticked: every box ticked is
+    # one line — none at all when it was just said, as QA was accepted here
+    # (QA_TICKED_SAID, qa_accept_here) — not the whole list again.
+    # An open box in the list itself counts too: --unticked is a fetch of
+    # its own, and one that failed says nothing.
+    if [[ -n "$unticked" ]] || grep -q '^☐' <<<"$criteria"; then
+      echo ""
+      say "Acceptance criteria in issue #$issue:"
+      while IFS= read -r line; do say "  $line"; done <<<"$criteria"
+    elif [[ "${QA_TICKED_SAID:-}" != "$issue" ]]; then
+      echo ""
+      say "All $(grep -c . <<<"$criteria") acceptance criteria in issue #$issue are ticked."
+    fi
     if [[ -n "$unticked" && "$mode" == nodeploy ]]; then
       prompt="Not ticked in issue #$issue: $unticked. Merge anyway?"
     elif [[ -n "$unticked" && "$qa_checked" -eq 1 ]]; then

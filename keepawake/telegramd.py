@@ -39,7 +39,7 @@ from keepawake import notices, review_keys
 from keepawake.i18n import current, set_lang
 from keepawake.state import read
 
-from keepawake import asks, botapi, card_view, handling, holding, menus, phone_access, processes, repos, sleep_warning, topics
+from keepawake import asks, botapi, card_view, handling, holding, menus, phone_access, processes, repos, sleep_warning, tg_journal, topics
 
 
 log = logging.getLogger("keepawake")
@@ -236,6 +236,7 @@ def main():
                     handling.remember_lang(msg.get("from"))
                     bot.thread = topics.message_thread(msg)
                     topics.remember_in_topic(bot.thread, msg.get("message_id"))
+                    tg_journal.bot_update(upd, bot.thread)
                     handler.message(msg)
                 elif "callback_query" in upd:
                     cq = upd["callback_query"]
@@ -245,6 +246,7 @@ def main():
                         continue
                     handling.remember_lang(cq.get("from"))
                     bot.thread = topics.message_thread(cq.get("message") or {})
+                    tg_journal.bot_update(upd, bot.thread)
                     handler.callback(cq)
                 elif "widget_query" in upd:
                     wq = upd["widget_query"]
@@ -252,6 +254,7 @@ def main():
                         log.warning("a foreign chat in a widget: %s", (wq.get("chat") or {}).get("id"))
                         continue
                     handling.remember_lang(wq.get("from"))
+                    tg_journal.bot_update(upd)
                     handler.widget_query(wq)
             except Exception as exc:
                 log.exception("handling the update: %s", exc)

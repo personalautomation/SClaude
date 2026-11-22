@@ -230,7 +230,7 @@ LIB="%s"
 PROMPTS="$LIB/../prompts"
 info() { echo "INFO $*"; }
 term_render() { echo "RENDERED" > /dev/tty; }
-render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE] MAP[$SCLAUDE_V_MAP_OFF|$SCLAUDE_B_MAP_OFF]" > /dev/tty; return 1; }
+render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE] MAP[$SCLAUDE_V_MAP_OFF|$SCLAUDE_B_MAP_OFF] TG[$SCLAUDE_V_TELEGRAM_LOG]" > /dev/tty; return 1; }
 new_session_id() { echo new-id; }
 source "%s/core/state.sh"
 source "%s/improve/retro.sh"
@@ -271,6 +271,14 @@ echo "rc=$?"
     check("retro-unstarted-is-new", "PROMPT retro SINCE" in text, True)
     text = retro('{}')
     check("retro-first-is-new", "PROMPT retro SINCE" in text, True)
+    check("retro-no-journal-none-named", "TG[]" in text, True)
+    # The journal of the feature's Telegram topic, once anything went there.
+    journal = os.path.join(wt, ".sclaude/local/feature", "telegram-log.jsonl")
+    with open(journal, "w") as fh:
+        fh.write('{"dir": "out", "method": "sendMessage", "text": "hello"}\n')
+    text = retro('{}')
+    os.remove(journal)
+    check("retro-is-given-the-journal", "TG[%s]" % journal in text, True)
     check("retro-map-off-none-along-the-map", "MAP[|]" in text, True)
     # Where the feature left the process map (process.py off): a sync where
     # no block carries S is handed over, flag and lines both.

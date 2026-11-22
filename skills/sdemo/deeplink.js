@@ -90,6 +90,9 @@ cursor:text;user-select:text;-webkit-user-select:text}
 .vstage{display:none}
 .vstage:fullscreen{display:flex;background:#000;width:100%;height:100%}
 .vstage:-webkit-full-screen{display:flex;background:#000;width:100%;height:100%}
+/* In the window: the stage over the page, the browser's own bar and tools left. */
+.vstage.inwin{display:flex;position:fixed;inset:0;z-index:2147483000;background:#000;width:100%;height:100%}
+html.sdemo-inwin{overflow:hidden}
 .vstage .vw{flex:1;min-width:0;display:flex;flex-direction:column;width:100%;max-width:none;margin:0}
 .vstage .vw video{flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;object-fit:contain;border-radius:0}
 .vstage .vw .vs{flex:none;padding:8px 16px 12px}
@@ -218,11 +221,20 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
   document.body.appendChild(stage);
   const held = document.createElement("div");
   const screenEl = () => document.fullscreenElement || document.webkitFullscreenElement;
-  // The video's wrapper on the screen, or what else is (a video alone).
+  // The stage in the window (W, ▣): over the page, with no Fullscreen API,
+  // so the browser's address bar and tools stay in view.
+  const inWin = () => stage.classList.contains("inwin") && !screenEl();
+  // The video's wrapper on the screen or in the window, or what else is on
+  // the screen (a video alone).
   const full = () => {
     const f = screenEl();
-    return f === stage ? stage.firstElementChild : f;
+    return f === stage || inWin() ? stage.firstElementChild : f;
   };
+  const resync = () => { for (const f of syncs) f(); };
+  function winMark(on) {
+    stage.classList.toggle("inwin", on);
+    document.documentElement.classList.toggle("sdemo-inwin", on);
+  }
   // Each wrapper's buttons and caption follow whether it is on the screen;
   // a swap on the stage is no fullscreenchange, so it tells them itself.
   const syncs = [];
@@ -239,24 +251,66 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
     if (wrap && held.parentNode) held.replaceWith(wrap);
     for (const f of syncs) f();
   }
+  // Whether the whole screen was asked for from the window: leaving it goes
+  // back there, as W from the whole screen does.
+  let fromWin = false;
   function enter(wrap) {
     const go = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    const wasWin = inWin();
     if (!go) {
-      // An iPhone puts only a video on the whole screen.
+      // An iPhone puts only a video on the whole screen, and says nothing
+      // when it leaves it: the video goes back to the page first.
+      if (wasWin) { winMark(false); offStage(); }
       const video = wrap.querySelector("video");
       if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
       return;
     }
+    // From the window to the whole screen: the wrapper stays on the stage.
+    fromWin = wasWin;
+    winMark(false);
     onStage(wrap);
     const asked = go.call(stage);
-    if (asked && asked.catch) asked.catch(() => { if (!screenEl()) offStage(); });
+    // Refused: where the person was — the window, or the page.
+    if (asked && asked.catch) asked.catch(() => {
+      if (screenEl()) return;
+      fromWin = false;
+      if (wasWin) { winMark(true); resync(); } else offStage();
+    });
   }
   function toggle(wrap) {
     if (screenEl()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
     enter(wrap);
   }
+  // W, ▣: in the window, or back to the page; from the whole screen, down
+  // to the window rather than out of it.
+  function winToggle(wrap) {
+    if (inWin() && stage.firstElementChild === wrap) {
+      winMark(false);
+      offStage();
+      return;
+    }
+    const f = screenEl();
+    winMark(true);
+    // The stage on the screen goes down to the window as it is; a video the
+    // browser put there alone (its own button) comes onto the stage first,
+    // or the window would be an empty black stage.
+    if (f === stage) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      return;
+    }
+    if (f) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    if (stage.firstElementChild === wrap) resync();
+    else onStage(wrap);
+  }
   for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
-    document.addEventListener(ev, () => { if (screenEl() !== stage) offStage(); });
+    document.addEventListener(ev, () => {
+      if (screenEl() === stage) return;
+      // Back from the whole screen to the window it was asked for from.
+      if (fromWin) { fromWin = false; winMark(true); }
+      // Down to the window (winToggle, or the line above): the wrapper stays.
+      if (stage.classList.contains("inwin")) resync();
+      else offStage();
+    });
   // A version unfolded or folded changes which videos are next door (⏮ ⏭).
   document.addEventListener("toggle", (e) => { if (e.target.tagName === "DETAILS") for (const f of syncs) f(); }, true);
 
@@ -299,7 +353,7 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
   // scrolled to on the page; the one playing pauses as it starts (below).
   function playFrom(to) {
     const wrap = to.closest(".vw");
-    if (screenEl() === stage) onStage(wrap);
+    if (screenEl() === stage || inWin()) onStage(wrap);
     else wrap.scrollIntoView({block: "center", behavior: "smooth"});
     to.currentTime = 0;
     // A browser may refuse to play with sound when no click started it; a
@@ -565,7 +619,7 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
   // its keys always; with no video, the page keeps them (space scrolls). A
   // focused video takes space, Enter and the arrows itself: twice would
   // undo them.
-  const KEYS = "Keys: space or K play/pause · ← → or J L 5 s · [ ] step · , . frame · < > speed · M sound · F full screen" +
+  const KEYS = "Keys: space or K play/pause · ← → or J L 5 s · [ ] step · , . frame · < > speed · M sound · F full screen · W in the window" +
     " · Shift+P Shift+N the video before or after";
   let hovered = null, used = null;
   // [wrapper, chosen]: chosen when the person points at it — on the screen,
@@ -573,6 +627,10 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
   function active() {
     const f = full();
     if (f && f.classList && f.classList.contains("vw")) return [f, true];
+    // A video the browser put on the screen alone: its wrapper, whatever the
+    // pointer last rested on.
+    const alone = f && f.closest && f.closest(".vw");
+    if (alone) return [alone, true];
     if (hovered) return [hovered, true];
     const a = document.activeElement && document.activeElement.closest && document.activeElement.closest(".vw");
     if (a) return [a, true];
@@ -590,6 +648,13 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
     // under the pointer — rather than only the last one played.
     const t = e.target;
     if (t.closest && t.closest("input,textarea,select,[contenteditable]:not([contenteditable=false])")) return;
+    // Esc leaves the window as the browser's leaves the whole screen.
+    if (e.code === "Escape" && inWin()) {
+      winMark(false);
+      offStage();
+      e.preventDefault();
+      return;
+    }
     const [wrap, chosen] = active();
     if (!wrap) return;
     if (!chosen && t !== document.body && t !== document.documentElement) return;
@@ -608,6 +673,7 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
     else if (c === "Period") s ? speed(wrap, 1) : frameStep(video, 1);
     else if (c === "KeyM") video.muted = !video.muted;
     else if (c === "KeyF") toggle(wrap);
+    else if (c === "KeyW") winToggle(wrap);
     else return;
     used = wrap;
     e.preventDefault();
@@ -631,6 +697,10 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
     big.type = "button";
     big.title = "Full screen, with the copy button";
     big.textContent = "⛶";
+    const win = document.createElement("button");
+    win.type = "button";
+    win.className = "win";
+    win.textContent = "▣";
     const pin = document.createElement("button");
     pin.type = "button";
     pin.className = "pin";
@@ -668,7 +738,7 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
       syncs.push(ends);
       ends();
     }
-    bar.append(...(many ? [prev, next, pin, link, nx, big] : [pin, link, big]));
+    bar.append(...(many ? [prev, next, pin, link, nx, win, big] : [pin, link, win, big]));
     const pick = document.createElement("div");
     pick.className = "pick";
     const dot = document.createElement("div");
@@ -691,6 +761,7 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
     });
     link.addEventListener("click", () => copy(video, link));
     big.addEventListener("click", () => toggle(wrap));
+    win.addEventListener("click", () => winToggle(wrap));
     video.addEventListener("dblclick", (e) => {
       e.preventDefault();
       // The double click's first click flipped playback: taken back, or
@@ -705,7 +776,9 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
       const left = toggle(wrap);
       if (!back) return;
       // The exit's promise may come before its fullscreenchange: put back here.
-      const home = () => { offStage(); flip(video); };
+      // Back to the page — or to the window the full screen was asked for
+      // from, where the wrapper stays on the stage (fullscreenchange).
+      const home = () => { if (!fromWin && !stage.classList.contains("inwin")) offStage(); flip(video); };
       if (left && left.then) left.then(home, home);
       else flip(video);
     });
@@ -732,9 +805,12 @@ background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:
       }, 0);
     });
     const sync = () => {
-      const on = full() === wrap;
-      big.textContent = on ? "✕" : "⛶";
-      big.title = on ? "Leave full screen (Esc)" : "Full screen, with the copy button\n\n" + KEYS;
+      const on = full() === wrap, inw = on && inWin(), whole = on && !inw;
+      big.textContent = whole ? "✕" : "⛶";
+      big.title = whole ? "Leave full screen (Esc)" : "Full screen, with the copy button\n\n" + KEYS;
+      win.textContent = inw ? "✕" : "▣";
+      win.title = inw ? "Back to the page (Esc or W)"
+        : "In the window: the video fills the browser's window, its address bar and tools still there (W)";
       if (!on) cap.classList.remove("on");
     };
     const cap = document.createElement("div");

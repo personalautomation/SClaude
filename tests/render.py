@@ -220,9 +220,25 @@ def main():
         check("pr-files-agree", sorted(render_prompt.PR_FILES.values()),
               sorted([resolved_md, threads_md]))
 
+        # The retrospective reads the journal of the feature's Telegram topic
+        # when there is one, and is told to look in it for what was said twice
+        # or for nothing; without one it is not named.
+        with open(os.path.join(prompts, "retro.md"), encoding="utf-8") as fh:
+            retro = fh.read()
+        kept = render(retro, prompts, {"telegram-log": "/wt/.sclaude/local/feature/telegram-log.jsonl",
+                                       "terminal": "/wt/terminal.txt"}, {})
+        none = render(retro, prompts, {"telegram-log": "", "terminal": "/wt/terminal.txt"}, {})
+        check("retro-reads-the-journal",
+              ("`/wt/.sclaude/local/feature/telegram-log.jsonl`" in kept, "and the Telegram journal" in kept,
+               "the same thing said twice or more" in kept),
+              (True, True, True))
+        check("retro-without-a-journal", ("Telegram journal" in none, "telegram-log" in none,
+                                          "the same thing said twice or more" in none),
+              (False, False, True))
+
         # Five assemblies with the blocks filled, five with them empty, and the
         # rest are the checks above.
-        total = 37
+        total = 39
         for name, want, got in failures:
             print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
         print("%d/%d passed" % (total - len(failures), total))

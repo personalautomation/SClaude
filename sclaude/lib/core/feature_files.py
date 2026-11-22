@@ -77,6 +77,8 @@ FILES = [
     ("db-copy.sql", "main's rows, dumped for the copy into the feature's database"),
     ("supabase", "the feature's own Supabase project"),
     ("telegram.json", "the bot's record of the feature's topic (FEATURE_RECORD in topics.py)"),
+    ("telegram-log.jsonl", "what went to the feature's topic and came back from it, one JSON line each, "
+     "with none of how (FILE in keepawake/tg_journal.py); the retrospective reads it"),
 ]
 
 

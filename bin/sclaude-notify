@@ -179,10 +179,32 @@ def multipart(fields, files):
     return "multipart/form-data; boundary=" + edge, b"".join(out)
 
 
+def journal(method, fields, out=None, error=None, files=None):
+    """The call into the feature's journal of its topic (keepawake's
+    tg_journal), which keeps what was sent and none of how. Only with --in:
+    without a worktree there is nowhere to keep it."""
+    if not feature:
+        return
+    try:
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from keepawake import tg_journal
+        if error is not None:
+            try:
+                error = json.loads(error.read().decode()).get("description") or error
+            except Exception:
+                pass
+        tg_journal.note(feature + "/.sclaude/local/feature",
+                        tg_journal.outgoing(method, fields, out, error, files))
+    except Exception:
+        pass
+
+
 def send(params, raw):
     """sendMessage — or, with videos, the videos with `raw`, the same text
     unescaped, as their caption: one by sendVideo, several as an album by
     sendMediaGroup (ten at most)."""
+    method, fields = "sendMessage", params
     if not videos:
         req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
     else:
@@ -204,8 +226,20 @@ def send(params, raw):
         kind, data = multipart(fields, files)
         req = urllib.request.Request(url.rsplit("/", 1)[0] + "/" + method, data=data,
                                      headers={"Content-Type": kind})
-    with urllib.request.urlopen(req, timeout=120 if videos else 15) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=120 if videos else 15) as resp:
+            out = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        # Read once here for the journal, and kept for every reader after it.
+        body = exc.read()
+        exc.read = lambda: body
+        journal(method, fields, error=exc, files=videos[:10])
+        raise
+    except Exception as exc:
+        journal(method, fields, error=exc, files=videos[:10])
+        raise
+    journal(method, fields, out, files=videos[:10])
+    return out
 
 
 def message_ids(out):
@@ -219,8 +253,19 @@ def message_ids(out):
 def call(method, **fields):
     req = urllib.request.Request(url.rsplit("/", 1)[0] + "/" + method,
                                  data=urllib.parse.urlencode(fields).encode())
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            out = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        exc.read = lambda: body
+        journal(method, fields, error=exc)
+        raise
+    except Exception as exc:
+        journal(method, fields, error=exc)
+        raise
+    journal(method, fields, out)
+    return out
 
 
 # deleteMessage's refusals that no later try changes: the message is gone

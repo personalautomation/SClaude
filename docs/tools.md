@@ -111,7 +111,10 @@ terminal only — with:
   video's own frame from its top left corner, black bars left out, so the same
   on any screen) and copies the link at once; the link also ends with
   `&u=<path>`, the product's page the video shows at that second; 🔗 copies it without a point, and
-  ⛶ goes full screen with these buttons still on it (✕ or Esc leaves).
+  ⛶ goes full screen with these buttons still on it (✕ or Esc leaves), and
+  ▣ fills the browser's window instead, its address bar, tabs and tools still
+  there (✕, Esc or W leaves; ⛶ from there goes on to the whole screen, and
+  leaving that comes back to the window).
   A click on the picture plays and pauses, on the page and in full screen. Send the link to Claude
   with what to change there: `demo.py at <link>` (which `/sdemo`, step 2
   and every fix session know to run) names the scenario and the step at that second and cuts out the
@@ -126,7 +129,7 @@ terminal only — with:
   focus is on no link or button of the page (a text field keeps its keys
   always): space or K play and pause, ← → or J L five seconds, `[` `]` the
   step before or after, `,` `.` a frame on pause, `<` `>` the speed (kept
-  for the next visit), M the sound, F full screen, Shift+P Shift+N the video
+  for the next visit), M the sound, F full screen, W the window, Shift+P Shift+N the video
   before or after. ⛶'s tooltip lists them.
 - **✋ Try it yourself**, under a scenario's video where part of the check is
   beyond the recorder — a downloaded file opened in another program, a mail,
@@ -738,7 +741,10 @@ it is started, and the topic takes the feature's name once it has one. After eac
 gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the
-history. And it follows what sclaude is doing there — each session that
+history. Everything that goes to the topic and comes back from it — messages,
+edits, deletions, widgets and their data, your replies and taps — is also kept
+in the feature's tree, `.sclaude/local/feature/telegram-log.jsonl`, never in
+git and with no token or key in it, for the retrospective to read. And it follows what sclaude is doing there — each session that
 starts and ends, and each step once it is done; a review fix session with
 what it is handed and what it leaves (findings not fixed yet, new, fixed,
 declined, commits), and the review on this machine as it runs — its start

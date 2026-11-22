@@ -452,7 +452,7 @@ def case_a():
     check("returned-preview-cleared", w.state("regression.preview.status"), "")
     # And the production reminder must NOT be what the human ends up looking at.
     check("returned-no-production-reminder",
-          "has been through every step" in out, False)
+          "is through its session steps" in out, False)
 
     # The comments reached the session rather than being filed away unread.
     check_true("returned-notes-reach-the-session",
@@ -605,8 +605,13 @@ def case_f():
     w = World(os.path.join(tmp, "f"), merged=True)
     w.set_state(dict(DONE_STATE, step="review", steps=reopened_review, worktree=w.wt,
                      reopened="review", reopened_pr=208, reopened_by="preview"))
-    w.resume()
+    out = w.resume()
     check("preview-reopen-closes-on-merge", w.state("step"), "done")
+    # The sessions are over, the cycle is not: the preview, QA, the merge and
+    # production follow. "Every step" said the cycle was over while all that
+    # was still to run.
+    check_true("preview-reopen-says-sessions-over", "is through its session steps" in out)
+    check("preview-reopen-no-every-step", "every step" in out, False)
     check("preview-reopen-no-review-session", w.prompts.strip(), "")
     check("preview-reopen-mark-cleared", w.state("reopened_by"), "")
 

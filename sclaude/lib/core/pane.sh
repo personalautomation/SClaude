@@ -674,6 +674,10 @@ claude_launch_once() {
   # it only for a resume with something new to tell.
   local which="new session" arg
   for arg in "$@"; do [[ "$arg" == --resume ]] && { which="same session, resumed"; break; }; done
+  # Why the same one, when the review kept it for its next round
+  # (review_round.sh): said here rather than on a line of its own.
+  [[ "$which" == "same session, resumed" && -n "${PANE_RESUME_WHY:-}" ]] && which+=": $PANE_RESUME_WHY"
+  PANE_RESUME_WHY=""
   info "   claude is running in a new tab ($title) · $which."
   # Left here, Ctrl-C would end sclaude and leave the session running with
   # nobody to carry on after it: no next step, no friction review. It ends the

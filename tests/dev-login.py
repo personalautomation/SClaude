@@ -592,6 +592,39 @@ def check_proxy(root, wt, dport, login_file):
                "</" not in open(os.path.join(ROOT, "skills", "sdemo", "deeplink.js")).read()),
               (True, True, True, True))
         script = demo.deeplink_script()
+        # Three ways to watch: in the page, the whole screen (⛶, F), and the
+        # browser's window (▣, W) with its address bar and tools left; the
+        # stage is the same, so the step's caption, the panel and the next
+        # video in a row follow the window as they follow the screen.
+        check("demo: a video fills the browser's window as well as the screen",
+              (".vstage.inwin{display:flex;position:fixed;inset:0" in script,
+               "return f === stage || inWin() ? stage.firstElementChild : f;" in script,
+               'else if (c === "KeyW") winToggle(wrap);' in script, "W in the window" in script,
+               'win.textContent = inw ? "✕" : "▣";' in script,
+               "if (screenEl() === stage || inWin()) onStage(wrap);" in script,
+               'if (e.code === "Escape" && inWin())' in script,
+               # The whole screen asked for from the window leaves back to it,
+               # a refusal stays there, and an iPhone's own goes from the page.
+               "if (fromWin) { fromWin = false; winMark(true); }" in script,
+               "if (wasWin) { winMark(true); resync(); } else offStage();" in script,
+               "if (wasWin) { winMark(false); offStage(); }" in script,
+               'if (!fromWin && !stage.classList.contains("inwin")) offStage(); flip(video);' in script,
+               'const alone = f && f.closest && f.closest(".vw");\n    if (alone) return [alone, true];' in script),
+              (True,) * 12)
+        # A scenario's browser zone: its own, else the demo's, else the
+        # machine's — no timezoneId at all — and never in a live play.
+        play_src = open(os.path.join(ROOT, "skills", "sdemo", "play.mjs")).read()
+        zone_fn = re.search(r"^const zoneOf = .*$", play_src, re.M).group(0)
+        zones = subprocess.run(["node", "-e", zone_fn + "; console.log(JSON.stringify(["
+                                "zoneOf({timezone: 'Asia/Tokyo'}, {timezone: 'Europe/Berlin'}),"
+                                "zoneOf({}, {timezone: 'Europe/Berlin'}), zoneOf({}, {})]))"],
+                               capture_output=True, text=True).stdout.strip()
+        check("demo: a scenario's browser zone, the demo's, or the machine's",
+              (zones, "...(zone ? { timezoneId: zone } : {})" in play_src,
+               "LIVE ? { viewport: null }" in play_src),
+              ('["Asia/Tokyo","Europe/Berlin",null]', True, True))
+        check("demo: a recording kept from an earlier one keeps its browser zone",
+              "...(zoneOf(s, demo) ? [zoneOf(s, demo)] : [])" in play_src, True)
         check("demo: the moment deeplink.js writes is the one demo.py at reads",
               (demo.link_moment("http://f1.localhost/__sclaude/demo/f1/20261031-120000/#v=s2&t=12.5&p=30,40.5&u=/a/b?x%3D1%26y%3D2"),
                demo.link_moment("http://x/__sclaude/demo/f1/#v=20261031-120000.3&t=1:05"),
@@ -722,9 +755,13 @@ def check_proxy(root, wt, dport, login_file):
         # It answers --ids as the real one does, with a message id of its
         # own each time, and deletes nothing but what it is asked to.
         with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
-            fh.write('#!/bin/sh\necho "notify $*" >> %s\n[ "$1" = --delete ] && exit 0\n'
+            # A deletion names its tree (--in, for the topic's journal) before
+            # the ids; the line it leaves says only what is deleted.
+            fh.write('#!/bin/sh\ncase " $* " in *" --delete "*)\n'
+                     '  echo "notify $*" | sed "s/ --in [^ ]*//" >> %s; exit 0 ;;\nesac\n'
+                     'echo "notify $*" >> %s\n'
                      'n=$(cat %s 2>/dev/null || echo 100); n=$((n + 1)); echo $n > %s\n'
-                     'echo "sent: $n"\n' % (asked, asked + ".n", asked + ".n"))
+                     'echo "sent: $n"\n' % (asked, asked, asked + ".n", asked + ".n"))
         for name in ("node", "sclaude-notify"):
             os.chmod(os.path.join(stub, name), 0o755)
         os.remove(asked)
@@ -855,6 +892,34 @@ def check_proxy(root, wt, dport, login_file):
               (delta["kind"], delta["stage"], delta["from"], delta["change"],
                [c.split(" ", 1)[1] for c in delta["commits"]]),
               ("delta", "preview", "by hand", "The button is now green", ["feat: the change"]))
+        # A delta played again with nothing changed is not a second message.
+        with tempfile.TemporaryDirectory() as twin_wt:
+            os.makedirs(os.path.join(twin_wt, demo.DEMO_DIR))
+            with open(os.path.join(twin_wt, demo.DEMO_DIR, "history.json"), "w") as fh:
+                json.dump([{"id": "d0", "kind": "delta", "tree": "t3", "change": "Blue", "messages": [6], "broken": 1},
+                           {"id": "d1", "kind": "delta", "tree": "t1", "change": "Green", "messages": [7]},
+                           {"id": "d2", "kind": "delta", "tree": "t1", "change": "Green"}], fh)
+            check("demo delta: the same change on the same tree is not sent twice",
+                  (demo.sent_before(twin_wt, {"id": "d2", "kind": "delta", "tree": "t1", "change": "Green"}),
+                   demo.sent_before(twin_wt, {"id": "d3", "kind": "delta", "tree": "t2", "change": "Green"}),
+                   demo.sent_before(twin_wt, {"id": "d4", "kind": "delta", "tree": "t1", "change": "Red"}),
+                   demo.sent_before(twin_wt, {"id": "m1", "kind": "main", "tree": "t1", "change": "Green"}),
+                   demo.sent_before(twin_wt, {"id": "d5", "kind": "delta", "tree": "t3", "change": "Blue"})),
+                  ("d1", "", "", "", ""))
+            # A delta not sent again carries the messages that hold it, so it
+            # reads as having reached the topic.
+            saved_env = os.environ.get("SCLAUDE_SESSION")
+            os.environ["SCLAUDE_SESSION"] = "s"
+            try:
+                demo.publish(twin_wt, "f", "d2", {"id": "d2", "kind": "delta", "tree": "t1", "change": "Green"},
+                             {}, "")
+            finally:
+                if saved_env is None:
+                    del os.environ["SCLAUDE_SESSION"]
+                else:
+                    os.environ["SCLAUDE_SESSION"] = saved_env
+            check("demo delta: one not sent again keeps the messages that carry it",
+                  [e.get("messages") for e in demo.history(twin_wt)], [[6], [7], [7]])
         check("demo delta: told in the topic, not posted on the issue alone",
               (any("Δ by hand → preview: The button is now green" in l for l in calls),
                any(l.startswith("issue:") for l in said)), (True, False))
@@ -988,7 +1053,7 @@ def check_proxy(root, wt, dport, login_file):
                 fh.write(saved_hist)
         check("demo: a full demo deletes every full one before it and no delta",
               (open(delete_args).read().split(), gone, kept_msgs),
-              (["--delete", "1", "--delete", "3"], "2 earlier message(s) deleted, from 2 recording(s)",
+              (["--in", wt, "--delete", "1", "--delete", "3"], "2 earlier message(s) deleted, from 2 recording(s)",
                [None, [2], None, [4], [5]]))
         check("demo: the feature's removal deletes the ref demo.py keeps",
               'update-ref -d "%s"' % (demo.DEMO_REF % "$label")

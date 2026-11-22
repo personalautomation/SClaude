@@ -722,7 +722,7 @@ review_pane_keys() {
     # Not on the first look: a mark left before this launch was reported.
     if [[ -n "$first" || "${REVIEW_PANE_TICK:-0}" -gt 0 ]]; then
       printf '\r\033[2K\033[?25h' >&2
-      review_report_unshown "$wt" "$slug" >&2
+      REVIEW_REPORT_ROUNDS_ONLY=1 review_report_unshown "$wt" "$slug" >&2
       REVIEW_PANE_TICK=0
     fi
   fi

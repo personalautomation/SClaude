@@ -431,8 +431,10 @@ review_close_gate() {
         elif [[ "$count" -gt 0 ]]; then
           # The report printed as the session ended was made before this
           # run: once more with it, where the person decides whether to go
-          # on fixing.
-          [[ "$fresh_pass" -eq 1 ]] && review_report "$wt" "$slug"
+          # on fixing. Not to the topic: the fix session's start says the
+          # round's findings there, and the round's numbers go once it
+          # closes, with what was fixed (after_step).
+          [[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"
           gate_reported=1
           # Open by its own count, not by asking GitHub again: a finding in
           # the conversation, or one still waiting to be posted, is no thread
@@ -736,13 +738,20 @@ cmd_review_stats() {
 # The report, unless what it would show is what the last report in this
 # process showed on this head (REVIEW_REPORTED, written by review_report).
 #
+# With REVIEW_REPORT_ROUNDS_ONLY set, as a fix session works: only when a
+# round finished since the last report, whatever the head — the session's
+# commits and resolved threads alone are not news to the terminal.
+#
 #   review_report_unshown <wt> <slug>
 review_report_unshown() {
   local unless=""
   # Unset until a report in this process showed something (set -u).
   local reported="${REVIEW_REPORTED:-}"
-  [[ -n "$reported" && "${reported%% *}" == "$(git -C "$1" rev-parse HEAD 2>/dev/null)" ]] \
-    && unless="${reported#* }"
+  if [[ -n "$reported" && -n "${REVIEW_REPORT_ROUNDS_ONLY:-}" ]]; then
+    unless="${reported#* }"
+  elif [[ -n "$reported" && "${reported%% *}" == "$(git -C "$1" rev-parse HEAD 2>/dev/null)" ]]; then
+    unless="${reported#* }"
+  fi
   REVIEW_REPORT_UNLESS="$unless" review_report "$1" "$2"
 }
 
@@ -780,6 +789,7 @@ review_report() {
   # same again, it prints and sends nothing (review_close_gate).
   SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" SCLAUDE_REPORT_OPEN="$shown" \
     SCLAUDE_REPORT_UNLESS="${REVIEW_REPORT_UNLESS:-}" \
+    SCLAUDE_REPORT_ROUNDS_ONLY="${REVIEW_REPORT_ROUNDS_ONLY:-}" \
     python3 "$LIB/review/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" 2>/dev/null || true
   # The verdict, when the rounds stopped converging, for review_stuck_say;

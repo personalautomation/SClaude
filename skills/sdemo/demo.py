@@ -473,6 +473,22 @@ def cmd_play(args, label, wt, where, live, only=""):
     publish(wt, label, demo, entry, results, phone)
 
 
+def sent_before(wt, entry):
+    """The id of a delta already in the topic that says what this one says
+    — the same tree, the same change — or "". A delta played again with
+    nothing changed went as a second message beside the first, and deltas
+    stay in the topic for good."""
+    if entry.get("kind") != "delta" or not entry.get("tree"):
+        return ""
+    for e in reversed(history(wt)):
+        if e.get("id") == entry.get("id") or e.get("kind") != "delta" or not e.get("messages") \
+                or e.get("broken"):
+            continue
+        if e.get("tree") == entry["tree"] and (e.get("change") or "") == (entry.get("change") or ""):
+            return e.get("id") or "?"
+    return ""
+
+
 def publish(wt, label, demo, entry, results, phone):
     """A recording that played, to the feature's topic and, a full one, to
     its issue — in a session sclaude runs; anywhere else the links already
@@ -481,6 +497,14 @@ def publish(wt, label, demo, entry, results, phone):
     # goes to the feature's topic or its issue on somebody's casual /sdemo.
     if not os.environ.get("SCLAUDE_SESSION"):
         print("kept here: not a session sclaude runs, so nothing went to Telegram or GitHub")
+        return
+    twin = sent_before(wt, entry)
+    if twin:
+        # The messages that carry it, on this entry too: whoever asks whether
+        # this recording reached the topic (demo_refresh.py sent) is told it
+        # did, which it has.
+        keep_messages(wt, demo, next(e for e in history(wt) if e.get("id") == twin)["messages"])
+        print("not sent again: the same change on the same tree went to the topic with %s" % twin)
         return
     out = os.path.join(wt, DEMO_DIR, demo)
     # For both places: the phone's address opens only on the tailnet, which
@@ -712,7 +736,8 @@ def withdraw_old(wt, demo):
     ids = [m for ms in old.values() for m in ms]
     if not ids:
         return "nothing earlier to delete"
-    done = subprocess.run(["sclaude-notify"] + [a for m in ids for a in ("--delete", str(m))],
+    # --in: the deletions go into the feature's journal of its topic too.
+    done = subprocess.run(["sclaude-notify", "--in", wt] + [a for m in ids for a in ("--delete", str(m))],
                           capture_output=True, text=True)
     def named(marker):
         return {int(w) for line in done.stderr.splitlines() if marker in line

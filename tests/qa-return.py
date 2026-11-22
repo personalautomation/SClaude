@@ -73,7 +73,7 @@ def run_bash(script, cwd, modules=("core/io", "core/ui", "core/steps", "core/sta
 
 
 def feature(root, step="done", review_done=True):
-    """A worktree whose feature has been through every step."""
+    """A worktree whose feature is through its session steps."""
     wt = os.path.join(root, "wt")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"), exist_ok=True)
     state = {

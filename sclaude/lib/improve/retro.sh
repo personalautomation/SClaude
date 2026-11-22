@@ -152,7 +152,12 @@ PY
     template=retro-again
     since_block="${since:-$RETRO_NOTHING_SINCE}"
   fi
+  # What went to the feature's Telegram topic and came back
+  # (keepawake/tg_journal.py), when anything did.
+  local tg_log="$wt/.sclaude/local/feature/telegram-log.jsonl"
+  [[ -s "$tg_log" ]] || tg_log=""
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
+    SCLAUDE_V_TELEGRAM_LOG="$tg_log" \
     SCLAUDE_B_SINCE="$since_block" \
     SCLAUDE_B_MAP_OFF="$map_off" \
     SCLAUDE_V_MAP_OFF="${map_off:+1}" \

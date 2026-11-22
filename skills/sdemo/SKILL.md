@@ -93,6 +93,10 @@ small-screen branches first: on a phone the names and the way in differ (a
 menu button before the item). A place that looks the same on both needs only
 one. In `ac` mode a criterion about one of them shows that one.
 
+**Where a scenario begins.** Each scenario starts as a person who has been on
+the page before would find it, unless the scenario is about the first visit
+itself: what such a person meets once does not open every scenario.
+
 ## 3. Who sees each one
 
 One user for every scenario is fine, and the default: the one whose data
@@ -122,6 +126,7 @@ module whose default export is the demo:
 export default {
   title: "Event view: what owners and guests see",
   viewport: "desktop",            // the default; a scenario may set "phone" (live keeps the window's size)
+  timezone: "Asia/Tokyo",         // the browser's zone; a scenario may set its own; the machine's zone when left out
   scenarios: [
     {
       title: "AC1. The owner sees every field",
@@ -269,7 +274,9 @@ the links and the scenarios' videos to the feature's Telegram topic (`sent:`)
 — a full demo also deletes the topic's messages of every full demo before
 it, their videos with them (`telegram: N earlier message(s) deleted`), so the
 topic holds the current demo and every delta, which stays true of what it
-shows; Telegram lets a bot delete nothing older than 48 hours, which stays —
+shows; Telegram lets a bot delete nothing older than 48 hours, which stays.
+A delta that says what one already in the topic says — the same change on
+the same tree — is not sent again (`not sent again: …`) —
 and, a full demo only, posts them, with how each scenario went and the commit shown, as the
 issue's demo comment, the earlier one deleted (`issue: posted on #N with K
 video(s)`, or why not); anywhere else it says

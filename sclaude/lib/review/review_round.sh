@@ -394,7 +394,13 @@ review_reopen() {
       if why="$(review_keep "$wt" "$session" "$held")"; then
         # The round it closed is counted by run_step, and only once it has
         # resumed this session (`kept`).
-        info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
+        # Why it is the same session goes on the tab's own line, which says
+        # "same session, resumed" (PANE_RESUME_WHY, pane.sh): a line of its
+        # own before it said the same thing twice. In place, there is no
+        # such line, and this one says it.
+        PANE_RESUME_WHY="context ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%), $why"
+        pane_available 2>/dev/null \
+          || info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
         REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
         # resolved.md written again, alone: the carry-on sends the session
         # there for a file new to it, and threads resolved since its launch —

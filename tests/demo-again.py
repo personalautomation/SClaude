@@ -60,8 +60,10 @@ def sigs(script):
     start = src.index("function sig(s, demo)")
     body = src[start:src.index("\n}\n", start) + 3]
     vp = src.index("const viewportOf")
+    zone = src.index("const zoneOf")
     hand = src.index("function byHandOf(s)")
-    body = (src[vp:src.index(";\n", vp) + 2] + src[hand:src.index("\n}\n", hand) + 3] + body)
+    body = (src[vp:src.index(";\n", vp) + 2] + src[zone:src.index(";\n", zone) + 2]
+            + src[hand:src.index("\n}\n", hand) + 3] + body)
     done = subprocess.run(["node", "--input-type=module", "-e", SIG % body, script],
                           capture_output=True, text=True)
     return json.loads(done.stdout)
@@ -76,6 +78,11 @@ try:
     script = os.path.join(tmp, "demo.mjs")
     write(script, SCRIPT % '"two"')
     one, two = sigs(script)
+    # A browser zone set later changes the scenario's signature, so the
+    # earlier recording in the machine's zone is not kept; none set keeps it.
+    zoned = os.path.join(tmp, "zoned.mjs")
+    write(zoned, SCRIPT.replace('title: "T",', 'title: "T", timezone: "Asia/Tokyo",') % '"two"')
+    check("a browser zone set changes every scenario's signature", sigs(zoned) != [one, two], True)
     before = os.path.join(tmp, "before")
     rec = lambda title, sig, n, **more: dict(  # noqa: E731
         title=title, as_="x", sig=sig, steps=[{"kind": "say", "text": title, "t": 1}],

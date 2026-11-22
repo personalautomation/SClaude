@@ -157,7 +157,7 @@ run_step() {
       )."
       step_close_merged "$wt"
       issue_sync "$wt"
-      echo "${GREEN}Feature '$slug' has been through every step.${OFF}"
+      echo "${GREEN}Feature '$slug' is through its session steps.${OFF}"
       remind_prod "$wt" "$slug"
       return 0
     fi
@@ -1041,16 +1041,10 @@ after_step() {
         info "  The review of $(blocks_label "$wt") of PR #${pr:-?} closed."
       elif [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."
-      elif no_deploy_feature "$wt"; then
-        info "  Review closed. Next: the merge of PR #${pr:-?}, with no preview, QA or production."
       else
-        # Which ticket QA will work in, beside which pull request. state_get
-        # answers a missing issue with the string "null", and "issue #null" is
-        # worse than saying nothing.
-        local next_issue="$issue"
-        [[ "$next_issue" == "null" ]] && next_issue=""
-        info "  Review closed — PR #${pr:-?} stays open until QA has accepted the feature."
-        info "  Next: the preview, then QA${next_issue:+ on issue #$next_issue}, then the merge."
+        # What comes next is remind_prod's to say, a few lines on ("PR #N is
+        # open. Next: …"): said here too, it came twice in five lines.
+        info "  Review closed."
       fi
       ;;
     *)
@@ -1209,7 +1203,7 @@ after_step() {
     state_set "$state" step "done"
     issue_sync "$wt"
     echo ""
-    echo "${GREEN}Feature '$slug' has been through every step.${OFF}"
+    echo "${GREEN}Feature '$slug' is through its session steps.${OFF}"
     remind_prod "$wt" "$slug"
     return 0
   fi
@@ -1403,7 +1397,14 @@ plan_report() {
   local headline told
   if [[ "$step" == "plan" ]]; then
     capture_plan "$wt" || return 0
-    headline="Approved plan (.sclaude/local/feature/plan.md):"
+    # Its size, not its text: the person approved it in the session a minute
+    # ago, the session's last message just above sums it up, and the
+    # criteria go to the issue. Printed whole, it was a screen of text they
+    # already knew, and the session's report scrolled away under it.
+    local criteria lines
+    criteria="$(grep -cE '^[[:space:]]*- \[[ xX]\] (~~)?AC[0-9]+' "$plan" 2>/dev/null)" || criteria=0
+    lines="$(wc -l < "$plan" 2>/dev/null | tr -d ' ')"
+    headline="Approved plan: .sclaude/local/feature/plan.md · $criteria acceptance criteria · ${lines:-0} lines"
     told="Plan approved"
   else
     [[ -s "$plan" ]] || return 0
@@ -1423,10 +1424,8 @@ plan_report() {
   ask_feed say "$told"
   echo ""
   say_here "${BOLD}$headline${OFF}"
-  echo ""
-  if [[ "$step" == "plan" ]]; then
-    sed 's/^/  /' "$plan"
-  else
+  if [[ "$step" != "plan" ]]; then
+    echo ""
     plan_changes "$printed" "$plan"
     echo ""
     echo "  The whole plan: .sclaude/local/feature/plan.md"

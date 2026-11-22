@@ -174,9 +174,9 @@ remind_prod() {
   else
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
     if [[ "$(project_flow_mode merge)" == auto ]]; then
-      echo "${DIM}Next: the preview, then QA, then the merge — sclaude makes it once QA has passed (\`merge\` is auto).${OFF}"
+      echo "${DIM}Next: the preview, then QA${issue:+ on issue #$issue}, then the merge — sclaude makes it once QA has passed (\`merge\` is auto).${OFF}"
     else
-      echo "${DIM}Next: the preview, then QA, then the merge — the merge is yours to do.${OFF}"
+      echo "${DIM}Next: the preview, then QA${issue:+ on issue #$issue}, then the merge — the merge is yours to do.${OFF}"
     fi
   fi
 
@@ -438,6 +438,10 @@ remind_prod() {
       # timer; the way on from it once it is made.
       qa_yes_edge "$wt"
       pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?
+      # Said just now, by the hand-off ("QA accepted every issue of PR …"),
+      # which runs in a subshell under its lock: the merge's question, for
+      # this pull request, does not say it again (merge.sh).
+      [[ "$handed" -eq 0 ]] && QA_ACCEPT_SAID="$pr"
       [[ "$handed" -eq 0 || "$handed" -eq 3 ]] \
         && once_edge "$wt" handoff merge sclaude "pr_qa_handoff" note="PR #$pr ready"
       # Done before — by an earlier run, or by the QA timer while this one
@@ -712,6 +716,9 @@ remind_prod() {
   # one is cut off at the question).
   [[ "$prod_same" -eq 0 && "$ship_mode" != off ]] \
     && { state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping "$(date -Iseconds)" 2>/dev/null || true; }
+  # Where the ship's commands write in full; the screen shows them short
+  # (block_quiet.py, run_block).
+  local ship_log; ship_log="$wt/.sclaude/local/feature/logs/ship/ship_$(date +%F_%H-%M-%S).log"
   if [[ "$prod_same" -eq 1 ]]; then
     echo ""
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
@@ -762,7 +769,7 @@ remind_prod() {
     local snapshot=""
     [[ -n "$promote_cmd" ]] && snapshot="$(environment_snapshot "$REPO")"
 
-    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" run_block \
+    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" SCLAUDE_BLOCK_LOG="$ship_log" run_block \
       "Production" \
       "$prod_red${prod_note:-The branch adds migrations: promote first, then ship.}" \
       "$prod_ask" \
@@ -779,7 +786,7 @@ remind_prod() {
     fi
   else
     write_vercelignore "$REPO"
-    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" run_block \
+    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" SCLAUDE_BLOCK_LOG="$ship_log" run_block \
       "Production" \
       "$prod_red${prod_note:-The branch adds no migrations.}" \
       "$prod_ask" \

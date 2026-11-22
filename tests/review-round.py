@@ -1192,7 +1192,7 @@ echo "watcher=[$SESSION_WATCHER]"
           'REVIEW_KNOWN_COUNT="$known" review_close_gate "$wt" "$slug" "${pr:-}"' in entry
           and '"$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)"' in entry
           and '[[ -n "$entry" ]] && local_review_done "$wt" && fresh_pass=0' in RUN
-          and '[[ "$fresh_pass" -eq 1 ]] && review_report "$wt" "$slug"' in RUN
+          and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in RUN
           and '[[ "$fresh_pass" -eq 1 ]] && review_report_unshown "$wt" "$slug"' in RUN, True)
     check("not-done-says-where-it-stands",
           'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
@@ -1580,6 +1580,11 @@ echo "watcher=[$SESSION_WATCHER]"
     unshown = unshown[:unshown.index("\n}\n")]
     check("reported-read-with-a-default", 'local reported="${REVIEW_REPORTED:-}"' in unshown
           and "${REVIEW_REPORTED%%" not in unshown, True)
+    # The table after a pass that leaves findings goes to the terminal only:
+    # the topic hears the round's numbers once, as its fix session closes.
+    many = gate[gate.index('elif [[ "$count" -gt 0 ]]'):]
+    check("open-pass-table-not-to-the-topic",
+          'REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in many[:1500], True)
     # A pass that leaves nothing open ends on the table, but not on one the
     # pass into step 4 printed on this head just now.
     zero = gate[gate.index('elif [[ "$count" -eq 0 ]]; then'):]
@@ -1907,6 +1912,19 @@ finally:
     for p in stand_ins:
         p.kill()
     shutil.rmtree(tmp, ignore_errors=True)
+
+# Kept for its next round, the session's tab line says why, once: no line of
+# its own before it saying "the same session" again; in place, that line
+# stays, there being no tab line.
+PANE = open(os.path.join(LIB, "core", "pane.sh"), encoding="utf-8").read()
+check("kept-reason-on-the-tab-line",
+      ('PANE_RESUME_WHY="context ${pct}%' in RUN, "pane_available 2>/dev/null \\\n" in RUN,
+       'which+=": $PANE_RESUME_WHY"' in PANE, 'PANE_RESUME_WHY=""' in PANE),
+      (True, True, True, True))
+# What follows the review is said once, by remind_prod, with the issue.
+CYCLE = open(os.path.join(LIB, "cycle", "run.sh"), encoding="utf-8").read()
+DEPLOY = open(os.path.join(LIB, "ship", "deploy.sh"), encoding="utf-8").read()
+check("next-said-once", ("Next: the preview" in CYCLE, "QA${issue:+ on issue #$issue}" in DEPLOY), (False, True))
 
 if failures:
     for name, want, got in failures:

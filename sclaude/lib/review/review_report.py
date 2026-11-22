@@ -302,6 +302,12 @@ def threads(cwd, pr, repo):
                 fate = "no fix" if declined(comments[1:]) else "fixed"
             else:
                 fate = "no fix" if first.get("url") in left else "open"
+            # Where the pull request's head has it now, on purpose: a finding
+            # on the fixes, or a repeat, is told by its distance from earlier
+            # ones in today's code. A finished round's counts of those two may
+            # then shift between reports as later commits move lines; its
+            # found, fixed and declined do not. The person chose today's
+            # accuracy over still past numbers (2026-11-22).
             line = thread_line(t)
             own = DISCUSSION.search(first.get("url") or "")
             own = own.group(1) if own else None
@@ -859,6 +865,14 @@ def main():
         sum(1 for g in groups if not g["running"]), len(groups))
     if shown is not None and os.environ.get(UNLESS_ENV) == shown:
         return 0
+    # Asked while a fix session works (review_pane_keys): its resolved
+    # threads and its commits change the open findings and the head, not
+    # the rounds — the table again then showed one row with its fix still
+    # under way. Only a round finished since is worth printing there.
+    unless = os.environ.get(UNLESS_ENV) or ""
+    if shown is not None and unless and os.environ.get(ROUNDS_ONLY_ENV) \
+            and unless.rpartition(" rounds:")[2] == shown.rpartition(" rounds:")[2]:
+        return 0
     path = os.environ.get(OPEN_ENV, "")
     if path and shown is not None:
         try:
@@ -1089,6 +1103,7 @@ def main():
 STUCK_ENV = "SCLAUDE_REPORT_STUCK"
 OPEN_ENV = "SCLAUDE_REPORT_OPEN"
 UNLESS_ENV = "SCLAUDE_REPORT_UNLESS"
+ROUNDS_ONLY_ENV = "SCLAUDE_REPORT_ROUNDS_ONLY"
 STUCK_ROUNDS = 4
 FEEDING_ROUNDS = 2
 

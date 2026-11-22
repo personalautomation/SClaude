@@ -350,7 +350,8 @@ qa_accept_here() {
   column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_DONE" || return 1
   word="$(python3 "$LIB/cycle/acceptance.py" --tick "$issue" "${REPO:-.}" 2>/dev/null || true)"
   case "$word" in
-    ticked) info "  Every acceptance criterion in issue #$issue is ticked." ;;
+    ticked) info "  Every acceptance criterion in issue #$issue is ticked."
+            QA_TICKED_SAID="$issue" ;;  # its merge question does not say it again (merge.sh)
     already|nothing) ;;
     body) warn "  The criteria of issue #$issue are in its description, which sclaude never writes — tick them there." ;;
     torn) warn "  The criteria comment on issue #$issue lost one of its markers — nothing ticked; tick them on GitHub." ;;

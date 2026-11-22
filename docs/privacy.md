@@ -52,7 +52,7 @@ when the tree is next opened.
   Tailscale, often Google, and sometimes your local network's resolver.
 
 **What stays on your machine.** Session transcripts, terminal recordings,
-each feature's history and its DORA page, and your cycle records
+each feature's history and its DORA page, the journal of what went to a feature's Telegram topic and came back (`.sclaude/local/feature/telegram-log.jsonl`, with no token, address or key in it), and your cycle records
 (`~/.claude/sclaude/`) when no `metrics` repository is set. The product's
 `.sclaude/local/` is kept out of git and out of every Vercel upload; a
 feature's friction log lives there and goes with its tree. What the reviews

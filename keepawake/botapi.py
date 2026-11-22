@@ -11,7 +11,7 @@ import urllib.request
 
 from keepawake.i18n import STRINGS, current, t
 from keepawake.state import locked, read
-from keepawake import handling, menus, phone_access, topics, widgets
+from keepawake import handling, menus, phone_access, topics, tg_journal, widgets
 
 
 API = "https://api.telegram.org/bot%s/%s"
@@ -63,6 +63,17 @@ class Bot(object):
     # --- transport ----------------------------------------------------------
 
     def call(self, method, http_timeout=15, **params):
+        # Every call about a feature's topic goes into its journal
+        # (tg_journal), a refused one with what Telegram said.
+        try:
+            out = self._call(method, http_timeout, params)
+        except Exception as exc:
+            tg_journal.bot_call(method, params, error=getattr(exc, "telegram", "") or exc)
+            raise
+        tg_journal.bot_call(method, params, out)
+        return out
+
+    def _call(self, method, http_timeout, params):
         # http_timeout is the ceiling for the socket, params["timeout"] is how
         # long Telegram holds the long poll. The values differ and must not be
         # confused: the socket has to outlive the long poll, otherwise every

@@ -376,7 +376,7 @@ cmd_reset() {
     fi
   fi
 
-  [[ "$step" != "done" ]] || { info "Feature '$slug' has been through every step."; return 0; }
+  [[ "$step" != "done" ]] || { info "Feature '$slug' is through its session steps: there is none to start over."; return 0; }
 
   local session; session="$(state_get "$state" "steps.$step.session" || true)"
 

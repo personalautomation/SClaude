@@ -830,6 +830,13 @@ try:
         'echo "0 bbb 2" > "%s"; review_pane_keys "%s" slug ""; review_pane_keys "%s" slug ""'
         % (repo, repo, checked, repo, repo))
     check("pane-report-once-per-mark", err.count("REPORT slug"), 1)
+    # And asks for a table only when a round finished since the last one.
+    out, err, _ = run_bash(
+        'review_report_unshown() { echo "REPORT ${REVIEW_REPORT_ROUNDS_ONLY:-} $2"; }; review_enough() { :; }; '
+        'review_go_box() { :; }; review_box() { :; }; '
+        'review_pane_keys "%s" slug ""; echo "1 ccc 3" > "%s"; review_pane_keys "%s" slug ""'
+        % (repo, checked, repo))
+    check("pane-report-rounds-only", "REPORT 1 slug" in err, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

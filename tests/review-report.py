@@ -443,6 +443,20 @@ with tempfile.TemporaryDirectory() as wt:
         finally:
             del os.environ[review_report.UNLESS_ENV]
         check("unless-%s" % ("same" if not printed else "other"), bool(out.getvalue()), printed)
+    # As a fix session works, only a round finished since is news: other
+    # open findings with the same rounds print nothing, other rounds do.
+    rounds_part = shown.rpartition(" rounds:")[2]
+    for unless, printed in (("open:other rounds:" + rounds_part, False), ("open:other rounds:0/0", True)):
+        os.environ[review_report.UNLESS_ENV] = unless
+        os.environ[review_report.ROUNDS_ONLY_ENV] = "1"
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                review_report.main()
+        finally:
+            del os.environ[review_report.UNLESS_ENV]
+            del os.environ[review_report.ROUNDS_ONLY_ENV]
+        check("rounds-only-%s" % ("same" if not printed else "other"), bool(out.getvalue()), printed)
     check("still-running", "one review run still running" in text, True)
     check("closed-without-fix",
           "Fixed 5 of 10 (50%) · without a fix 3 (30%), 1 waiting for you to resolve on GitHub" in text, True)

@@ -214,6 +214,21 @@ breaks the other silently — grep before you edit:
   `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review/review_report.py`
   (`review_report` in `review_gate.sh`).
 
+- The journal of a feature's topic, `.sclaude/local/feature/telegram-log.jsonl`,
+  is named by `FILE` in `keepawake/tg_journal.py`, which `Bot.call` in
+  `keepawake/botapi.py`, the update loop in `keepawake/telegramd.py` and
+  `journal` in `bin/sclaude-notify` write through, and by `run_retro` in
+  `sclaude/lib/improve/retro.sh`, which hands it to `retro.md` and
+  `retro-again.md` as `<telegram-log>`; an edit or a deletion finds its
+  topic in the record of a topic's messages (below). `tests/tg-journal.py`,
+  `tests/keepawake.py`, `tests/terminal.py` and `tests/render.py` check each
+  side. Renamed on one side alone, the journal is written where the
+  retrospective never looks.
+
+  <!-- Added by Claude on 2026-11-22 at the user's request, in a
+  retrospective: Telegram kept no history to tell a message sent twice from
+  one sent once, and the retrospective is to read what went there. -->
+
 - The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
   (`KEEPAWAKE_TOPICS` in tests), is named once, by `topic_ledger` in
   `keepawake/state.py`. It is written by `remember_in_topic` in

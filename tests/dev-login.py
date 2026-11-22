@@ -662,6 +662,18 @@ def check_proxy(root, wt, dport, login_file):
         check("demo: the captions are served as WebVTT",
               (status.split(" ", 1)[1], headers.get("content-type")),
               ("200 OK", "text/vtt; charset=utf-8"))
+        # A file a scenario kept for the person's own try: a download of any
+        # kind, even one named like a page, under the name it was kept by.
+        prefix = re.search(r'const FILE_PREFIX = "([^"]+)"', filler).group(1)
+        check("demo: play.mjs names kept files as the proxy serves them",
+              'DEMO_FILE_PREFIX = "%s"' % prefix in proxy_src, True)
+        for kept, ctype in (("event.ics", "application/octet-stream"), ("x.html", "application/octet-stream")):
+            write(os.path.join(recorded, "%s1-2-%s" % (prefix, kept)), "BEGIN:VCALENDAR")
+            status, headers, body = request(port, host, tail + "/%s1-2-%s" % (prefix, kept))
+            check("demo: a kept file %s goes out as a download" % kept,
+                  (status.split(" ", 1)[1], headers.get("content-type"),
+                   headers.get("content-disposition"), body),
+                  ("200 OK", ctype, 'attachment; filename="%s"' % kept, "BEGIN:VCALENDAR"))
         with open(os.path.join(recorded, "big.webm"), "wb") as fh:
             fh.write(b"x" * (5 * 1024 * 1024))
         status, headers, _ = request(port, host, tail + "/big.webm", extra=["Range: bytes=0-"])
@@ -810,6 +822,17 @@ def check_proxy(root, wt, dport, login_file):
               (demo.videos(clips_dir, res) == [os.path.join(clips_dir, "scenario-1.mp4")],
                body.count("![](./"), "![](./scenario-1.mp4)" in body, "📱 phone" in body),
               (True, 1, True, True))
+        res["scenarios"][0]["byHand"] = {"why": "only a calendar shows it",
+                                         "steps": [{"do": "Open the file", "expect": "18:00"}]}
+        res["scenarios"][0]["files"] = [{"src": "file-1-1-e.ics", "name": "e.ics", "label": ""}]
+        body = demo.demo_body(res, "", "http://h/", clips_dir)
+        check("demo comment: a scenario's case to try by hand is told under it",
+              ("✋ **Try it yourself** — only a calendar shows it (on the demo's page — files: `e.ics`)" in body,
+               "1. Open the file — expect: 18:00" in body), (True, True))
+        check("demo comment: a case with only links is told too, as the pages show it",
+              demo.hand_rows({"byHand": {"why": "the mail", "steps": [],
+                                         "links": [{"label": "Inbox", "path": "/inbox"}]}}),
+              ["✋ **Try it yourself** — the mail (on the demo's page — links: Inbox)", ""])
 
         # A delta: measured from the last full demo, kept in the history with
         # the stages, the commits and the change; told in the topic, and put
@@ -845,11 +868,10 @@ def check_proxy(root, wt, dport, login_file):
                 fh.write(state_before)
         with open(issue_file) as fh:
             posted = json.load(fh)
-        check("demo delta: the next full demo's comment carries it",
-              ("#### Δ What changed, by hand → preview" in posted[-1]["body"],
-               "The button is now green" in posted[-1]["body"]), (True, True))
+        check("demo delta: the next full demo's comment does not carry it — the topic and the page do",
+              ("Δ" in posted[-1]["body"], "The button is now green" in posted[-1]["body"]), (False, False))
         _, _, body = request(port, host, "/__sclaude/demo/f1/")
-        check("demo delta: the next full demo keeps it in the topic, takes the full one before out",
+        check("demo delta: the next full demo keeps it in the topic, takes the full ones before out",
               ([l for l in calls if l.startswith("notify --delete")],
                [e.get("messages") for e in demo.history(wt)]),
               (["notify --delete 102"], [None, None, None, [103], [104]]))
@@ -944,6 +966,30 @@ def check_proxy(root, wt, dport, login_file):
               (old_left, demo.history(wt)[mains[-2]].get("messages")),
               ("0 earlier message(s) deleted, from 1 recording(s); 1 too old for Telegram "
                "to delete, left in the chat", None))
+        # Every full demo before the new one leaves the topic; every delta
+        # stays, the ones before the last full demo too.
+        saved_hist = open(os.path.join(wt, demo.DEMO_DIR, "history.json")).read()
+        with open(os.path.join(wt, demo.DEMO_DIR, "history.json"), "w") as fh:
+            json.dump([{"id": "a", "kind": "main", "messages": [1]}, {"id": "b", "kind": "delta", "messages": [2]},
+                       {"id": "c", "kind": "main", "messages": [3]}, {"id": "d", "kind": "delta", "messages": [4]},
+                       {"id": "e", "kind": "main", "messages": [5]}], fh)
+        delete_args = os.path.join(root, "asked-delete")
+        with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+            fh.write('#!/bin/sh\necho "$@" > "%s"\n' % delete_args)
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            gone = demo.withdraw_old(wt, "e")
+        finally:
+            os.environ["PATH"] = saved_path
+            with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+                fh.write(notify_stub)
+            kept_msgs = [e.get("messages") for e in demo.history(wt)]
+            with open(os.path.join(wt, demo.DEMO_DIR, "history.json"), "w") as fh:
+                fh.write(saved_hist)
+        check("demo: a full demo deletes every full one before it and no delta",
+              (open(delete_args).read().split(), gone, kept_msgs),
+              (["--delete", "1", "--delete", "3"], "2 earlier message(s) deleted, from 2 recording(s)",
+               [None, [2], None, [4], [5]]))
         check("demo: the feature's removal deletes the ref demo.py keeps",
               'update-ref -d "%s"' % (demo.DEMO_REF % "$label")
               in open(os.path.join(ROOT, "sclaude", "lib", "tree", "worktree.sh")).read(), True)

@@ -60,7 +60,8 @@ def sigs(script):
     start = src.index("function sig(s, demo)")
     body = src[start:src.index("\n}\n", start) + 3]
     vp = src.index("const viewportOf")
-    body = src[vp:src.index(";\n", vp) + 2] + body
+    hand = src.index("function byHandOf(s)")
+    body = (src[vp:src.index(";\n", vp) + 2] + src[hand:src.index("\n}\n", hand) + 3] + body)
     done = subprocess.run(["node", "--input-type=module", "-e", SIG % body, script],
                           capture_output=True, text=True)
     return json.loads(done.stdout)
@@ -85,6 +86,11 @@ try:
     for n in (1, 2):
         write(os.path.join(before, "scenario-%d.mp4" % n), "video %d" % n)
         write(os.path.join(before, "scenario-%d.vtt" % n), "WEBVTT\n")
+    # Scenario two kept a file for the person's own try: taken with it.
+    meta = json.load(open(os.path.join(before, "demo.json")))
+    meta["scenarios"][1]["files"] = [{"src": "file-2-1-event.ics", "name": "event.ics", "label": ""}]
+    write(os.path.join(before, "demo.json"), json.dumps(meta))
+    write(os.path.join(before, "file-2-1-event.ics"), "BEGIN:VCALENDAR")
 
     out = os.path.join(tmp, "all-kept")
     done = subprocess.run(["node", PLAY, script, "--out", out, "--base", "http://f.localhost:1",
@@ -95,6 +101,15 @@ try:
            open(os.path.join(out, "scenario-2.mp4")).read(),
            os.path.isfile(os.path.join(out, "index.html"))),
           (2, True, "video 2", False))
+    check("a kept scenario's file for the person is taken with it",
+          open(os.path.join(out, "file-2-1-event.ics")).read(), "BEGIN:VCALENDAR")
+    # What the person is to try by hand is the scenario's too: changed, it plays again.
+    hand = os.path.join(tmp, "hand.mjs")
+    write(hand, SCRIPT.replace('path: "/a",', 'path: "/a", byHand: { steps: ["open it"] },') % '"two"')
+    write(script, SCRIPT.replace('path: "/a",', 'path: "/a", byHand: { steps: ["open it", {do: "x"}] },') % '"two"')
+    check("byHand is part of what makes a scenario the same one",
+          (sigs(hand)[0] != sigs(script)[0], sigs(hand)[1] == two), (True, True))
+    write(script, SCRIPT % '"two"')
     done = subprocess.run(["node", PLAY, script, "--out", os.path.join(tmp, "past"), "--base",
                            "http://f.localhost:1", "--keep-from", before, "--only", "5"],
                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)

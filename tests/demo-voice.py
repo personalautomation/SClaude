@@ -95,7 +95,7 @@ console.log(JSON.stringify({ why, secs, blank, dead, after, arrow: spokenFor("A 
             out = os.path.join(tmp, "out.mp4")
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", video] +
                            [x if not x.endswith(".wav") else os.path.join(tmp, x) for x in track["inputs"]] +
-                           ["-filter_complex", track["filter"]] + track["map"] + ["-c:v", "copy", out],
+                           ["-filter_complex", track["filter"], "-map", "0:v"] + track["map"] + ["-c:v", "copy", out],
                            check=True)
             streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
                                       "-of", "csv=p=0", out], capture_output=True, text=True).stdout.split()

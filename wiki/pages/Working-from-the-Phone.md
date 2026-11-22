@@ -66,7 +66,9 @@ three features in parallel included.
   of asking, and gives you a summary of its decisions in the morning.
 - **Demo videos**, recorded by the agent: each feature clicked through as its
   users, on a desktop and a phone, with captions read aloud by a voice model
-  run on the laptop; the video lands on the issue for QA.
+  run on the laptop; the video lands on the issue for QA. What a browser
+  cannot show — a calendar file, a mail — it hands to you, with the steps,
+  the file the feature gave and links in, signed in.
 
 ## Read more
 

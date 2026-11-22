@@ -16,7 +16,18 @@
 //
 // Play in a row, a checkbox put into the page's <h1> (on by default, kept
 // in localStorage): a video that ends starts the next one, on the page and
-// on the screen.
+// on the screen, within its section (data-row: the feature's page marks
+// each version so; the end of one is no cue for the next). ⏮ and ⏭ over each video (Shift+P, Shift+N) start the one
+// before or after it, on the page and on the screen alike. Only one video
+// plays at a time: one that starts pauses every other.
+//
+// A video whose scenario ends in a case for the person to try by hand
+// (data-hand: its steps, files and links, and `at`, the second the
+// recording handed over) shows that case beside the picture in full screen
+// from that second: the video narrows and a panel slides in on the right
+// for HAND_SHOW seconds, then slides back out — seconds of the clock, since
+// the case often comes as the video ends. Nothing waits for the person:
+// the video and the row play on. Back before that second, it comes again.
 //
 // 📍 then a click on the frame puts a point in the address too: p=<x>,<y>,
 // in per cent of the video's own frame from its top left corner — not of the
@@ -89,7 +100,24 @@ font:400 13px/1 system-ui,sans-serif;color:inherit;opacity:.8;cursor:pointer;use
 label.inrow input{margin:0;cursor:pointer}
 .vw .vb .nx{display:none}
 .vstage .vw .vb .nx{display:inline-block}
-.vw .vb .nx.on{background:rgba(37,99,235,.85)}`;
+.vw .vb .nx.on{background:rgba(37,99,235,.85)}
+.vw .vb button:disabled{opacity:.35;cursor:default}
+/* The by-hand case beside the picture in full screen; see handView(). */
+.vw .hp{display:none}
+.vstage .vw{--hw:min(440px,36%);transition:padding-right .45s ease;overflow:hidden}
+.vstage .vw.handon{padding-right:var(--hw)}
+.vstage .vw.handon .vb{right:calc(var(--hw) + 8px)}
+.vstage .vw .hp{display:block;transform:translateX(100%);transition:transform .45s ease}
+.vstage .vw.handon .hp{transform:none}
+.vw .hp{position:absolute;top:0;right:0;bottom:0;width:var(--hw);overflow:auto;box-sizing:border-box;padding:22px 20px;
+background:#111827;color:#f9fafb;font:15px/1.5 system-ui,sans-serif;border-left:1px solid rgba(255,255,255,.15)}
+.vw .hp h3{margin:0 0 6px;font-size:18px}
+.vw .hp .why{color:#d1d5db;font-size:14px;margin:0 0 10px}
+.vw .hp ol{margin:10px 0;padding:0 0 0 22px;list-style:decimal}
+.vw .hp li{display:list-item;margin:6px 0;padding:0;border-radius:0;background:none;cursor:auto}
+.vw .hp .ex{color:#a7f3d0;font-size:14px}
+.vw .hp a{color:#93c5fd;display:block;margin:4px 0}
+.vw .vb button:disabled:hover{background:rgba(0,0,0,.6)}`;
   document.head.appendChild(css);
 
   const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
@@ -229,6 +257,8 @@ label.inrow input{margin:0;cursor:pointer}
   }
   for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
     document.addEventListener(ev, () => { if (screenEl() !== stage) offStage(); });
+  // A version unfolded or folded changes which videos are next door (⏮ ⏭).
+  document.addEventListener("toggle", (e) => { if (e.target.tagName === "DETAILS") for (const f of syncs) f(); }, true);
 
   // Play in a row: once a video ends the next one on the page starts, in
   // full screen as out of it. The next is the next in the page that has a
@@ -250,23 +280,51 @@ label.inrow input{margin:0;cursor:pointer}
   const many = [...document.querySelectorAll("video[data-v]")].filter(hasSource).length > 1;
   // In the page's order, the one on the stage counted where its placeholder is.
   const spot = (v) => (stage.contains(v) ? held : v);
-  function nextOf(video) {
-    const all = [...document.querySelectorAll("video[data-v]")].sort((a, b) => a === b ? 0 :
+  function ordered() {
+    return [...document.querySelectorAll("video[data-v]")].sort((a, b) => a === b ? 0 :
       spot(a).compareDocumentPosition(spot(b)) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+  }
+  function nextOf(video) {
+    const all = ordered();
     return all.slice(all.indexOf(video) + 1).find(playable) || null;
   }
+  function prevOf(video) {
+    const all = ordered();
+    return all.slice(0, all.indexOf(video)).reverse().find(playable) || null;
+  }
   const PRESS_PLAY = "▶ Press play to go on";
-  function playNext(video) {
-    const next = nextOf(video);
-    if (!next) return;
-    const wrap = next.closest(".vw");
+  // How long the by-hand panel stays beside the video, in seconds (see the top).
+  const HAND_SHOW = 15;
+  // The video `to` from its start, in full screen where the screen is, else
+  // scrolled to on the page; the one playing pauses as it starts (below).
+  function playFrom(to) {
+    const wrap = to.closest(".vw");
     if (screenEl() === stage) onStage(wrap);
     else wrap.scrollIntoView({block: "center", behavior: "smooth"});
-    next.currentTime = 0;
+    to.currentTime = 0;
     // A browser may refuse to play with sound when no click started it; a
     // pause the person made before it began is no refusal.
-    next.play().catch((e) => { if (e.name === "NotAllowedError") say(wrap, PRESS_PLAY, 6000); });
+    to.play().catch((e) => { if (e.name === "NotAllowedError") say(wrap, PRESS_PLAY, 6000); });
   }
+  // In a row: the next video, only from the same section where the page
+  // marks sections (data-row) — a version ended is not the next one begun.
+  function playNext(video) {
+    const next = nextOf(video), row = spot(video).closest("[data-row]");
+    if (next && (!row || row.contains(next))) playFrom(next);
+  }
+  // ⏮ ⏭ and Shift+P, Shift+N.
+  function goVideo(wrap, d) {
+    const video = wrap.querySelector("video"), to = d > 0 ? nextOf(video) : prevOf(video);
+    if (to) playFrom(to);
+    else say(wrap, d > 0 ? "This is the last video" : "This is the first video");
+  }
+  // Only the last video started plays: the rest pause, on the page and on
+  // the screen alike.
+  document.addEventListener("play", (e) => {
+    const v = e.target;
+    if (!(v instanceof HTMLVideoElement) || !v.dataset.v) return;
+    for (const other of document.querySelectorAll("video[data-v]")) if (other !== v && !other.paused) other.pause();
+  }, true);
 
   const flip = (video) => (video.paused ? video.play().catch(() => {}) : video.pause());
   function say(wrap, text, ms = 1200) {
@@ -507,7 +565,8 @@ label.inrow input{margin:0;cursor:pointer}
   // its keys always; with no video, the page keeps them (space scrolls). A
   // focused video takes space, Enter and the arrows itself: twice would
   // undo them.
-  const KEYS = "Keys: space or K play/pause · ← → or J L 5 s · [ ] step · , . frame · < > speed · M sound · F full screen";
+  const KEYS = "Keys: space or K play/pause · ← → or J L 5 s · [ ] step · , . frame · < > speed · M sound · F full screen" +
+    " · Shift+P Shift+N the video before or after";
   let hovered = null, used = null;
   // [wrapper, chosen]: chosen when the person points at it — on the screen,
   // under the pointer, holding the focus — not when it is only remembered.
@@ -538,7 +597,9 @@ label.inrow input{margin:0;cursor:pointer}
     if (t === video && NATIVE.includes(e.code)) return;
     const c = e.code, s = e.shiftKey;
     // Space on a button just pressed (⛶ itself) would press it again.
-    if (c === "Space" || c === "KeyK") flip(video);
+    if (s && c === "KeyP") { if (many) goVideo(wrap, -1); else return; }
+    else if (s && c === "KeyN") { if (many) goVideo(wrap, 1); else return; }
+    else if (c === "Space" || c === "KeyK") flip(video);
     else if (c === "ArrowLeft" || c === "KeyJ") video.currentTime = Math.max(0, video.currentTime - 5);
     else if (c === "ArrowRight" || c === "KeyL") video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
     else if (c === "BracketLeft") jump(wrap, -1);
@@ -578,7 +639,7 @@ label.inrow input{margin:0;cursor:pointer}
     const nx = document.createElement("button");
     nx.type = "button";
     nx.className = "nx";
-    nx.textContent = "⏭";
+    nx.textContent = "🔁";
     const nxView = () => {
       nx.classList.toggle("on", inRow);
       nx.title = "Play in a row: " + (inRow ? "on — the next video starts when this one ends" : "off");
@@ -586,7 +647,28 @@ label.inrow input{margin:0;cursor:pointer}
     nxView();
     rowViews.push(nxView);
     nx.addEventListener("click", () => setRow(!inRow));
-    bar.append(...(many ? [pin, link, nx, big] : [pin, link, big]));
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.className = "pv";
+    prev.textContent = "⏮";
+    prev.title = "The video before (Shift+P)";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "nv";
+    next.textContent = "⏭";
+    next.title = "The next video (Shift+N)";
+    prev.addEventListener("click", () => goVideo(wrap, -1));
+    next.addEventListener("click", () => goVideo(wrap, 1));
+    // Greyed where there is none: looked again whenever the bar may be seen,
+    // since a version unfolded or the stage's swap changes the neighbours.
+    const ends = () => { prev.disabled = !prevOf(video); next.disabled = !nextOf(video); };
+    if (many) {
+      wrap.addEventListener("pointerenter", ends);
+      wrap.addEventListener("focusin", ends);
+      syncs.push(ends);
+      ends();
+    }
+    bar.append(...(many ? [prev, next, pin, link, nx, big] : [pin, link, big]));
     const pick = document.createElement("div");
     pick.className = "pick";
     const dot = document.createElement("div");
@@ -707,6 +789,61 @@ label.inrow input{margin:0;cursor:pointer}
     // (a link to its last frame, the keys, the strip) stays where it was put.
     video.addEventListener("seeking", () => { if (video.paused) video.sought = true; });
     video.addEventListener("play", () => { video.sought = false; });
+    // The by-hand case beside the picture (see the top).
+    let hand = null;
+    try { hand = video.dataset.hand ? JSON.parse(video.dataset.hand) : null; } catch {}
+    const hp = document.createElement("div");
+    hp.className = "hp";
+    if (hand) {
+      const add = (tag, text, cls) => {
+        const el = document.createElement(tag);
+        el.textContent = text;
+        if (cls) el.className = cls;
+        return el;
+      };
+      hp.append(add("h3", "✋ Try it yourself"));
+      if (hand.why) hp.append(add("p", hand.why, "why"));
+      for (const f of hand.files || []) {
+        const a = add("a", "📎 " + (f.label || f.name) + (f.label ? " (" + f.name + ")" : ""));
+        a.href = f.href;
+        a.download = f.name;
+        hp.append(a);
+      }
+      if ((hand.steps || []).length) {
+        const ol = document.createElement("ol");
+        for (const x of hand.steps) {
+          const li = add("li", x.do);
+          if (x.expect) li.append(add("div", "✅ Expect: " + x.expect, "ex"));
+          ol.append(li);
+        }
+        hp.append(ol);
+      }
+      for (const l of hand.links || []) {
+        const a = add("a", "🔗 " + l.label + " →");
+        a.href = l.href;
+        a.target = "_blank";
+        a.rel = "noopener";
+        hp.append(a);
+      }
+      wrap.append(hp);
+      let crossed = false, timer = 0;
+      const handView = () => {
+        if (full() !== wrap || video.currentTime < hand.at - 0.1) {
+          crossed = false;
+          clearTimeout(timer);
+          wrap.classList.remove("handon");
+          return;
+        }
+        if (crossed) return;
+        crossed = true;
+        wrap.classList.add("handon");
+        timer = setTimeout(() => wrap.classList.remove("handon"), HAND_SHOW * 1000);
+      };
+      for (const ev of ["timeupdate", "seeked"]) video.addEventListener(ev, handView);
+      syncs.push(handView);
+      document.addEventListener("fullscreenchange", handView);
+      document.addEventListener("webkitfullscreenchange", handView);
+    }
     video.addEventListener("ended", () => { if (inRow && !video.sought) playNext(video); });
     new ResizeObserver(() => place(video)).observe(video);
   }

@@ -19,8 +19,18 @@
 //       title: "…", as: "<email>", path: "/start",
 //       shows: "…", look: ["…"], why: "…",
 //       async steps(d) { await d.click(d.page.getByRole("button", {name: "Save"}), "…"); },
+//       byHand: { why: "…", steps: ["…", {do: "…", expect: "…"}],
+//                 links: [{label?: "…", path: "/…" or a whole address, as?: "<email>"}] },
 //     }],
 //   };
+//
+// `byHand` is what the person has to try themselves, where the recorder
+// cannot follow (a file opened in another program, a mail, a phone's own
+// app): shown under the scenario's video with the files it saved —
+// d.download clicks something that downloads and keeps the file, d.save
+// writes one the script makes — and links to the product, signed in.
+// Those files go beside the videos named FILE_PREFIX…, which sclaude-proxy
+// serves as a download whatever their kind (DEMO_FILE_PREFIX).
 //
 // A step's text is a line, or {say, look, why}: what happens, where to look,
 // and what it proves — shown under the line on the page, in the video, on
@@ -99,6 +109,36 @@ const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 };
 const TIMEOUT = 10000;
+// What the recording says where its by-hand part begins (d.handOver).
+// Whatever the case holds — steps, links, files — "what comes with" it.
+const HAND_SAY = "This part could not be checked in the recording: try it yourself with what comes with this video";
+// A file a scenario keeps for the person (byHand): file-<scenario>-<n>-<name>.
+const FILE_PREFIX = "file-";
+// Shortened before its extension, which says what opens it.
+const fileName = (name) => {
+  const safe = String(name || "file").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[-.]+/, "") || "file";
+  const dot = safe.lastIndexOf("."), ext = dot > 0 && safe.length - dot <= 10 ? safe.slice(dot) : "";
+  return safe.slice(0, safe.length - ext.length).slice(0, 80 - ext.length) + ext;
+};
+// The scenario's byHand, in one shape: steps as {do, expect}, links as
+// {label, path, as}. Nothing to try gives null.
+function byHandOf(s) {
+  const h = s.byHand;
+  if (!h || typeof h !== "object") return null;
+  const steps = (Array.isArray(h.steps) ? h.steps : h.steps ? [h.steps] : []).map((x) =>
+    x && typeof x === "object" ? { do: String(x.do || ""), expect: String(x.expect || "") } : { do: String(x || ""), expect: "" })
+    .filter((x) => x.do || x.expect);
+  // A path, or a whole address written into the script, taken for its path;
+  // labelled by the path where the script gave no label. Read from the
+  // script before the steps run: a link added by a step is not seen.
+  const pathOf = (p) => { try { const u = new URL(String(p || "/"), "http://x"); return u.pathname + u.search + u.hash; } catch { return "/"; } };
+  const links = (Array.isArray(h.links) ? h.links : []).map((l) => {
+    const to = pathOf(l.path);
+    return { label: String(l.label || to), path: to, as: String(l.as || s.as || "") };
+  });
+  if (!steps.length && !links.length && !h.why) return null;
+  return { why: String(h.why || ""), steps, links };
+}
 
 // --- the overlay, injected into every document of a demo ---------------------
 //
@@ -134,18 +174,21 @@ const OVERLAY = String.raw`(() => {
       '.card h2{margin:0 0 4px;font-size:22px}.card .who{color:#6b7280;font-size:14px;margin-bottom:12px}' +
       '.card h3{margin:12px 0 2px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280}' +
       '.card ul{margin:0;padding-left:20px}' +
+      '.tip{position:fixed;max-width:min(420px,80vw);padding:5px 9px;border-radius:6px;background:#1f2937;color:#f9fafb;' +
+      'font-size:13px;line-height:1.35;white-space:pre-line;box-shadow:0 4px 14px rgba(0,0,0,.35);opacity:0;transition:opacity .15s}' +
       '.ctl{position:fixed;bottom:14px;right:14px;display:flex;gap:6px;pointer-events:auto}' +
       '.ctl button{border:0;border-radius:10px;padding:8px 12px;font-size:15px;cursor:pointer;' +
       'background:rgba(17,24,39,.9);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.3)}' +
       '.ctl .st{background:rgba(255,255,255,.95);color:#111827;font-size:13px;padding:8px 10px;border-radius:10px;' +
       'box-shadow:0 4px 14px rgba(0,0,0,.2)}' +
-      '</style><div class=ring></div><div class=cur></div><div class=card></div><div class=cap></div>' +
+      '</style><div class=ring></div><div class=cur></div><div class=tip></div><div class=card></div><div class=cap></div>' +
       '<div class=ctl hidden></div>';
     document.documentElement.appendChild(host);
     api.root = root;
     api.cap = root.querySelector(".cap");
     api.ringEl = root.querySelector(".ring");
     api.curEl = root.querySelector(".cur");
+    api.tipEl = root.querySelector(".tip");
     api.cardEl = root.querySelector(".card");
     api.ctl = root.querySelector(".ctl");
     if (window.__sdemoCtl) controls();
@@ -164,6 +207,19 @@ const OVERLAY = String.raw`(() => {
     if (x == null) { e.style.opacity = 0; return; }
     Object.assign(e.style, { left: x + "px", top: y + "px", opacity: 1 });
     e.classList.toggle("down", !!down);
+  });
+  // A title's tooltip, drawn here: the browser's own is no part of the
+  // page and never reaches the video (d.hover).
+  api.tip = (r, text) => later(() => {
+    const e = api.tipEl;
+    if (!r) { e.style.opacity = 0; return; }
+    e.textContent = text;
+    // Measured where it has the whole width, not squeezed by the last one's place.
+    Object.assign(e.style, { left: "0px", top: "0px" });
+    const below = r.y + r.height + 8, h = e.offsetHeight || 30;
+    // Under the pointer, which rests at the middle, as the browser puts its own.
+    Object.assign(e.style, { left: Math.max(8, Math.min(innerWidth - e.offsetWidth - 8, r.x + r.width / 2 - 10)) + "px",
+      top: (below + h < innerHeight ? below : Math.max(8, r.y - h - 8)) + "px", opacity: 1 });
   });
   api.card = (h) => later(() => {
     api.cardEl.innerHTML = h ? "<div>" + h + "</div>" : "";
@@ -210,6 +266,14 @@ const contexts = new Map(); // live: a context per user, its windows
 let voice = null; // the voice, when --voice and it started (voice.mjs)
 const READY_FOR = 90 * 1000; // how long the recording waits for it to start
 const CLIPS = new WeakMap(); // a scenario's record → its lines, for its encoding
+// A scenario's record → the stretches of its video where something shows
+// ([from, to] seconds): the card, a step's caption and action, a check, a
+// wait the script asked for. The voice's lines count too (finish). The rest
+// is waiting — a page loading, an element the script waits for, a slow
+// server — and a wait longer than GAP_MAX is cut to GAP_KEEP when the
+// video is encoded; the one before the card to GAP_LEAD (cutsOf).
+const BUSY = new WeakMap();
+const GAP_MAX = 2, GAP_KEEP = 1, GAP_LEAD = 0.5;
 class Skip extends Error {}
 class Stop extends Error {}
 
@@ -299,7 +363,27 @@ function progress(fields) {
   if (!LIVE) console.log("progress: " + JSON.stringify(fields));
 }
 
-function helpers(page, record, started, talk) {
+function helpers(page, record, started, talk, n) {
+  // What shows, for the cuts (BUSY): a stretch opens as a step starts and
+  // closes as it ends; a wait on the page inside it (`waiting`) is left out.
+  const spans = BUSY.get(record) || [];
+  BUSY.set(record, spans);
+  const now = () => (Date.now() - started) / 1000;
+  let from = now();
+  const done = () => { spans.push([from, now()]); };
+  const waiting = async (promise) => {
+    done();
+    try { return await promise; } finally { from = now(); }
+  };
+  // A file kept for the person, beside the videos; live there is no page to
+  // show it on.
+  const keep = async (name, label, write) => {
+    if (LIVE) return;
+    record.files ||= [];
+    const src = `${FILE_PREFIX}${n}-${record.files.length + 1}-${fileName(name)}`;
+    await write(path.join(OUT, src));
+    record.files.push({ src, name: fileName(name), label: String(label || "") });
+  };
   // The step before has been said by now: a step's line never runs over the
   // next one's.
   const note = async (kind, w, extra = {}) => {
@@ -308,6 +392,7 @@ function helpers(page, record, started, talk) {
     if (w.look) step.look = w.look;
     if (w.why) step.why = w.why;
     record.steps.push(step);
+    from = now();
     talk.say(w.voice);
     progress({ step: record.steps.length });
     return step;
@@ -326,16 +411,16 @@ function helpers(page, record, started, talk) {
       (w.why ? `<div class=sm>💡 ${esc(w.why)}</div>` : ""));
   async function point(target) {
     const loc = typeof target === "string" ? page.locator(target) : target;
-    await loc.first().waitFor({ state: "visible", timeout: TIMEOUT });
+    await waiting(loc.first().waitFor({ state: "visible", timeout: TIMEOUT }));
     await loc.first().scrollIntoViewIfNeeded({ timeout: TIMEOUT }).catch(() => {});
     const box = await loc.first().boundingBox();
     if (box) {
       await ov((b) => { window.__sdemo?.ring(b); window.__sdemo?.cursor(b.x + b.width / 2, b.y + b.height / 2); }, box);
-      await sleep(550);
+      await sleep(450);
     }
     return { loc: loc.first(), box };
   }
-  const clear = () => ov(() => window.__sdemo?.ring(null));
+  const clear = () => ov(() => { window.__sdemo?.ring(null); window.__sdemo?.tip(null); });
   async function act(kind, text, target, fn) {
     await gate(page);
     const w = words(text);
@@ -343,25 +428,29 @@ function helpers(page, record, started, talk) {
     await caption(w);
     try {
       const p = target ? await point(target) : {};
-      await sleep(readFor(" ".repeat(length(w))) * (kind === "say" ? 1 : 0.6));
+      await sleep(readFor(" ".repeat(length(w))) * (kind === "say" || kind === "hand" ? 1 : 0.6));
       await gate(page);
       if (fn) {
-        if (p.box) await ov((b) => window.__sdemo?.cursor(b.x + b.width / 2, b.y + b.height / 2, true), p.box);
-        await fn(p.loc);
+        if (p.box && kind !== "hover") await ov((b) => window.__sdemo?.cursor(b.x + b.width / 2, b.y + b.height / 2, true), p.box);
+        // A page being fetched shows nothing worth the seconds.
+        await (kind === "goto" ? waiting(fn(p.loc)) : fn(p.loc));
         await sleep(150);
         if (p.box) await ov(() => window.__sdemo?.cursor(null));
-        await page.waitForLoadState("domcontentloaded").catch(() => {});
-        await sleep(700);
+        await waiting(page.waitForLoadState("domcontentloaded").catch(() => {}));
+        await sleep(400);
       }
       await clear();
+      done();
     } catch (err) {
       if (err instanceof Stop) throw err;
       if (LIVE && page.isClosed()) throw closed(step);
       if (err instanceof Skip) throw err;
       step.error = String(err.message || err).split("\n")[0];
+      from = now();
       await caption({ say: (w.say ? w.say + " — " : "") + "did not work: " + step.error, look: "", why: "" },
         "⚠ ", "bad");
       await sleep(2500);
+      done();
       throw err;
     }
   }
@@ -376,8 +465,47 @@ function helpers(page, record, started, talk) {
     }),
     select: (target, value, text) => act("select", text, target, (l) => l.selectOption(value)),
     press: (key, text) => act("press", text, null, () => page.keyboard.press(key)),
+    // The moment the recording hands over to the person (byHand): said and
+    // spoken, a step of its own ("hand") — the demo pages show the by-hand
+    // steps beside the video from it. Played after the steps by itself when
+    // the script does not place it. Live there is no recording to hand over from.
+    handOver: async (text) => {
+      if (LIVE) return;
+      await act("hand", text ?? { say: HAND_SAY, look: record.byHand?.why || "" }, null);
+    },
+    // Rests the pointer on it: what the page does on hover is recorded as it
+    // is, and a title's tooltip — the browser's, never in the video — is
+    // drawn beside it for as long as it takes to read. Live, the browser
+    // shows its own.
+    hover: (target, text) => act("hover", text, target, async (l) => {
+      await l.hover({ timeout: TIMEOUT });
+      // The nearest title up from it, as the browser picks: an attribute, or
+      // an SVG element's own <title> child; its lines trimmed as the browser's.
+      const tip = LIVE ? "" : await l.evaluate((el) => {
+        for (let n = el; n; n = n.parentElement) {
+          if (n.hasAttribute("title")) return n.getAttribute("title");
+          const t = n instanceof SVGElement && n.querySelector(":scope > title");
+          if (t) return t.textContent.split("\n").map((x) => x.trim()).filter(Boolean).join("\n");
+        }
+        return "";
+      });
+      if (!tip.trim()) return;
+      const box = await l.boundingBox();
+      if (box) await ov(([b, t]) => window.__sdemo?.tip(b, t), [box, tip]);
+      await sleep(readFor(tip));
+      // Gone with the pointer, as the browser's own goes.
+      await ov(() => window.__sdemo?.tip(null));
+    }),
+    // Clicks what downloads a file, and keeps the file for the person's own
+    // try (byHand): opts {name, label}, the name the browser offered else.
+    download: (target, text, opts = {}) => act("download", text, target, async (l) => {
+      const [file] = await Promise.all([page.waitForEvent("download", { timeout: TIMEOUT }), l.click({ timeout: TIMEOUT })]);
+      await keep(opts.name || file.suggestedFilename(), opts.label, (to) => file.saveAs(to));
+    }),
+    // A file the script makes itself (a CSV to upload, say), kept the same way.
+    save: (name, data, label) => keep(name, label, (to) => fs.promises.writeFile(to, data)),
     goto: (p, text) => act("goto", text, null, () => page.goto(BASE + p)),
-    wait: async (ms) => { await gate(page); await sleep(ms); },
+    wait: async (ms) => { await gate(page); from = now(); await sleep(ms); done(); },
     // A check says what must be seen, and is marked passed or failed in the
     // caption and on the page; a failed one does not stop the scenario.
     check: async (target, text) => {
@@ -397,8 +525,9 @@ function helpers(page, record, started, talk) {
         step.error = `not seen within ${TIMEOUT / 1000} s`;
         await caption({ ...w, say: w.say + " — not seen" }, "✗ ", "bad");
       }
-      await sleep(readFor(" ".repeat(length(w))));
+      await sleep(readFor(" ".repeat(length(w))) * 0.7);
       await clear();
+      done();
     },
   };
 }
@@ -431,7 +560,7 @@ async function onPage(page, fn, arg) {
 // Everything the demo draws, taken off the page.
 const wipe = (page) => page.evaluate(() => {
   const d = window.__sdemo;
-  d?.card(null); d?.caption(""); d?.ring(null); d?.cursor(null);
+  d?.card(null); d?.caption(""); d?.ring(null); d?.cursor(null); d?.tip(null);
 }).catch(() => {});
 
 async function signIn(context, s) {
@@ -480,6 +609,8 @@ async function scenario(browser, demo, s, i, contexts) {
   const viewport = viewportOf(s, demo);
   const record = { title: s.title, as: s.as, path: s.path || "/", shows: s.shows || "", why: s.why || "",
     look: Array.isArray(s.look) ? s.look : s.look ? [s.look] : [], steps: [], viewport };
+  const hand = byHandOf(s);
+  if (hand) record.byHand = hand;
   const size = VIEWPORTS[viewport];
   let context = LIVE ? contexts.get(s.as) : null;
   if (!context) {
@@ -529,9 +660,13 @@ async function scenario(browser, demo, s, i, contexts) {
   }
   await page.waitForLoadState("load").catch(() => {});
   const talk = talker(started, i + 1);
+  const spans = [];
+  BUSY.set(record, spans);
+  const since = (t) => spans.push([(t - started) / 1000, (Date.now() - started) / 1000]);
   try {
     // A pause pressed as the page landed holds before the card covers it.
     await gate(page);
+    const card = Date.now();
     await onPage(page, (h) => window.__sdemo?.card(h), cardHtml(s));
     // The card spoken: its title — what it shows is a paragraph, read on the
     // card — or the scenario's own `voice` ("" for nothing).
@@ -541,11 +676,16 @@ async function scenario(browser, demo, s, i, contexts) {
     await gate(page);
     await onPage(page, () => window.__sdemo?.card(null));
     await sleep(400);
-    await s.steps(helpers(page, record, started, talk));
+    since(card);
+    const d = helpers(page, record, started, talk, i + 1);
+    await s.steps(d);
+    if ((record.byHand || record.files?.length) && !record.steps.some((st) => st.kind === "hand")) await d.handOver();
     await talk.hold();
     await gate(page);
+    const end = Date.now();
     await page.evaluate(() => window.__sdemo?.caption('<b>✓ end of this scenario</b>')).catch(() => {});
     await sleep(1500);
+    since(end);
   } catch (err) {
     // Skipped, stopped or failed, nothing of the demo is left on a page the
     // person may now take over.
@@ -592,7 +732,7 @@ function localTime() {
 function sig(s, demo) {
   const look = Array.isArray(s.look) ? s.look : s.look ? [s.look] : [];
   return createHash("sha1").update(JSON.stringify([s.title, s.as, s.path || "/", viewportOf(s, demo),
-    s.shows || "", look, s.why || "", String(s.steps), s.voice ?? null])).digest("hex").slice(0, 16);
+    s.shows || "", look, s.why || "", String(s.steps), s.voice ?? null, byHandOf(s)])).digest("hex").slice(0, 16);
 }
 
 // The scenarios taken from the earlier recording (--keep-from), by index:
@@ -616,19 +756,21 @@ function keepPlan(demo) {
     if (ONLY.has(i + 1)) continue;
     const r = (before.scenarios || [])[i];
     const files = r ? [...(r.sources || []).map((v) => v.src), r.captions].filter(Boolean) : [];
+    const kept = r ? (r.files || []).map((f) => f.src) : [];
     // Spoken now and silent there, or the other way: played again, so that
     // one demo's videos are all spoken or all silent.
     const sameVoice = r?.voiced !== "partly" && !!r?.voiced === !!voice;
     const ok = r && !r.error && !r.skipped && r.sig && r.sig === sig(s, demo) && sameVoice && files.length
-      && files.every((f) => fs.existsSync(path.join(KEEP_FROM, f)));
+      && [...files, ...kept].every((f) => fs.existsSync(path.join(KEEP_FROM, f)));
     if (!ok) {
       if (r) console.log(`scenario ${i + 1}: plays again — ${r.error || r.skipped ? "it did not play there"
         : r.sig !== sig(s, demo) ? "it changed since" : !sameVoice ? (r.voiced === "partly" ? "it is partly spoken there"
           : voice ? "it is silent there" : "it is spoken there")
-        : "its video is not there"}`);
+        : files.length && files.every((f) => fs.existsSync(path.join(KEEP_FROM, f)))
+          ? "a file it kept for the person is not there" : "its video is not there"}`);
       continue;
     }
-    for (const f of files) {
+    for (const f of [...files, ...kept]) {
       // A hard link where the file system allows: the same video twice costs nothing.
       try { fs.linkSync(path.join(KEEP_FROM, f), path.join(OUT, f)); }
       catch { fs.copyFileSync(path.join(KEEP_FROM, f), path.join(OUT, f)); }
@@ -644,14 +786,43 @@ function keepPlan(demo) {
   return plan;
 }
 
+// The stretches to cut out of a video ([from, to] seconds): where nothing
+// shows (BUSY) and no line is being said for longer than GAP_MAX, all but
+// GAP_KEEP of it, half on each side; before the first thing that shows,
+// all but its last GAP_LEAD.
+function cutsOf(spans, clips) {
+  const all = [...spans, ...clips.map((c) => [c.t, c.t + c.seconds])]
+    .filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const [a, b] of all) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  const cuts = [];
+  merged.forEach(([a], k) => {
+    if (!k) { if (a > GAP_LEAD + 0.25) cuts.push([0, a - GAP_LEAD]); return; }
+    const prev = merged[k - 1][1];
+    if (a - prev > GAP_MAX) cuts.push([prev + GAP_KEEP / 2, a - GAP_KEEP / 2]);
+  });
+  return cuts;
+}
+
 // A scenario's video made what the page plays, and its captions.
 async function finish(r) {
   const clips = CLIPS.get(r) || [];
   await Promise.all(clips.map((c) => c.done));
   const made = clips.filter((c) => c.seconds != null);
+  // The waits cut out, and every time after a cut moved back by it: the
+  // lines and the steps — the steps only when the cut was made, which an
+  // MP4 says (the WebM fallback keeps its waits).
+  const cuts = cutsOf(BUSY.get(r) || [], made);
+  const moved = (t) => Math.round(cuts.reduce((x, [a, b]) => x - Math.max(0, Math.min(t, b) - a), t) * 1000) / 1000;
   try {
     let refused;
-    [r.sources, refused] = await squeeze(r.video, made);
+    [r.sources, refused] = await squeeze(r.video, made.map((c) => ({ ...c, t: moved(c.t) })), cuts);
+    if (cuts.length && r.sources[0].type === "video/mp4")
+      for (const st of r.steps) st.t = moved(st.t);
     // Spoken through (`true`), silent (none), or "partly": some lines on
     // the track and some not — the voice died or a line never came — which
     // neither a spoken retry nor a silent one takes (keepPlan).
@@ -828,7 +999,7 @@ function vtt(r) {
 // The voice's lines, when there are any, go on its sound track (trackArgs);
 // the second value is true when ffmpeg refused the track and the video went
 // silent.
-async function squeeze(name, clips = []) {
+async function squeeze(name, clips = [], cuts = []) {
   const src = path.join(OUT, name);
   const webm = [{ src: name, type: "video/webm" }];
   const mp4 = name.replace(/\.webm$/, ".mp4");
@@ -842,19 +1013,28 @@ async function squeeze(name, clips = []) {
     try { os.setPriority(child.pid, 10); } catch {}
   });
   const track = trackArgs(clips);
+  // The parts kept between the cuts, joined: the waits taken out (cutsOf).
+  const kept = cuts.map(([, b], k) => [b, k + 1 < cuts.length ? cuts[k + 1][0] : null]);
+  if (cuts.length && cuts[0][0] > 0) kept.unshift([0, cuts[0][0]]);
+  const cut = kept.length ? kept.map(([a, b], k) =>
+    `[0:v]trim=start=${a.toFixed(3)}${b == null ? "" : `:end=${b.toFixed(3)}`},setpts=PTS-STARTPTS[k${k}]`).join(";") +
+    `;${kept.map((_, k) => `[k${k}]`).join("")}concat=n=${kept.length}:v=1:a=0[cut]` : "";
+  const picture = cut ? ["-map", "[cut]"] : ["-map", "0:v"];
+  const silent = cut ? ["-filter_complex", cut, ...picture, "-an"] : ["-an"];
   let refused = false;
   try {
     // A track ffmpeg refuses costs the voice, not the MP4: encoded again
     // silent — and blamed on the track only when that one works.
     if (track) {
       try {
-        await encode([...track.inputs, "-filter_complex", track.filter, ...track.map]);
+        await encode([...track.inputs, "-filter_complex", [cut, track.filter].filter(Boolean).join(";"),
+          ...picture, ...track.map]);
       } catch (err) {
-        await encode(["-an"]);
+        await encode(silent);
         refused = true;
         console.log(`voice: ${name} is silent — ffmpeg refused its track: ${err.message}`);
       }
-    } else await encode(["-an"]);
+    } else await encode(silent);
     if (!fs.statSync(path.join(OUT, mp4)).size) return [webm, false];
   } catch {
     return [webm, false];

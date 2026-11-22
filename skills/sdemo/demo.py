@@ -35,10 +35,11 @@
 #                                       the step under way, the frame cut out
 #                                       with the point drawn on it
 #
-# A full demo that goes to the topic deletes the messages of the full demo
-# before it and of everything older (withdraw_old): the topic keeps the
-# current demo and the deltas leading to it. The feature's page keeps every
-# recording, as its history of versions.
+# A full demo that goes to the topic deletes the messages of every full demo
+# before it (withdraw_old): the topic keeps the current demo and every delta,
+# which stays true of the change it shows. The issue's demo comment carries
+# the current full demo alone. The feature's page keeps every recording, as
+# its history of versions.
 #   demo.py open <email> <path> [<email> <path>]... [--feature F]
 #                                       the links in chrome-debug, laptop's
 #
@@ -522,13 +523,13 @@ def publish(wt, label, demo, entry, results, phone):
         keep_field(wt, demo, "unsent", why)
     if ids:
         keep_messages(wt, demo, ids)
-        # A full demo that went out makes the one before it, and what came
-        # before that, old news in the chat: they leave it (the page keeps
-        # them, as its history).
+        # A full demo that went out makes the full ones before it old news in
+        # the chat: they leave it, the deltas stay (the page keeps them all,
+        # as its history).
         if entry["kind"] == "main":
             print("telegram: " + withdraw_old(wt, demo))
-    # The issue keeps one demo comment, written with a full demo: a delta goes
-    # into it with the full demo that follows it (a delta is recorded first).
+    # The issue keeps one demo comment, the current full demo alone, written
+    # in place of the one before; deltas stay in the topic and on the page.
     if entry["kind"] == "main":
         print("issue: " + issue_comment(wt, results, phone, here))
 
@@ -697,20 +698,17 @@ def keep_messages(wt, demo, ids):
 
 
 def withdraw_old(wt, demo):
-    """The chat's messages of every recording up to the full demo before
-    `demo` (that one included) deleted: what stays in the topic is the new
-    full demo and the deltas that lead to it — what the issue's comment
-    shows too. The history keeps the entries; a deleted one loses its
-    `messages`. What happened, in a few words."""
+    """The chat's messages of every full demo before `demo` deleted, their
+    videos with them: what stays in the topic is the new full demo and every
+    delta ever recorded — a delta says what changed and when, which a later
+    full demo does not make untrue. The history keeps the entries; a
+    deleted one loses its `messages`. What happened, in a few words."""
     entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")
                and not e.get("kept")]
     pos = next((k for k, e in enumerate(entries) if e.get("id") == demo), None)
     if pos is None:
         return "nothing earlier to delete"
-    mains = [k for k, e in enumerate(entries[:pos]) if e.get("kind") == "main"]
-    if not mains:
-        return "nothing earlier to delete"
-    old = {e["id"]: e["messages"] for e in entries[:mains[-1] + 1] if e.get("messages")}
+    old = {e["id"]: e["messages"] for e in entries[:pos] if e.get("kind") == "main" and e.get("messages")}
     ids = [m for ms in old.values() for m in ms]
     if not ids:
         return "nothing earlier to delete"
@@ -825,7 +823,8 @@ def write_feature_page(wt, label):
     current one — the latest full demo, since when it is current, what
     changed in it, its videos; below, every earlier version, newest first,
     marked outdated, with the time it was the current one. Nothing is left
-    out: the topic keeps only the current demo, the page keeps them all."""
+    out: the topic keeps the current full demo and the deltas, the issue the
+    current full demo alone, the page every recording."""
     import html as h
     # Only what played and went out: a recording that did not, or one still
     # held, was never published.
@@ -842,19 +841,67 @@ def write_feature_page(wt, label):
             out.append((os.path.relpath(path, os.path.join(wt, DEMO_DIR)) if path else "", sc))
         return out
 
+    def login(sc, link):
+        return "/__sclaude/login?" + urlencode({
+            "f": label, "as": link.get("as") or sc.get("as") or "",
+            "next": dev_login.safe_next(link.get("path") or "/")})
+
+    def hand_data(entry, sc):
+        """The by-hand case for deeplink.js, shown beside the video in full
+        screen from the step where the recording handed over — as `handData`
+        in player.html writes it on the demo's own page."""
+        hand, files = sc.get("byHand") or {}, sc.get("files") or []
+        at = next((st.get("t") for st in sc.get("steps") or [] if st.get("kind") == "hand"), None)
+        if (not hand and not files) or at is None:
+            return ""
+        return json.dumps({"at": at, "why": hand.get("why", ""), "steps": hand.get("steps") or [],
+                           "files": [{"href": "%s/%s" % (entry["id"], f.get("src", "")), "name": f.get("name", ""),
+                                      "label": f.get("label", "")} for f in files],
+                           "links": [{"href": login(sc, l), "label": l.get("label", "")}
+                                     for l in hand.get("links") or []]})
+
+    def hand_block(entry, sc):
+        """What the person tries themselves (the scenario's byHand), with the
+        files it kept and links into the product signed in — as `byHand` in
+        player.html writes it on the demo's own page."""
+        hand, files = sc.get("byHand") or {}, sc.get("files") or []
+        if not hand and not files:
+            return ""
+        out = ["<div class=hand><h4>✋ Try it yourself</h4>"]
+        if hand.get("why"):
+            out.append("<p class=sub>%s</p>" % h.escape(hand["why"]))
+        if files:
+            out.append("<div class=files>%s</div>" % "".join(
+                "<a href='%s/%s' download='%s'>📎 %s</a>" % (
+                    h.escape(entry["id"]), h.escape(f.get("src", "")), h.escape(f.get("name", "")),
+                    h.escape(f.get("label") or f.get("name", "")) + (
+                        " <span class=sub>(%s)</span>" % h.escape(f.get("name", "")) if f.get("label") else ""))
+                for f in files))
+        if hand.get("steps"):
+            out.append("<ol>%s</ol>" % "".join(
+                "<li>%s%s</li>" % (h.escape(x.get("do", "")),
+                                   "<div class=sub>✅ Expect: %s</div>" % h.escape(x["expect"]) if x.get("expect") else "")
+                for x in hand["steps"]))
+        if hand.get("links"):
+            out.append("<div class=links>%s</div>" % "".join(
+                "<a href='%s' target=_blank rel=noopener>🔗 %s →</a>" % (h.escape(login(sc, l)), h.escape(l.get("label", "")))
+                for l in hand["links"]))
+        return "".join(out) + "</div>"
+
     def grid(entry, preload):
         # data-v names the video in the address (deeplink.js): the demo's id
         # and the scenario's number, so a link stays good as versions pile up.
         return "<div class=grid>%s</div>" % "".join(
-            "<figure>%s<figcaption>%s</figcaption></figure>" % (
-                "<video controls playsinline preload=%s data-v='%s' data-pages='%s' data-steps='%s' src='%s'></video>" % (
+            "<figure>%s<figcaption>%s</figcaption>%s</figure>" % (
+                "<video controls playsinline preload=%s data-v='%s' data-pages='%s' data-steps='%s'%s src='%s'></video>" % (
                     preload, h.escape("%s.%d" % (entry["id"], n)),
                     h.escape(json.dumps([[0, sc.get("path") or ""]] + [
                         [st.get("t") or 0, st.get("url") or ""] for st in sc.get("steps") or []])),
                     h.escape(json.dumps(steps_strip(sc))),
+                    " data-hand='%s'" % h.escape(hand_data(entry, sc)) if hand_data(entry, sc) else "",
                     h.escape(c))
                 if c else "<p class=sub>⚠ no video: %s</p>" % h.escape(sc.get("error") or "not recorded"),
-                h.escape(sc.get("title", "")))
+                h.escape(sc.get("title", "")), hand_block(entry, sc))
             for n, (c, sc) in enumerate(clips(entry), 1))
 
     def facts(e):
@@ -890,7 +937,7 @@ def write_feature_page(wt, label):
     parts = ["<header><h1>%s</h1><p class=sub>%s · %d version(s) of the demo</p></header>" % (
         h.escape(title or label), h.escape(label), len(found))]
     if newer:
-        parts.append("<section class='card newer'><span class='badge amber'>NEWER CHANGE</span>"
+        parts.append("<section class='card newer' data-row><span class='badge amber'>NEWER CHANGE</span>"
                      "<h2>Not in a full demo yet</h2><p class=sub>Recorded after the current "
                      "version; the next full demo will take it in.</p>%s</section>"
                      % changes(newer, "metadata"))
@@ -898,7 +945,7 @@ def write_feature_page(wt, label):
         cur = found[-1]
         m = cur["main"]
         parts.append(
-            "<section class='card current'><span class='badge green'>CURRENT</span> "
+            "<section class='card current' data-row><span class='badge green'>CURRENT</span> "
             "<span class=ver>v%d</span><h2>Current since %s</h2><p class=sub>%s · "
             "<a href='%s/'>scenarios with their steps →</a></p>%s%s%s</section>" % (
                 len(found), at(m), facts(m), h.escape(m["id"]), confirms(cur),
@@ -912,7 +959,7 @@ def write_feature_page(wt, label):
             m = v["main"]
             took = lasted(m, nxt["main"])
             cards.append(
-                "<li class='card old'><span class='badge grey'>OUTDATED</span> "
+                "<li class='card old' data-row><span class='badge grey'>OUTDATED</span> "
                 "<span class=ver>v%d</span><h3>Current from %s to %s%s</h3>"
                 "<p class=sub>%s · replaced by v%d · <a href='%s/'>scenarios with their steps →</a></p>"
                 "%s%s<details><summary>the whole feature as it was (%d video(s))</summary>%s</details></li>" % (
@@ -949,6 +996,9 @@ details{margin:4px 0}summary{cursor:pointer;color:var(--mute);font-size:13px}
 .timeline>li{position:relative}.timeline>li::before{content:"";position:absolute;left:-26px;top:20px;
 width:10px;height:10px;border-radius:50%%;background:var(--line);border:2px solid var(--bg)}
 code{font-size:13px}
+.hand{margin-top:8px;padding:8px 10px;border:1px dashed #2563eb;border-radius:8px;font-size:14px}
+.hand h4{font-size:14px;margin:0 0 4px}.hand ol{margin:6px 0 0;padding-left:22px}
+.hand .files,.hand .links{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px}
 </style></head><body><main>%s</main><script>%s</script></body></html>""" % (
         TAB_ICON, h.escape(label), "".join(parts), deeplink_script())
     with open(os.path.join(wt, DEMO_DIR, "index.html"), "w") as fh:
@@ -977,7 +1027,11 @@ def videos(out, results):
 
 
 def scenario_rows(results, out, root):
-    """A recording's scenarios for the comment: how each went, its video under it."""
+    """A recording's scenarios for the comment: how each went, its video under it.
+
+    The script's words (titles, the change, the by-hand case) go into the
+    comment's Markdown as they are, unescaped: the demo's own session writes
+    them, not an outsider — the user's decision of 2026-11-22."""
     rows = []
     for i, s in enumerate(results.get("scenarios") or [], 1):
         bad = [st for st in s.get("steps") or [] if st.get("ok") is False or st.get("error")]
@@ -988,13 +1042,30 @@ def scenario_rows(results, out, root):
             " · 📱 phone" if s.get("viewport") == "phone" else "", how))
         clip = videos(out, {"scenarios": [s]}) if out else []
         rows += ["", "![](./%s)" % os.path.relpath(clip[0], root), ""] if clip else [""]
+        rows += hand_rows(s)
     return rows
 
 
-def demo_body(results, phone, here, out=None, deltas=(), root=None):
-    """The issue's demo comment: the links; what changed since the last full
-    demo (`deltas`: (entry, its recording, its directory)); the full demo,
-    the commit it shows and how each scenario went, videos under them."""
+def hand_rows(s):
+    """A scenario's case for the person to try by hand, for the comment:
+    its steps in words; the files and the signed-in links are on the demo's
+    page, which the comment links to. Told whenever the pages show the block."""
+    hand, files = s.get("byHand") or {}, s.get("files") or []
+    if not hand and not files:
+        return []
+    there = (["files: " + ", ".join("`%s`" % f.get("name", "") for f in files)] if files else []) + (
+        ["links: " + ", ".join(l.get("label", "") for l in hand["links"])] if hand.get("links") else [])
+    rows = ["✋ **Try it yourself**%s%s" % (
+        " — " + hand["why"] if hand.get("why") else "",
+        " (on the demo's page — %s)" % "; ".join(there) if there else "")]
+    rows += ["%d. %s%s" % (n, x.get("do", ""), " — expect: " + x["expect"] if x.get("expect") else "")
+             for n, x in enumerate(hand.get("steps") or [], 1)]
+    return rows + [""]
+
+
+def demo_body(results, phone, here, out=None, root=None):
+    """The issue's demo comment: the links; the full demo, the commit it
+    shows and how each scenario went, videos under them."""
     root = root or out
     head = results.get("head") or ""
     lines = [DEMO_MARKER, "### 🎬 Demo", "",
@@ -1003,14 +1074,6 @@ def demo_body(results, phone, here, out=None, deltas=(), root=None):
                                      " on `%s`" % head[:7] if head else ""), ""]
     lines += (["- 📱 phone, over the tailnet: " + phone] if phone else [])
     lines += ["- 💻 the laptop it runs on: " + here, ""]
-    for entry, rec, where in deltas:
-        lines += ["#### Δ What changed, %s → %s" % (entry.get("from") or "?", entry["stage"]), "",
-                  entry.get("change") or "", ""]
-        lines += ["<details><summary>%d commit(s)</summary>" % len(entry.get("commits") or []), ""]
-        lines += ["- `%s`" % c for c in entry.get("commits") or []] + ["", "</details>", ""]
-        lines += scenario_rows(rec, where, root)
-    if deltas:
-        lines += ["#### The whole feature", ""]
     lines += scenario_rows(results, out, root)
     lines += ["<sub>The page has each scenario's steps beside its video, a link on "
               "each step to go on by hand, signed in, and every change before; it "
@@ -1021,8 +1084,9 @@ def demo_body(results, phone, here, out=None, deltas=(), root=None):
 
 def issue_comment(wt, results, phone, here):
     """Write the demo comment on the feature's issue — the full demo just
-    recorded and the deltas recorded since the one before it — its videos
-    attached, in place of the one before; what happened. A comment's
+    recorded, its videos attached — in place of the one before; what
+    happened. Deltas are not posted there: a comment's attachments stay on
+    GitHub after it is deleted, and the topic and the page keep them. A comment's
     attachments cannot be changed by editing it, so the old one is deleted
     and a new one posted — the newest in the issue, where a reader looks
     first."""
@@ -1038,18 +1102,13 @@ def issue_comment(wt, results, phone, here):
     if found is None:
         return "not written — issue #%s could not be read (gh, network or permissions)" % issue
     root = os.path.join(wt, DEMO_DIR)
-    # Only what played: a recording that did not was never published. A
-    # keep is no recording, and no new version: the deltas since the full
-    # demo before it still lead to this one, as on the page and in the topic.
-    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")
-               and not e.get("kept")]
-    mains = [k for k, e in enumerate(entries) if e.get("kind") == "main"]
-    since = mains[-2] + 1 if len(mains) > 1 else 0
-    deltas = [(e, recording(wt, e["id"]), os.path.join(root, e["id"]))
-              for e in entries[since:] if e.get("kind") == "delta"]
-    out = os.path.join(root, entries[mains[-1]]["id"]) if mains else root
-    clips = [c for _, rec, where in deltas for c in videos(where, rec)] + videos(out, results)
-    body = demo_body(results, phone, here, out, deltas, root)
+    # Only what played: a recording that did not was never published, and a
+    # keep is no recording.
+    mains = [e for e in history(wt) if not e.get("broken") and not e.get("held")
+             and not e.get("kept") and e.get("kind") == "main"]
+    out = os.path.join(root, mains[-1]["id"]) if mains else root
+    clips = videos(out, results)
+    body = demo_body(results, phone, here, out, root)
     note = os.path.join(root, "issue-comment.md")
     with open(note, "w") as fh:
         fh.write(body)

@@ -140,10 +140,16 @@ with tempfile.TemporaryDirectory() as root:
                                       "error": "not seen within 10 s"}]}]})
     delta = demo.history(wt)[-1]["id"]
     code, lines = play(True, {"title": "T", "scenarios": [
-        {"title": "Likes", "steps": [{"text": "the list says so", "ok": False,
-                                      "error": "not seen within 10 s"}]}]})
+        {"title": "Likes", "as": "a@x", "steps": [{"text": "the list says so", "ok": False,
+                                      "error": "not seen within 10 s"},
+                                     {"kind": "hand", "text": "try it yourself", "t": 7.5}],
+         "files": [{"src": "file-1-1-likes.ics", "name": "likes.ics", "label": "The calendar file"}],
+         "sources": [{"src": "scenario-1.mp4", "type": "video/mp4"}],
+         "byHand": {"why": "Only a calendar app shows it", "links": [{"label": "The list", "path": "/likes", "as": "b@x"}],
+                    "steps": [{"do": "Open the file", "expect": "One event at 18:00"}]}}]})
     held_ids = refresh.held(wt, before)
     last = demo.history(wt)[-1]["id"]
+    write(os.path.join(wt, demo.DEMO_DIR, last, "scenario-1.mp4"), "video")
     check("held: the last delta and the last full recording are the ones to publish",
           held_ids, [delta, last])
     check("held: nothing held is measured from, until it goes out",
@@ -165,6 +171,16 @@ with tempfile.TemporaryDirectory() as root:
           ("Second try" in page, "First try" in page), (True, False))
     check("page: it carries the place in a video in the address",
           demo.deeplink_script() in page, True)
+    check("page: what the person tries by hand is under the scenario, with its file and a signed-in link",
+          ("✋ Try it yourself" in page, "Only a calendar app shows it" in page,
+           "href='%s/file-1-1-likes.ics' download='likes.ics'" % last in page,
+           "Open the file<div class=sub>✅ Expect: One event at 18:00" in page,
+           "/__sclaude/login?f=f1&amp;as=b%40x&amp;next=%2Flikes" in page),
+          (True, True, True, True, True))
+    check("page: the video carries its by-hand case for full screen, from the hand step",
+          ("data-hand='{&quot;at&quot;: 7.5" in page, "&quot;href&quot;: &quot;%s/file-1-1-likes.ics&quot;" % last in page,
+           "data-hand" in demo.deeplink_script()), (True, True, True))
+    check("page: play in a row keeps to each version's section", "class='card current' data-row" in page, True)
     check("history: the try never published stays held",
           [e.get("held") for e in demo.history(wt) if e["id"] == first_delta], [True])
     code, lines = said(demo.cmd_publish, ["nothing"], "f1", wt)

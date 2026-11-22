@@ -151,8 +151,9 @@ records a demo of the feature, on a desktop and on a phone
 short delta of only what changed for a user, then the whole demo again — and
 gives the link first in its report; the link
 and the videos go to the feature's topic and to a demo comment on the issue,
-where QA finds them; a new full demo takes the earlier one out of both, and
-the feature's demo page keeps every version as its history. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
+where QA finds them — the full demo, while each delta stays in the topic
+alone; a new full demo takes the earlier full one out of both, and the
+feature's demo page keeps every version as its history. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
 on with no question of its own; **Remarks**, and you say what is wrong and the
 session carries on. The step closes when you accept the work **and** the
 product's local tests pass. A branch not
@@ -196,8 +197,9 @@ Once the preview's tests pass, before the issue goes to QA, when the
 product's code changed since the last demo — the review may have changed what
 the feature does — a headless session records a delta of what changed for the
 user and the whole demo again, starting from the last script and what changed,
-and the issue's demo comment is replaced: step 2's demo is for you accepting
-the work, this one for QA to see what the feature is and what changed. Only
+and the issue's demo comment is replaced by the whole demo, the delta going
+to the topic and the page: step 2's demo is for you accepting the work, this
+one for QA to see what the feature is and what changed. Only
 where a person does QA (`qa: github` or `both`, or `auto-own` on somebody
 else's issue); with `qa: auto` (or `auto-own` on your own issue) the whole demo
 is recorded again before the last epilogue instead, and no delta. Where

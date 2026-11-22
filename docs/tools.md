@@ -126,12 +126,31 @@ terminal only — with:
   focus is on no link or button of the page (a text field keeps its keys
   always): space or K play and pause, ← → or J L five seconds, `[` `]` the
   step before or after, `,` `.` a frame on pause, `<` `>` the speed (kept
-  for the next visit), M the sound, F full screen. ⛶'s tooltip lists them.
+  for the next visit), M the sound, F full screen, Shift+P Shift+N the video
+  before or after. ⛶'s tooltip lists them.
+- **✋ Try it yourself**, under a scenario's video where part of the check is
+  beyond the recorder — a downloaded file opened in another program, a mail,
+  a phone's own app: the steps to take and what should happen, the files to
+  download (the very ones the feature gave in the recording) and links into
+  the product, opened signed in as the scenario's user. On the demo's page
+  and on the feature's. The video says, in a caption and aloud, where its
+  part ends and yours begins; in full screen the picture narrows at that
+  moment and what to try slides in on the right for a few seconds, the video
+  playing on.
+- ⏮ and ⏭ over each video start the one before or after it from the
+  beginning, on the page and in full screen alike; a video folded away (an
+  earlier version) is passed over. Only one video plays at a time: starting
+  one pauses whichever was playing.
 - **Play in a row**, a checkbox in the page's heading, on by default: when a
   video ends the next one starts, on the page and in full screen alike; a
-  video folded away (an earlier version) is passed over. In full screen ⏭
+  video folded away (an earlier version) is passed over. On the feature's
+  page it stops at the end of a section — the newer change, the current
+  version, each earlier one — rather than run into the next. In full screen 🔁
   turns it on and off. The choice is kept for the next visit. An iPhone's
   own full-screen player stops at the end of its video.
+
+A wait where nothing happens on the screen — a page loading, a slow server —
+is cut down to a second in the videos.
 
 Each feature has one demo page, `/__sclaude/demo/<feature>/`, with every demo
 it ever had, as versions: a full demo and the deltas recorded before it — a
@@ -142,9 +161,10 @@ demo is recorded again after a change. On top the current version, marked
 sentence, its videos — and the whole feature. Below it the history, newest
 first: each earlier version marked **OUTDATED**, with the time it was the
 current one (from — to, and how long), its videos folded. The feature's
-Telegram topic keeps only the current version: a new full demo deletes the
-earlier ones there — all but a message older than 48 hours, which Telegram
-does not let a bot delete. `/sdemo delta` records one
+Telegram topic keeps the current full demo and every delta: a new full demo
+deletes the earlier full ones there, videos and all — but a message older
+than 48 hours, which Telegram does not let a bot delete. The issue's demo
+comment carries the current full demo alone; deltas are not posted there. `/sdemo delta` records one
 by hand; when nothing changed for a user, it records nothing. The page is
 linked from the proxy's list of features, under the feature, and from its
 process map — a feature built in parts too, whose page has only the parts'

@@ -119,7 +119,8 @@ export const spokenFor = (text) => 0.25 + 0.056 * String(text || "").replace(/�
 // the tail of the line runs a little over the next one instead.
 const FASTEST = 1.3;
 
-// What ffmpeg needs, after the video's own input (0), to lay the lines on a
+// What ffmpeg needs, after the video's own input (0) — whose picture the
+// caller maps itself, cut or whole — to lay the lines on a
 // track at their times: an input per line, and the filter that delays each to
 // its time and mixes them. A line's place is up to the next line (the last
 // one's, its estimate and the end caption's moment); a line longer than its
@@ -138,6 +139,6 @@ export function trackArgs(clips) {
   });
   const mix = clips.length === 1 ? "[a0]anull[voice]"
     : `${clips.map((_, i) => `[a${i}]`).join("")}amix=inputs=${clips.length}:normalize=0:dropout_transition=0[voice]`;
-  return { inputs, filter: [...delayed, mix].join(";"), map: ["-map", "0:v", "-map", "[voice]",
+  return { inputs, filter: [...delayed, mix].join(";"), map: ["-map", "[voice]",
     "-c:a", "aac", "-b:a", "96k"] };
 }

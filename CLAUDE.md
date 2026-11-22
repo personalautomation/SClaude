@@ -268,7 +268,14 @@ breaks the other silently — grep before you edit:
   proxy puts the current file in its place as a page goes out (`demo_page`),
   finding it by the file's first line (`DEMO_SCRIPT_HEAD`): reword that line
   and old pages keep the player they were recorded with; the same test
-  checks the swap.
+  checks the swap. A file a scenario keeps for the person's own try
+  (`byHand`, `d.download`/`d.save`) is named `FILE_PREFIX…` by play.mjs and
+  served as a download of any kind by the proxy's `DEMO_FILE_PREFIX`; the
+  ✋ block that offers it is `byHand` in `player.html` and `hand_block` in
+  demo.py, and the panel beside the video in full screen is `data-hand`,
+  written by `handData` in `player.html` and `hand_data` in demo.py from the
+  recording's `hand` step (`d.handOver` in play.mjs) and read by deeplink.js. `tests/dev-login.py` checks the prefix, `tests/demo-refresh.py`
+  the feature's page, `tests/demo-again.py` that a retry keeps the file.
 - The demo's comment on the issue is headed by `DEMO`, declared in
   `sclaude/lib/github/issue_comments.py` and imported by `skills/sdemo/demo.py`,
   which writes it only for sclaude (`SCLAUDE_SESSION`, set by

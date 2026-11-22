@@ -139,6 +139,15 @@ export default {
         });
         await d.check(d.page.getByText("Members only"), "The hidden fields are marked");
       },
+      // Only where a part of the check is beyond the recorder — see below.
+      byHand: {
+        why: "Only a calendar app shows the time the file carries.",
+        steps: [
+          "Download the event's calendar file above.",
+          { do: "Open it in your calendar app", expect: "Climbing on Friday at 18:00, your local time" },
+        ],
+        links: [{ label: "The event as its owner sees it", path: "/events/42" }],  // `as` defaults to the scenario's
+      },
     },
   ],
 };
@@ -155,9 +164,23 @@ address, and wait for the target (10 s):
 | `d.fill(target, value, text)` | types the value into it |
 | `d.select(target, value, text)` | picks an option of a `<select>` |
 | `d.press(key, text)` | a key, e.g. `"Enter"` |
+| `d.hover(target, text)` | rests the pointer on it; a `title`'s tooltip (or an SVG `<title>`'s) is drawn beside it |
 | `d.goto(path, text)` | another page of the feature |
 | `d.check(target, text)` | marks ✓ when it is visible, ✗ when not; goes on either way |
 | `d.wait(ms)` | a pause |
+| `d.download(target, text, {name, label}?)` | clicks what downloads a file and keeps the file for the person (`byHand`) |
+| `d.save(name, data, label?)` | keeps a file the script makes itself (a CSV to upload), no step shown |
+| `d.handOver(text?)` | where the by-hand part begins: said and spoken; played after the steps by itself when not placed |
+
+Hover with `d.hover`, not Playwright's `.hover()`: what the page itself
+draws on hover is recorded either way, but the tooltip of a `title`
+attribute or of an SVG element's `<title>` is the browser's, never in the video, and only `d.hover` draws it there.
+
+Where nothing shows for more than two seconds — a page loading, an element
+the script waits for that may not come, a slow server — the recording cuts
+the wait down to a second; the steps and the voice keep to the picture. A
+wait still costs the recording its time, so keep a script's own timeouts
+short.
 
 A target is a Playwright locator (or a CSS selector string). Prefer
 `getByRole`, `getByLabel`, `getByText` with the names the components really
@@ -172,6 +195,29 @@ scenario's own `voice` replaces its title). Keep lines to a sentence: a
 long line is a long step.
 The scenario's `shows`, `look` and `why` open it as a card. A failed action
 ends its scenario (the next one runs); a failed check does not.
+
+**What the person must try themselves.** Where a scenario's point cannot be
+seen in the browser — a downloaded file opened in another program (a
+calendar's `.ics`, a PDF, a spreadsheet), a mail or a message that arrives
+elsewhere, a phone's own app, a print — the recording shows as far as it
+goes, and the scenario's `byHand` says the rest: `why` it is by hand, its
+`steps` (a line, or `{do, expect}` — what to do and what should happen,
+concrete: the values, the time, the words to look for) and `links` into the
+product, opened signed in as `as` (the scenario's user when left out) — a
+`path`, or a whole address written into the script, of which the path is
+kept; without a `label` the link is named by its path. `byHand` is read
+before the steps run, so write its links into the script, not from a step. The files the steps need are kept by the
+recording itself — `d.download` on the button that downloads it, `d.save`
+for one the person has to upload — so the page offers exactly the file the
+feature gave. Under the scenario's video, on its page and on the feature's,
+a **✋ Try it yourself** block lists the files to download, the steps and the
+links. The recording says where its part ends and the person's begins — a
+caption and the voice: "This part could not be checked in the recording: try
+it yourself with what comes with this video" — after the steps, or
+where `d.handOver()` puts it; in full screen the video narrows from that
+second and what to try slides in beside it for a while, the video playing on. Write the steps for somebody who has not read the code, and name in
+the answer that the demo has a case to try by hand. Not for what the
+recorder can check itself.
 
 A demo acts on the feature's own local database as a person would: it may
 create and change data there; it does not delete the seed's users or data
@@ -190,7 +236,8 @@ the user in one sentence, in business terms ("A guest now sees the price, not
 places that changed, each one's `shows` saying what it was before and what it
 is now, desktop and phone where the change differs between them. A delta is
 recorded before the full demo that follows it: played, it goes to the
-feature's topic, and into the issue with that full demo.
+feature's topic, where it stays, and to the feature's page — not to the
+issue, whose demo comment carries the current full demo alone.
 
 ## 4b. A part's demo, and the whole feature from the parts
 
@@ -219,10 +266,11 @@ demo's length and more. Recorded, it prints a line per scenario (`done`, or what
 `where:`, `link:` and `other:` for the demo's page, the way section 6 reads
 them. In a session sclaude runs (`SCLAUDE_SESSION` is set) it then sends
 the links and the scenarios' videos to the feature's Telegram topic (`sent:`)
-— a full demo also deletes the topic's messages of the full demo before it
-and of everything older (`telegram: N earlier message(s) deleted`), so the
-topic holds the current demo and the deltas leading to it; Telegram lets a bot
-delete nothing older than 48 hours, which stays — and posts them, with how each scenario went and the commit shown, as the
+— a full demo also deletes the topic's messages of every full demo before
+it, their videos with them (`telegram: N earlier message(s) deleted`), so the
+topic holds the current demo and every delta, which stays true of what it
+shows; Telegram lets a bot delete nothing older than 48 hours, which stays —
+and, a full demo only, posts them, with how each scenario went and the commit shown, as the
 issue's demo comment, the earlier one deleted (`issue: posted on #N with K
 video(s)`, or why not); anywhere else it says
 `kept here:` and sends nothing — give the links in the answer, as always.
@@ -283,7 +331,8 @@ changed does not, so name it. Once the product's code changed, play them all
 not do what it should is a finding: keep it, and say so.
 
 The answer: one line where the link is for, the link, then a line per
-scenario — its title and the user — and what did not work, if anything. End
+scenario — its title and the user — and what did not work, if anything;
+a scenario with `byHand` says so ("✋ to try by hand: <what>"). End
 with the `other:` link for the other place.
 
 Live, `play --live` brings chrome-debug forward and returns at once: the

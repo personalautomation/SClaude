@@ -954,6 +954,9 @@ DEMO_KINDS = {".html": "text/html; charset=utf-8", ".json": "application/json; c
 # and the player asks for the rest. A range given both ends is answered as
 # asked — players ask for small ones.
 DEMO_CHUNK = 4 * 1024 * 1024
+# A file a scenario kept for the person to try by hand (FILE_PREFIX in
+# skills/sdemo/play.mjs): any kind, always a download, never a page.
+DEMO_FILE_PREFIX = "file-"
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
@@ -1026,12 +1029,13 @@ def demo_file(path, wanted=""):
         return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     label, demo, name = parts
     name = name or "index.html"
-    kind = DEMO_KINDS.get(os.path.splitext(name)[1])
+    kept = name.startswith(DEMO_FILE_PREFIX)
+    kind = "application/octet-stream" if kept else DEMO_KINDS.get(os.path.splitext(name)[1])
     found = feature(label)
     if not found or not kind or not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", name):
         return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     file = os.path.join(found[0], DEMO_DIR, demo, name)
-    if name.endswith(".html"):
+    if name.endswith(".html") and not kept:
         try:
             with open(file, "rb") as fh:
                 return respond("200 OK", demo_page(fh.read().decode("utf-8", "replace")))
@@ -1063,6 +1067,9 @@ def demo_file(path, wanted=""):
             "Cache-Control: no-store", "Connection: close"]
     if status.startswith("206"):
         head.append("Content-Range: bytes %d-%d/%d" % (start, end, size))
+    if kept:
+        # The name without the prefix and the scenario's numbers.
+        head.append('Content-Disposition: attachment; filename="%s"' % name.split("-", 3)[-1])
     return ("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + data
 
 

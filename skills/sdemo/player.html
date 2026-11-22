@@ -45,6 +45,13 @@ div.now:empty{display:none}
 div.now .sm{font-size:15px}
 .chg{font-size:16px;margin:4px 0 8px}
 .take{display:inline-block;margin-top:10px;font-size:14px;color:var(--acc)}
+/* What the person tries themselves (byHand), under the video. */
+.hand{margin-top:12px;padding:10px 12px;border:1px dashed var(--acc);border-radius:10px}
+.hand h3{font-size:14px;margin:0 0 4px}
+.hand ol{list-style:decimal;margin:6px 0 0;padding-left:22px}
+.hand ol li{display:list-item;cursor:auto;padding:2px 0}
+.hand .files,.hand .links{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;font-size:14px}
+.hand a{color:var(--acc)}
 </style>
 </head>
 <body>
@@ -62,8 +69,35 @@ const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padSt
 // host on the laptop, on the shared one (f= routes it) from the phone.
 function takeOver(as, url) {
   let next = "/";
-  try { const u = new URL(url); next = u.pathname + u.search + u.hash; } catch {}
+  try { const u = new URL(url, "http://x"); next = u.pathname + u.search + u.hash; } catch {}
   return "/__sclaude/login?" + new URLSearchParams({f: FEATURE, as, next});
+}
+// What the person has to try themselves, where the recorder could not
+// follow: the steps, the files the scenario kept (beside this page) and
+// links into the product, signed in. Written the same way by `hand_block`
+// in demo.py for the feature's page.
+function byHand(s) {
+  const h = s.byHand, files = s.files || [];
+  if (!h && !files.length) return "";
+  return `<div class=hand><h3>✋ Try it yourself</h3>${h && h.why ? `<div class=sm>${esc(h.why)}</div>` : ""}` +
+    (files.length ? `<div class=files>${files.map((f) =>
+      `<a href="${esc(f.src)}" download="${esc(f.name)}">📎 ${esc(f.label || f.name)}${f.label ? ` <span class=sm>(${esc(f.name)})</span>` : ""}</a>`).join("")}</div>` : "") +
+    (h && h.steps.length ? `<ol>${h.steps.map((x) => `<li>${esc(x.do)}${x.expect ? `<div class=sm>✅ Expect: ${esc(x.expect)}</div>` : ""}</li>`).join("")}</ol>` : "") +
+    (h && h.links.length ? `<div class=links>${h.links.map((l) =>
+      `<a href="${esc(takeOver(l.as || s.as, l.path))}" target=_blank rel=noopener>🔗 ${esc(l.label)} →</a>`).join("")}</div>` : "") +
+    `</div>`;
+}
+// The same case for deeplink.js, which shows it beside the video in full
+// screen from the step where the recording handed over (kind "hand"):
+// data-hand='{at, why, steps, files: [{href, name, label}], links: [{href, label}]}',
+// as `hand_data` in demo.py writes it on the feature's page.
+function handData(s) {
+  const h = s.byHand, files = s.files || [];
+  const at = (s.steps.find((st) => st.kind === "hand") || {}).t;
+  if ((!h && !files.length) || at == null) return "";
+  return JSON.stringify({at, why: h ? h.why : "", steps: h ? h.steps : [],
+    files: files.map((f) => ({href: f.src, name: f.name, label: f.label || ""})),
+    links: (h ? h.links : []).map((l) => ({href: takeOver(l.as || s.as, l.path), label: l.label}))});
 }
 const app = document.getElementById("app");
 document.title = DEMO.title;
@@ -72,11 +106,11 @@ ${esc(new Date(DEMO.made).toLocaleString())} · tap a step to jump there; "take 
 to go on by hand</div><nav>${DEMO.scenarios.map((s, i) => `<a href="#s${i + 1}">${i + 1}. ${esc(s.title)}</a>`).join("")}</nav>` +
 DEMO.scenarios.map((s, i) => `<section id="s${i + 1}"><h2>${i + 1}. ${esc(s.title)}</h2>
 <div class=who>as ${esc(s.as)}<span class=vp>${s.viewport === "phone" ? "📱 phone" : "🖥 desktop"}</span></div><div class=grid><div>
-${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i} data-v="s${i + 1}" data-pages="${esc(JSON.stringify([[0, s.path || ""], ...s.steps.map((st) => [st.t, st.url || ""])]))}" data-steps="${esc(JSON.stringify(s.steps.map((st) => [st.t, st.text || st.kind || "", st.ok === true ? 1 : st.ok === false || st.error ? 0 : null, st.look || ""])))}"${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
+${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i} data-v="s${i + 1}" data-pages="${esc(JSON.stringify([[0, s.path || ""], ...s.steps.map((st) => [st.t, st.url || ""])]))}" data-steps="${esc(JSON.stringify(s.steps.map((st) => [st.t, st.text || st.kind || "", st.ok === true ? 1 : st.ok === false || st.error ? 0 : null, st.look || ""])))}"${handData(s) ? ` data-hand="${esc(handData(s))}"` : ""}${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
   `<source src="${esc(v.src)}" type='${esc(v.type)}'>`).join("")}${s.captions ?
   `<track kind=captions srclang=en label="Steps" src="${esc(s.captions)}"${PHONE ? " default" : ""}>` : ""}</video>
 <div class=now data-i=${i}></div>` : ""}
-${s.error ? `<div class=err>⚠ ${esc(s.error)}</div>` : ""}</div>
+${s.error ? `<div class=err>⚠ ${esc(s.error)}</div>` : ""}${byHand(s)}</div>
 <div class=about>${s.shows ? `<h3>What this shows</h3><div>${esc(s.shows)}</div>` : ""}
 ${s.look.length ? `<h3>Look at</h3><ul>${s.look.map((l) => `<li style="display:list-item;padding:0;cursor:auto">${esc(l)}</li>`).join("")}</ul>` : ""}
 ${s.why ? `<h3>Why this case</h3><div>${esc(s.why)}</div>` : ""}

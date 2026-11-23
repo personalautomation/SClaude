@@ -694,7 +694,8 @@ def single_quoted(command, name):
     tokenize() drops the quotes, so `'$S/a'` comes out as the same word as
     `$S/a`; bash takes the first as a literal name in the current directory.
     """
-    line = readable(command) or strip_heredocs(command)
+    line = readable(command)
+    line = strip_heredocs(command) if line is None else line
     quote, i = None, 0
     pattern = re.compile(r"\$(?:" + re.escape(name) + r"(?![A-Za-z0-9_])|\{"
                          + re.escape(name) + r"\})")
@@ -751,7 +752,8 @@ def writes(command):
     # already stripped heredocs; this scan runs before it and did not. It
     # reads the line tokenize() reads: in the raw one an apostrophe in
     # `"$(echo "it's")"` paired with a later one and hid the `>` between them.
-    line = QUOTED_VARIABLE.sub(r"\1", readable(command) or strip_heredocs(command))
+    line = readable(command)
+    line = QUOTED_VARIABLE.sub(r"\1", strip_heredocs(command) if line is None else line)
     unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", line)
     for match in re.finditer(r"(?<![0-9<>])>>?(?!&)\s*([^\s;|&<>()]*)", unquoted):
         # The target decides. The bare `>` used to be enough, and it made

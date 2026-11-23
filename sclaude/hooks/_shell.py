@@ -167,6 +167,12 @@ def readable(command, heredocs=False):
     did the masking and a regex the heredocs, each disagreement hid the lines
     after it from every ban. With `heredocs` their bodies stay, for a reader
     that judges them too.
+
+    Comments go too, up to their newline, which stays as the separator it is:
+    the shell runs none of them, and an apostrophe in one (`# the user's`)
+    opened a quote shlex never saw closed — a line bash runs as it stands was
+    refused as unparsable. Where a `#` opens one is scan()'s word_start(), so
+    `a#b`, `$#` and a quoted `#` stay words.
     """
     spans = []
     if scan(command, 0, False, spans) is None or any(k == "tick" for _, _, k in spans):
@@ -185,6 +191,8 @@ def readable(command, heredocs=False):
             command = command[:start] + command[stop:]
         elif kind == "sub":
             command = command[:start] + QUOTED_BODY + command[stop:]
+        elif kind == "comment":
+            command = command[:start] + command[stop:]
     return command
 
 
@@ -199,7 +207,8 @@ def tokenize(command, mask=False):
     """
     try:
         # A line scan() cannot read is taken as the regex reads it.
-        command = readable(command) or strip_heredocs(command)
+        line = readable(command)
+        command = strip_heredocs(command) if line is None else line
         return shlex.split(split_separators(mask_quoted(command) if mask else command))
     except ValueError:
         return None
@@ -291,8 +300,9 @@ def scan(text, i, closing, spans=None):
 
     With `spans`, (start, stop, "sub") is added to it for each body that
     stands in double quotes, (start, stop, "tick") for a backtick body out of
-    them, and (start, stop, "doc") for each heredoc's body
-    with its delimiter line, in a substitution's body too (readable).
+    them, (start, stop, "doc") for each heredoc's body
+    with its delimiter line, in a substitution's body too (readable), and
+    (start, stop, "comment") for each comment, its newline left out.
     """
     out, quote, depth, heredocs = [], "", 1, []
     while i < len(text):
@@ -361,7 +371,10 @@ def scan(text, i, closing, spans=None):
         # escaped blank, as in `a\ #`.
         if ch == "#" and word_start(text, i):
             end = text.find("\n", i)
-            i = len(text) if end == -1 else end
+            end = len(text) if end == -1 else end
+            if spans is not None:
+                spans.append((i, end, "comment"))
+            i = end
             continue
         if ch == "\n" and heredocs:
             for delimiter, quoted, tabs in heredocs:

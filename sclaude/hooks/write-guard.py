@@ -211,19 +211,32 @@ def heredoc_programs(command, cwd):
     keeps a misreading there, such as a heredoc in a substitution, from
     handing the body to a call on another line. The directory is the call's,
     followed through `cd` as calls() follows it.
+
+    The slice up to a body leaves that heredoc open, which readable() cannot
+    read, so its comments are cut here: an apostrophe in one made the slice
+    unparsable and the body went unchecked.
     """
     spans = []
     if scan(command, 0, False, spans) is None:
         return []
     out, by_line = [], {}
+    comments = [(start, stop) for start, stop, kind in spans if kind == "comment"]
+
+    def upto(end):
+        text = command[:end]
+        for start, stop in sorted(comments, reverse=True):
+            if stop <= end:
+                text = text[:start] + text[stop:]
+        return text
+
     for start, stop, kind in sorted(spans):
         if kind == "doc":
             line = command.rfind("\n", 0, start - 1) + 1
             by_line.setdefault(line, []).append((start, stop))
     for line, bodies in by_line.items():
         end = bodies[0][0]
-        before = calls(command[:line], cwd) or [] if line else []
-        through = calls(command[:end], cwd)
+        before = calls(upto(line), cwd) or [] if line else []
+        through = calls(upto(end), cwd)
         if through is None:
             continue
         opened = [(words, where) for words, where in through[len(before):]

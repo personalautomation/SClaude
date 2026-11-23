@@ -100,6 +100,10 @@ PLANNING = [
     ("echo \"$(echo \"it's\")\" > plan.md; echo \"it's\"", DENY),
     ("echo \"$(printf \"'\")\" > notes.md \"'\"", DENY),
     ("echo \"$(echo \"it's\")\"", ALLOW),
+    # A comment's apostrophe hides no redirection after its line.
+    ("# it's\necho x > plan.md", DENY),
+    ("ls # it's", ALLOW),
+    ("# it's > plan.md", ALLOW),
     # Writing is forbidden, in any wrapper.
     ("rm -rf /tmp/x", DENY),
     ("setsid rm -rf /tmp/x", DENY),
@@ -528,6 +532,19 @@ FORBIDDEN = [
     ("diff <(gh pr merge 5) x", DENY),
     ("echo $(echo $(gh pr merge 5))", DENY),
     ("echo '$(gh pr merge 5)'", ALLOW),
+    # A comment is not run, and an apostrophe in one opened a quote shlex
+    # never saw closed: an ordinary multi-line edit was refused as
+    # unparsable. The line after it is still judged, and a `#` inside a word
+    # or in quotes opens no comment.
+    ("echo a # it's", ALLOW),
+    ("# it's done", ALLOW),
+    ("x=1\n# it's a note\necho ok", ALLOW),
+    ("f() { python3 - \"$@\" <<'EOF'\nprint(1)\nEOF\n}\n# the user's\nf a", ALLOW),
+    ("# it's\ngh pr merge 5", DENY),
+    ("echo ok # it's\ngh pr merge 5", DENY),
+    ("echo a#b'; gh pr merge 5 #'", ALLOW),
+    ("echo a#b; gh pr merge 5", DENY),
+    ("echo \"# it's\"; gh pr merge 5", DENY),
     ("gh pr comment 1 --body-file - <<'EOF'\nrun $(gh pr merge 5) later\nEOF", ALLOW),
     ("echo \"a ->(b\"", ALLOW),
     ("x=$(git rev-parse HEAD); echo $x", ALLOW),

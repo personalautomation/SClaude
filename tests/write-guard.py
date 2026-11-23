@@ -256,6 +256,16 @@ for command, cwd, want in (
         ("cat <<E\\OF\nhi\nEOF\n$(git commit -qm x)", "/home/u/sclaude", "deny"),
         ("x=$(echo 'open", "/home/u/sclaude", "deny"),
         ("x=$(cat <<EOF\n  EOF\nIt's\nEOF\n); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        # A comment's apostrophe leaves no heredoc program unread.
+        ("# it is the user's\ncd /home/u/sclaude && python3 - <<'EOF'\nopen('a.sh','w').write('x')\nEOF",
+         "/tmp", "deny"),
+        ("cd /home/u/sclaude && python3 - <<'EOF' # the user's\nopen('a.sh','w').write('x')\nEOF",
+         "/tmp", "deny"),
+        ("# the user's\ncd /home/u/sclaude && python3 - <<'EOF'\nprint(open('a.sh').read())\nEOF",
+         "/tmp", "allow"),
+        # A message's heredoc in a substitution is text, whatever it mentions.
+        ("cd /home/u/sclaude && git log -1; echo \"$(cat <<'EOF'\nfix: open(p, 'w') and unlink, it's done\nEOF\n)\"",
+         "/tmp", "allow"),
         # A body left open that names no read-only place is not this guard's.
         ("x=$(echo 'open", "/home/u/myapp-1", "allow"),
         # A `>` in quotes is text, not a redirection.

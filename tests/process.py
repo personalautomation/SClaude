@@ -380,6 +380,8 @@ cases = [
     ("rolled back", {"step": "done", "deploy": {"prod": {"sha": "x"}}, "rollback": {"prod": {"code": "done"}},
                      "regression": {"prod": {"status": "failed"}}}, "MERGED", "done_cmd"),
     ("merged", {"step": "done"}, "MERGED", "done_cmd"),
+    ("on the way into the epilogue: its demo first",
+     {"step": "done", "prod_pass": {"epilogue": True}}, "MERGED", "epilogue"),
     ("retro ran", {"step": "done", "retro": {"runs": [{"done": True}]}}, "MERGED", "cleanup"),
     ("a retro open", {"step": "done", "retro": {"runs": [{"session": "r"}]}}, "MERGED", "retro"),
     ("a retro resumed after its end", {"step": "done", "retro": {"runs": [

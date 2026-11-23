@@ -453,6 +453,10 @@ def _past_steps(state, pr_state, epilogue):
             return "cleanup", "the retrospective ran; the clean-up is left: sclaude done asks it"
         if retro:
             return "retro", "the retrospective is open: running, or broken off"
+        # On the way into the epilogue (deploy.sh): the issue's demo is
+        # recorded again before the epilogue's record exists.
+        if (state.get("prod_pass") or {}).get("epilogue"):
+            return "epilogue", "the epilogue is next: the issue's demo, then its status"
         epi = epilogue or {}
         if epi.get("session") and not epi.get("done"):
             return "epilogue", "the epilogue broke off"

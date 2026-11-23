@@ -520,7 +520,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
         -n "$(session_label friction "$key")/$slug" "$prompt" )
   fi
   session_watch_stop
-  instruments_unchanged "$before_instruments" "friction review" || true
+  instruments_unchanged "$before_instruments" "friction review" "$where" || true
   session_closed "$done_file" "$where" "$session" "" "" friction "$key" || true
 
   local changed=""

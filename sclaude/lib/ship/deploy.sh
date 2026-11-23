@@ -83,8 +83,9 @@ remind_prod() {
   # [N] in sclaude's tab during step 4: production is the next step.
   stop_asked "the preview, QA and production" "$slug" && return 0
   # A ship marked by a pass that was cut off is not going on: this pass asks
-  # again, and marks it again (below).
+  # again, and marks it again (below). So is its way into the epilogue.
   state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.epilogue null 2>/dev/null || true
   # A ship that failed before is not this pass's: its fix (regression_fix_block)
   # is over, or the ship is asked about again below.
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
@@ -1056,9 +1057,15 @@ remind_prod() {
   # same status.
   # Nobody did QA: the issue's demo is brought up to the code here, for its
   # record, before the epilogue writes the issue's last word.
+  #
+  # The feature stands at the epilogue from here (prod_pass.epilogue, read by
+  # position): the demo takes minutes before the epilogue's own record exists,
+  # and the feature's card said the retrospective was next, then went back.
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.epilogue true 2>/dev/null || true
   qa_settle "$wt" "$issue"
   [[ "$QA_MODE" == auto ]] && demo_refresh "$wt" epilogue
   run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.epilogue null 2>/dev/null || true
 
   # The pass got here for this pull request and this production, the epilogue
   # run: opened again, the feature goes to the clean-up (cmd_resume). A new

@@ -198,6 +198,9 @@ run_step() {
 
   echo ""
   echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
+  # A new step: what the last one printed explains none of its questions, and
+  # it went to the phone with the first of them (ask_forget).
+  ask_forget
   # The lines under the banner once a step in this process: a session taken
   # up again for the next round of the same step said them all again, every
   # round, with nothing in them changed.
@@ -692,7 +695,18 @@ session_ended() {
   fi
   plan_report "$wt" "$step"
   [[ "$step" == "review" ]] && { review_yours_report "$wt" "$pr" || true; }
-  [[ "$step" == "review" ]] && review_report "$wt" "$slug"
+  # The review's table — unless a pass on this machine reads the session's
+  # push next: its table, made after this session, carries the session's row
+  # too, and printed here as well the two stood one under the other with a
+  # heading between, three times in one review. Owed, should the gate end
+  # without a pass (review_close_report).
+  if [[ "$step" == "review" ]]; then
+    if [[ "$said_key" != later && "$(project_review_mode "$wt")" == local ]] && ! local_review_done "$wt"; then
+      REVIEW_REPORT_OWED=1
+    else
+      review_report "$wt" "$slug"
+    fi
+  fi
   if [[ "$step" == "review" ]]; then
     local closed_rounds; closed_rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
     [[ "$closed_rounds" =~ ^[0-9]+$ ]] || closed_rounds=0
@@ -911,8 +925,10 @@ after_step() {
       # once the review has finished with the pushed head and left nothing
       # open — or when the human says to close it anyway.
       if ! review_close_gate "$wt" "$slug" "${pr:-}"; then
+        review_owed_table "$wt" "$slug"
         return 0
       fi
+      review_owed_table "$wt" "$slug"
       # The release candidate's own gate. Step 4 pushes fixes to the branch,
       # and between the last of them and the merge nothing ran the suite: the
       # regression from step 2 was green about code that has since changed.
@@ -964,8 +980,10 @@ after_step() {
         return 0
       fi
       if [[ "$fix_pushed" -eq 0 ]] && ! review_close_gate "$wt" "$slug" "${pr:-}"; then
+        review_owed_table "$wt" "$slug"
         return 0
       fi
+      review_owed_table "$wt" "$slug"
       local branch; branch="$(state_get "$state" branch || true)"
       # The review closes here and the pull request stays open.
       #
@@ -1078,8 +1096,15 @@ after_step() {
         answer=y accept_by=sclaude accept_how="part $(parts_now "$state"): asked once the parts are in"
       elif [[ "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
         answer=y
-        info "  You accepted the work: in the session, or with [n] in this terminal."
-        [[ "${SESSION_HOW:-}" == "tab ["* ]] && accept_how="$SESSION_HOW" || accept_how="Accept in the session's dialog"
+        # Said only for a key in this terminal: an Accept in the session's
+        # dialog is in the session's last message, printed just above, and the
+        # line naming both ways told nobody which one it had been.
+        if [[ "${SESSION_HOW:-}" == "tab ["* ]]; then
+          accept_how="$SESSION_HOW"
+          info "  You accepted the work with ${SESSION_HOW#tab } in this terminal."
+        else
+          accept_how="Accept in the session's dialog"
+        fi
       else
         ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn \
           || accept_by=none

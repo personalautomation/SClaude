@@ -390,7 +390,7 @@ instruments_workers() {
 # what the checkout looks like afterwards is the check that holds for every
 # one of them. Nothing is reverted: what changed is for a person to look at.
 #
-#   instruments_unchanged <state before> <who>
+#   instruments_unchanged <state before> <who> [<the session's folder>]
 #
 # Commits alone are not that. Other sessions work in the checkout at the same
 # time, and the session watched here cannot commit (the guard refuses it): a
@@ -419,6 +419,14 @@ instruments_unchanged() {
   if [[ -n "$made" && "${was[2]:-}" == "${is[2]:-}" \
         && "${was[3]:-}" == clean && "${is[3]:-}" == clean ]] \
      && instruments_committed_only "${was[0]}" "${is[0]}"; then
+    # Exactly the fast-forward to what this tree's workshop published, which
+    # workshop_live_update has just said, naming what came along with it.
+    # The tree is the session's (its folder, <dir>), not this process's.
+    local tree followed=""
+    [[ -n "${3:-}" ]] && declare -F workshop_tree >/dev/null \
+      && tree="$(cd "$3" 2>/dev/null && workshop_tree 2>/dev/null)" \
+      && followed="$(workshop_py get "$(workshop_record "$tree")" followed 2>/dev/null || true)"
+    [[ "$followed" == "${was[0]} ${is[0]}" ]] && return 0
     info "   sclaude's checkout moved on while the $2 ran — published changes, or another hand's commits:"
     printf '%s\n' "$made"
     return 0

@@ -64,7 +64,9 @@ demo_refresh() {
   if command -v claude >/dev/null 2>&1 && [[ -f "$script" && -n "$head" ]]; then
     info "  A session writes it again from the last one (sdemo skill); its log: $log"
     demo_session "$wt" "$stage" "$log" "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")"
-    say "🎬 ${BOLD}Publishing${OFF} the recordings"
+    # Indented, so the topic leaves it out: the videos go there straight
+    # away, and this line, sent with the next batch, came after them.
+    say "  🎬 ${BOLD}Publishing${OFF} the recordings"
     demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
     : >"$log"
@@ -244,9 +246,12 @@ demo_progress() {
         [[ -n "$verb" ]] || continue
         # The status line off first, or the line lands after it.
         [[ -t 2 ]] && printf '\r\033[2K' >&2
+        # A recording not as expected is for this terminal alone: another
+        # try may follow, and the topic hears the outcome with the videos,
+        # the scenarios named (demo.py publish).
         case "$level" in
           ok)   say "  ✅ ${BOLD}$verb${OFF} $rest" ;;
-          warn) warn "  🎬 $verb $rest" ;;
+          warn) warn_here "  🎬 $verb $rest" ;;
           *)    say "  🎬 ${BOLD}$verb${OFF} $rest" ;;
         esac
       done

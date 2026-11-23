@@ -313,6 +313,25 @@ def play_watched(run, wt):
         progress_set(wt, None)
 
 
+def outcome_line(results):
+    """The caption's line for a recording with scenarios not as expected,
+    named; empty when every one played as written. It goes out with the
+    videos themselves: each try's count before it went to the topic as a
+    warning of its own, a retry still to come, and the last try's never did."""
+    scenarios = results.get("scenarios") or []
+    bad = failed_scenarios(results)
+    if not bad:
+        return ""
+    # Short, three names at most: an album's caption takes 1024 characters,
+    # and a longer one sends the links without the videos.
+    def name(i):
+        title = scenarios[i - 1].get("title") or "scenario %d" % i
+        return "«%s»" % (title if len(title) <= 60 else title[:59].rstrip() + "…")
+    named = ", ".join(name(i) for i in bad[:3])
+    more = " and %d more" % (len(bad) - 3) if len(bad) > 3 else ""
+    return "⚠️ %d not as expected: %s%s" % (len(bad), named, more)
+
+
 def failed_scenarios(results):
     """The scenarios of a recording worth playing again, numbered from 1: one
     that did not play, or a step or check not as expected."""
@@ -520,7 +539,9 @@ def publish(wt, label, demo, entry, results, phone):
         head_line = "Δ %s → %s: %s" % (entry["from"] or "?", entry["stage"], entry["change"] or title)
     else:
         head_line = "🎬 " + title
-    lines = [head_line] + (["📱 " + phone] if phone else []) + ["💻 " + here]
+    outcome = outcome_line(results)
+    lines = ([head_line] + ([outcome] if outcome else [])
+             + (["📱 " + phone] if phone else []) + ["💻 " + here])
     # The videos themselves too, an album of them under the links: watched in
     # the chat without opening anything.
     clips = videos(out, results)

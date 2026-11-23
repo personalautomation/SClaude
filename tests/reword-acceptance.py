@@ -34,7 +34,7 @@ def function(source, name):
 
 with open(os.path.join(LIB, "cycle", "acceptance.sh")) as fh:
     SOURCE = fh.read()
-BODY = function(SOURCE, "reword_acceptance")
+BODY = function(SOURCE, "reword_shared") + function(SOURCE, "reword_acceptance")
 EXTEND = function(SOURCE, "extend_acceptance")
 with open(os.path.join(LIB, "core", "ui.sh")) as fh:
     UI = fh.read()
@@ -76,6 +76,7 @@ try:
             fh.write(differs)
         script = ('source "%s/core/state.sh"\nLIB="%s"\nBOLD=""; OFF=""\n'
                   'info() { printf "%%s\\n" "$*"; }\nwarn() { printf "%%s\\n" "$*"; }\n'
+                  'ask_forget() { echo FORGOT; }\n'
                   'ask() { echo ASKED; printf -v "$2" "%%s" "%s"; }\n%s\n%s\n'
                   'reword_acceptance "%s"\n') % (os.path.abspath(LIB), lib, answer,
                                                   IS_YES, BODY, wt)
@@ -101,6 +102,24 @@ try:
 
     out = run(one, "y")
     check("the same difference after a no is not asked again", "ASKED" in out, False)
+
+    # The question's context is the difference alone: what was printed before
+    # it is forgotten first, so the phone gets the wording, not the step.
+    long_have = "When the text is too long for a link it is cut from the end, and the link stays last."
+    long_want = "When the text is too long for a link it is cut from the end, line by line, and the link stays last."
+    out = run("differs\nAC5\t%s\t%s\n" % (long_have, long_want), "n")
+    lines = out.splitlines()
+    check("what came before is forgotten before the difference is shown",
+          lines.index("FORGOT") < next(i for i, l in enumerate(lines) if "otherwise than issue" in l), True)
+    check("a long shared start is said once",
+          [l.strip() for l in lines if "AC5, in both:" in l],
+          ["AC5, in both: When the text is too long for a link it is cut from the end,…"])
+    check("then only where they part",
+          [l.strip() for l in lines if "AC5 in the" in l],
+          ["AC5 in the issue: …and the link stays last.",
+           "AC5 in the plan:  …line by line, and the link stays last."])
+    check("a short shared start is not split",
+          "in both" in run("differs\nAC6\tFrom two.\tFrom three.\n", "n"), False)
 
     three = "differs\nAC3\tA.\tB.\n"
     out = run(three, "")

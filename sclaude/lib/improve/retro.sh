@@ -215,7 +215,7 @@ PY
   # (workshop_live_update), or another hand updated it.
   local instruments_moved=""
   [[ "$(instruments_state | cut -d' ' -f1)" != "${before_instruments%% *}" ]] && instruments_moved=1
-  instruments_unchanged "$before_instruments" "retrospective" || true
+  instruments_unchanged "$before_instruments" "retrospective" "$wt" || true
   # A resumed conversation has the first pass's answers already: this pass
   # ran only if it added one. One that did not — refused at the door, left at
   # once — is neither reported nor counted, and its run keeps its last end.

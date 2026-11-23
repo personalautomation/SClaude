@@ -128,6 +128,7 @@ source %(lib)s/ship/demo.sh
 BOLD=""; OFF=""
 info() { echo "$*"; }
 warn() { echo "$*"; }
+warn_here() { echo "$*"; }
 say() { echo "$*"; }
 project_demo_mode() { echo %(demo)s; }
 project_part_accept() { echo %(accept)s; }

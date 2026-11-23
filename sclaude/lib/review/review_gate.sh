@@ -426,14 +426,16 @@ review_close_gate() {
           # (found nothing, nothing to fix) ends the table the person last saw
           # — unless that table is the one just printed on this head, by the
           # pass on the way into step 4.
-          [[ "$fresh_pass" -eq 1 ]] && review_report_unshown "$wt" "$slug"
+          # Not to the topic: its line for this pass says nothing is open,
+          # and the numbers under it said the same again.
+          [[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report_unshown "$wt" "$slug"
           gate_reported=1
         elif [[ "$count" -gt 0 ]]; then
-          # The report printed as the session ended was made before this
-          # run: once more with it, where the person decides whether to go
-          # on fixing. Not to the topic: the fix session's start says the
-          # round's findings there, and the round's numbers go once it
-          # closes, with what was fixed (after_step).
+          # The round's table, the fix session's row with it (the session's
+          # end printed none, a pass being next: session_ended), where the
+          # person decides whether to go on fixing. Not to the topic: its
+          # line for this pass says what is open, and the fix session's start
+          # says the findings.
           [[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"
           gate_reported=1
           # Open by its own count, not by asking GitHub again: a finding in
@@ -569,6 +571,9 @@ review_close_gate() {
     ask_note "Step 4 is not done — ${word#open: }."
     [[ -n "$standing" ]] && { ask_feed warn "  $standing"; ask_note "  $standing"; }
   else
+    # The round's table, owed by a session's end that left it to a pass this
+    # gate did not run.
+    [[ "$gate_reported" -eq 0 && -n "${REVIEW_REPORT_OWED:-}" ]] && review_report_unshown "$wt" "$slug"
     warn ""
     warn "${BOLD}Step 4 is not done — ${word#open: }.${OFF}"
     [[ -n "$standing" ]] && warn "  $standing"
@@ -762,15 +767,26 @@ review_report_unshown() {
 # in. Printed when the gate did not print one itself and either waited for a
 # run or a report on this feature's pull request was shown in this process
 # (REVIEW_REPORTED_FOR, on any head: one the threads could not be read for
-# keeps the last), not another feature's or pull request's; and only when it
-# differs from what was last shown on this head. A gate that closed at once
-# on a fresh start prints nothing.
+# keeps the last), not another feature's or pull request's, or a session's
+# end left the round's table to a pass (REVIEW_REPORT_OWED, session_ended);
+# and only when it differs from what was last shown on this head. A gate that
+# closed at once on a fresh start prints nothing.
 #
 #   review_close_report <wt> <slug> <gate_reported> <announced>
 review_close_report() {
   [[ "$3" -eq 0 ]] || return 0
   local pr; pr="$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
-  [[ "$4" -eq 1 || "${REVIEW_REPORTED_FOR:-}" == "$1#$pr" ]] || return 0
+  [[ "$4" -eq 1 || -n "${REVIEW_REPORT_OWED:-}" || "${REVIEW_REPORTED_FOR:-}" == "$1#$pr" ]] || return 0
+  review_report_unshown "$1" "$2"
+}
+
+# The round's table a session's end left to a pass (REVIEW_REPORT_OWED,
+# session_ended), when the gate printed none on its way out: an answer that
+# closed the step or left it open at the gate's question, a pass that failed.
+#
+#   review_owed_table <wt> <slug>
+review_owed_table() {
+  [[ -n "${REVIEW_REPORT_OWED:-}" ]] || return 0
   review_report_unshown "$1" "$2"
 }
 
@@ -805,11 +821,13 @@ review_report() {
   local ASK_SLUG="$slug"
   # The head the terminal last saw a report on, and what it showed: the open
   # findings and the rounds (review_close_gate). Kept as it was when nothing was printed:
-  # the threads unreadable, or the same as last shown.
+  # the threads unreadable, or a fix session's report with no round finished.
+  # The same as last shown counts as shown (review_report.py), and pays a
+  # table a session's end left owed.
   # And whose: review_close_report asks whether this feature's pull request
   # had a report shown in the process, whatever head it was on.
   [[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")" \
-    && REVIEW_REPORTED_FOR="$wt#$pr"
+    && REVIEW_REPORTED_FOR="$wt#$pr" && REVIEW_REPORT_OWED=""
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
   rm -f "$brief" "$stuck" "$shown"
 }

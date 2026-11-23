@@ -35,6 +35,8 @@ cmd_done() {
   # The retrospective and the clean-up come after any ship: a ship question
   # a pass cut off left marked is not pending any more (position).
   state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
+  # Nor is an epilogue a cut-off pass was on its way into (position).
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.epilogue null 2>/dev/null || true
 
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true

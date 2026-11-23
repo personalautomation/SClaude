@@ -1193,7 +1193,7 @@ echo "watcher=[$SESSION_WATCHER]"
           and '"$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)"' in entry
           and '[[ -n "$entry" ]] && local_review_done "$wt" && fresh_pass=0' in RUN
           and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in RUN
-          and '[[ "$fresh_pass" -eq 1 ]] && review_report_unshown "$wt" "$slug"' in RUN, True)
+          and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report_unshown "$wt" "$slug"' in RUN, True)
     check("not-done-says-where-it-stands",
           'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
@@ -1580,8 +1580,8 @@ echo "watcher=[$SESSION_WATCHER]"
     unshown = unshown[:unshown.index("\n}\n")]
     check("reported-read-with-a-default", 'local reported="${REVIEW_REPORTED:-}"' in unshown
           and "${REVIEW_REPORTED%%" not in unshown, True)
-    # The table after a pass that leaves findings goes to the terminal only:
-    # the topic hears the round's numbers once, as its fix session closes.
+    # The table after a pass goes to the terminal only: the pass's own line
+    # in the topic says what is open.
     many = gate[gate.index('elif [[ "$count" -gt 0 ]]'):]
     check("open-pass-table-not-to-the-topic",
           'REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in many[:1500], True)
@@ -1590,6 +1590,32 @@ echo "watcher=[$SESSION_WATCHER]"
     zero = gate[gate.index('elif [[ "$count" -eq 0 ]]; then'):]
     zero = zero[:zero.index('elif [[ "$count" -gt 0 ]]')]
     check("nothing-open-table-unless-shown", "review_report_unshown" in zero and "review_report " not in zero, True)
+    check("nothing-open-table-not-to-the-topic", 'REVIEW_REPORT_QUIET=1 review_report_unshown' in zero, True)
+    # A session's end leaves the round's table to the pass on its push, and
+    # owes it when the gate ends without one.
+    ended = open(os.path.join(LIB, "cycle", "run.sh")).read()
+    ended = ended[ended.index("session_ended() {"):]
+    ended = ended[:ended.index("\n}\n")]
+    check("session-end-leaves-the-table-to-the-pass",
+          ('[[ "$said_key" != later && "$(project_review_mode "$wt")" == local ]] && ! local_review_done "$wt"'
+           in ended, "REVIEW_REPORT_OWED=1" in ended), (True, True))
+    close = RUN[RUN.index("review_close_report() {"):]
+    close = close[:close.index("\n}\n")]
+    check("owed-table-printed-at-the-close", '-n "${REVIEW_REPORT_OWED:-}"' in close, True)
+    check("owed-table-printed-when-held-by-other-than-findings",
+          '[[ "$gate_reported" -eq 0 && -n "${REVIEW_REPORT_OWED:-}" ]] && review_report_unshown' in gate, True)
+    report = RUN[RUN.index("\nreview_report() {"):]
+    report = report[:report.index("\n}\n")]
+    check("a-shown-report-pays-what-was-owed",
+          ('REVIEW_REPORTED_FOR="$wt#$pr" && REVIEW_REPORT_OWED=""' in report,
+           'REVIEW_REPORT_OWED=""' in report.split("SCLAUDE_REPORT_BRIEF")[0]), (True, False))
+    # Every way out of step 4's gate in after_step, failed or passed, is
+    # followed by the owed table.
+    gate_calls = re.findall(r'! review_close_gate "\$wt" "\$slug" "\$\{pr:-\}"; then\n(.*)\n(.*)\n(.*)\n(.*)\n',
+                            open(os.path.join(LIB, "cycle", "run.sh")).read())
+    check("the-gate-pays-what-it-left-owed-on-every-way-out",
+          [(a.strip(), b.strip(), c.strip(), d.strip()) for a, b, c, d in gate_calls],
+          [('review_owed_table "$wt" "$slug"', "return 0", "fi", 'review_owed_table "$wt" "$slug"')] * 2)
     out, left = enough_gate("now", "open: red: build", 0, mode="github")
     check("github-red-to-session", "ASKED" not in out and "RUN_STEP review" in out, True)
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")

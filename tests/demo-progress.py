@@ -216,6 +216,22 @@ check("play.mjs prints the prefix demo.py reads",
       (True, True))
 check("play.mjs sends the fields the readers use",
       all(k + ":" in play for k in ("kind", "scenario", "of", "title", "viewport", "step")), True)
+check("demo.sh: a try not as expected stays in the terminal, Publishing is not sent",
+      ('warn) warn_here "  🎬 $verb $rest"' in sh, 'say "  🎬 ${BOLD}Publishing${OFF}' in sh), (True, True))
+spec_o = importlib.util.spec_from_file_location("demo_outcome", DEMO_PY)
+demo_o = importlib.util.module_from_spec(spec_o)
+spec_o.loader.exec_module(demo_o)
+check("caption: nothing to add when every scenario played",
+      demo_o.outcome_line({"scenarios": [{"title": "A", "steps": [{"ok": True}]}]}), "")
+check("caption: the scenarios not as expected, named",
+      demo_o.outcome_line({"scenarios": [{"title": "A", "steps": [{"ok": True}]},
+                                         {"title": "B", "steps": [{"error": "x"}]},
+                                         {"title": "C", "skipped": True}]}),
+      "⚠️ 2 not as expected: «B», «C»")
+many = demo_o.outcome_line({"scenarios": [{"title": "T%d " % i + "x" * 90, "skipped": True} for i in range(8)]})
+check("caption: three names at most, each short, so the album keeps its videos",
+      (many.startswith("⚠️ 8 not as expected: «T0 "), many.endswith(" and 5 more"), len(many) < 250),
+      (True, True, True))
 check("demo.sh: the session's events stream into demo_progress.py",
       ("--output-format stream-json --verbose" in sh, "demo_progress.py\" watch" in sh,
        '| demo_progress "$wt" "$log"' in sh), (True, True, True))

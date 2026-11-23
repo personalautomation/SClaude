@@ -180,8 +180,34 @@ export SCLAUDE_SESSION=%(session)s
     with open(mark, "w") as fh:
         fh.write(git(ws, "rev-parse", "HEAD") + "\n")
     sh("cmd_core_ready")
+    live_before = git(live, "rev-parse", "HEAD")
+    # Another hand's commit already on origin's main: the fast-forward to the
+    # published change brings it too, and says so.
+    other_clone = os.path.join(tmp, "other-hand")
+    git(tmp, "clone", "-q", origin, other_clone)
+    git(other_clone, "-c", "user.name=o", "-c", "user.email=o@o", "commit", "-q", "--allow-empty",
+        "-m", "docs(other): pushed by another hand")
+    git(other_clone, "push", "-q", "origin", "HEAD:main")
+    git(ws, "pull", "-q", "--rebase", "origin", "main")
+    with open(mark, "w") as fh:
+        fh.write(git(ws, "rev-parse", "HEAD") + "\n")
+    sh("cmd_core_ready")
     out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_after_session s1 --session-id s1 -n x p')
     check("published-to-main", "Published to sclaude's main" in out, True)
+    check("live-update-names-other-hands", ("1 commit(s) of other hands" in out,
+                                            "docs(other): pushed by another hand" in out,
+                                            "the tool says more" in out.split("other hands")[-1]),
+          (True, True, False))
+    check("live-update-records-the-move", ws_py("get", record, "followed").stdout.strip(),
+          "%s %s" % (live_before, git(live, "rev-parse", "HEAD")))
+    # The session's close then finds the checkout moved by exactly that, and
+    # says nothing more: the move was just said.
+    # From another folder than the tree, as sclaude started elsewhere is:
+    # the session's folder names the tree.
+    quiet = sh('source "$LIB/core/steps.sh"; s="$(instruments_state)"; '
+               'instruments_unchanged "%s ${s#* }" "friction review" "%s" 2>&1 && echo QUIET'
+               % (live_before, tree), cwd=tmp)
+    check("unchanged-silent-on-the-followed-move", quiet.strip(), "QUIET")
     # Nothing to ask under sclaude.contribute send: past the question unasked.
     check("published-unasked-edge", ("HISTORY w_clear w_who by=setting" in out, "w_decide" in out), (True, False))
     check("published-checked", "1 test file(s)" in out, True)

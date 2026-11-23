@@ -690,7 +690,7 @@ PY
       -n "friction/deferred" "$prompt" )
   session_watch_stop
   deferred_memory_back "$wt"
-  instruments_unchanged "$before_instruments" "deferred review" || true
+  instruments_unchanged "$before_instruments" "deferred review" "$wt" || true
   session_closed "$done_file" "$wt" "$session" "" "" deferred || true
 
   # What the review committed goes to the product as a pull request, unless

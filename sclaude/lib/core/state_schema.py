@@ -122,6 +122,7 @@ FIELDS = [
     ("deploy.prod.migrations", (FEATURE,), "the migrations production applied"),
     ("regression.<stage>.<field>", (FEATURE,), "any of the above, for code that appends to one"),
     ("prod_pass.shipping", (FEATURE,), "the ship question is pending (marked by the pass that asked it)"),
+    ("prod_pass.epilogue", (FEATURE,), "the pass is on its way into the epilogue: the issue's demo recorded again, then its status"),
     ("prod_pass.ended", (FEATURE,), "what a pass through the epilogue left at the clean-up: the pull request and production, or nodeploy"),
     ("qa.accepted", (FEATURE,), "when QA accepted the work"),
     ("qa.sha", (FEATURE,), "the head QA accepted"),

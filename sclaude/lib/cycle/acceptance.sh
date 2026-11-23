@@ -95,6 +95,22 @@ extend_acceptance() {
   esac
 }
 
+# Where two wordings of one criterion part, at a word's start: 0 when what
+# they share is too short to be worth saying once. A review rewords the end of
+# a criterion more often than not, and the two lines printed whole made the
+# reader find the change in two long, nearly equal sentences.
+#
+#   reword_shared <have> <want>
+reword_shared() {
+  local a="$1" b="$2" i=0 n
+  n=${#a}
+  [[ ${#b} -lt $n ]] && n=${#b}
+  while [[ $i -lt $n && "${a:i:1}" == "${b:i:1}" ]]; do i=$((i + 1)); done
+  while [[ $i -gt 0 && "${a:i-1:1}" != " " ]]; do i=$((i - 1)); done
+  [[ $i -ge 40 ]] || i=0
+  printf '%s\n' "$i"
+}
+
 # The criteria the review reworded in the plan, offered to the issue before QA.
 #
 # The review changes what a feature does at the person's word, and its session
@@ -118,11 +134,23 @@ reword_acceptance() {
   mark="$(printf '%s' "$details" | sha1sum | cut -c1-16)"
   kept="$(state_get "$state" acceptance.kept 2>/dev/null || true)"
   [[ "$kept" == "$mark" ]] && return 0
+  # The question carries only what explains it: whatever the terminal printed
+  # since the last question (a whole step's checks, once) went to the phone
+  # with it, and the phone's copy, cut in the middle, lost the wording itself.
+  ask_forget
   echo ""
   warn "  The plan words these acceptance criteria otherwise than issue #$ac_issue:"
+  local cut
   while IFS=$'\t' read -r cid have want; do
-    info "    $cid in the issue: $have"
-    info "    $cid in the plan:  $want"
+    cut="$(reword_shared "$have" "$want")"
+    if [[ "$cut" -gt 0 ]]; then
+      info "    $cid, in both: ${have:0:cut-1}…"
+      info "    $cid in the issue: …${have:cut}"
+      info "    $cid in the plan:  …${want:cut}"
+    else
+      info "    $cid in the issue: $have"
+      info "    $cid in the plan:  $want"
+    fi
   done <<<"$details"
   info "  QA ticks the issue's wording — a criterion changed in the review and left there is ticked as it was."
   if [[ "$word" == body ]]; then

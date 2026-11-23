@@ -878,7 +878,7 @@ workshop_publish() {
     workshop_edge "$tree" w_pr w_done sclaude ""
   fi
   workshop_history "$tree" "$(developer_is_maintainer && echo main || echo pr)"
-  developer_is_maintainer && workshop_live_update
+  developer_is_maintainer && workshop_live_update "$tree"
   return 0
 }
 
@@ -917,8 +917,16 @@ cmd_core_send() {
 # here and now — on main, clean, nobody else's sclaude running from it — so
 # the next session runs the fix. Otherwise the next sclaude start does
 # (instruments_sync).
+#
+# The move it made is written down for the tree (`followed` in its record):
+# the session's close then asked whether the checkout had moved
+# (instruments_unchanged) and listed the change just published once more, a
+# line under "Published". Commits of other hands that the fast-forward
+# brought along are named here instead, the one place that says the move.
+#
+#   workshop_live_update [<tree>]
 workshop_live_update() {
-  local other
+  local tree="${1:-}" other before after published brought
   if [[ "$(update_mode)" != auto ]]; then
     info "  $INSTRUMENTS takes it with: $SELF update"
     return 0
@@ -940,8 +948,23 @@ workshop_live_update() {
   if [[ "$own" =~ ^[1-9] ]]; then
     info "  $INSTRUMENTS has $own commit(s) of its own that origin does not: bring them on top of it"
     info "  (git -C $INSTRUMENTS pull --rebase origin main), and the change is there too."
-  elif git -C "$INSTRUMENTS" merge -q --ff-only origin/main >/dev/null 2>&1; then
+  elif before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
+       && git -C "$INSTRUMENTS" merge -q --ff-only origin/main >/dev/null 2>&1; then
     info "  $INSTRUMENTS is on it now: the next session runs it."
+    after="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)"
+    if [[ -n "$tree" ]]; then
+      # The workshop's head is the one commit published (workshop_prepare
+      # squashes): not known, nothing is called another hand's.
+      published="$(env -u GIT_CONFIG_COUNT git -C "$(workshop_dir "$tree")" rev-parse HEAD 2>/dev/null)"
+      brought=""
+      [[ -n "$published" ]] && brought="$(git -C "$INSTRUMENTS" log --format='%H %h %s' "$before..$after" 2>/dev/null \
+        | awk -v p="$published" '$1 != p { $1 = ""; print "    " substr($0, 2) }')"
+      if [[ -n "$brought" ]]; then
+        info "  With it came $(wc -l <<<"$brought" | tr -d ' ') commit(s) of other hands:"
+        printf '%s\n' "$brought"
+      fi
+      workshop_py put "$(workshop_record "$tree")" followed "\"$before $after\"" 2>/dev/null || true
+    fi
   else
     info "  $INSTRUMENTS takes it at the next sclaude start."
   fi

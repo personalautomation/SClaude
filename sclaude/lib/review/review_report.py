@@ -864,6 +864,15 @@ def main():
         ",".join(sorted(str(t["id"]) for t in found if t["fate"] == "open")),
         sum(1 for g in groups if not g["running"]), len(groups))
     if shown is not None and os.environ.get(UNLESS_ENV) == shown:
+        # Seen already, as it stands: said to the caller as shown, so a
+        # table a session's end left owed is paid (REVIEW_REPORT_OWED).
+        path = os.environ.get(OPEN_ENV, "")
+        if path:
+            try:
+                with open(path, "w") as fh:
+                    fh.write(shown)
+            except OSError:
+                pass
         return 0
     # Asked while a fix session works (review_pane_keys): its resolved
     # threads and its commits change the open findings and the head, not

@@ -283,7 +283,11 @@ sclaude also says where the review stands: `review_report` in `review_gate.sh` h
 `review_report.py` write the numbers of the last finished review round to the file
 `SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/core/io.sh`) lays that
 text in the feature channel's `notes/`, skipping a text the same as the last one
-— the report is printed at more than one point of a round. The bot sends every
+— the report is printed at more than one point of a round. With the review on
+this machine the topic hears no table after a pass: the pass's own line there
+says what is open, and the numbers said it again; the table goes to the topic
+when it is the only word on a round, a fix session's end with no pass after it
+or a gate that closed without one. The bot sends every
 note to the feature's topic in the order they came, each a message of its own and
 without a sound, and deletes it once sent (`keepawake/notices.py`); a message is
 never edited, so the topic keeps the history. A note the network kept back waits

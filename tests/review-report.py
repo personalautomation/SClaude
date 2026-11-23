@@ -443,6 +443,29 @@ with tempfile.TemporaryDirectory() as wt:
         finally:
             del os.environ[review_report.UNLESS_ENV]
         check("unless-%s" % ("same" if not printed else "other"), bool(out.getvalue()), printed)
+    # The same as last shown is said back as shown: a table owed is paid.
+    os.remove(shown_file)
+    os.environ[review_report.UNLESS_ENV] = shown
+    os.environ[review_report.OPEN_ENV] = shown_file
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            review_report.main()
+    finally:
+        del os.environ[review_report.UNLESS_ENV]
+        del os.environ[review_report.OPEN_ENV]
+    check("unless-same-said-as-shown", os.path.exists(shown_file) and open(shown_file).read() == shown, True)
+    # A fix session's report with no round finished is not: the table stays owed.
+    os.remove(shown_file)
+    os.environ[review_report.UNLESS_ENV] = "open:other rounds:" + shown.rpartition(" rounds:")[2]
+    os.environ[review_report.ROUNDS_ONLY_ENV] = "1"
+    os.environ[review_report.OPEN_ENV] = shown_file
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            review_report.main()
+    finally:
+        for k in (review_report.UNLESS_ENV, review_report.ROUNDS_ONLY_ENV, review_report.OPEN_ENV):
+            del os.environ[k]
+    check("rounds-only-skip-not-said-as-shown", os.path.exists(shown_file), False)
     # As a fix session works, only a round finished since is news: other
     # open findings with the same rounds print nothing, other rounds do.
     rounds_part = shown.rpartition(" rounds:")[2]
@@ -534,10 +557,11 @@ BIN = "".join(open(os.path.join(ROOT, _p)).read()
 # without (on the way into step 4 too), the gate finding what is open with no
 # report on this head printed — and where a session is launched on the
 # findings (run_step, fresh and resumed), and the step's close once the gate
-# waited for a run or a report was shown. The round marker's two are gone
+# waited for a run or a report was shown, or a gate held by something other
+# than findings with a session's table owed. The round marker's two are gone
 # with it: every round now closes at the gate.
 check("printed-at-every-round-close",
-      len(re.findall(r'review_(?:report(?:_unshown)?|close_report) "\$wt" "\$slug"', RUN)), 9)
+      len(re.findall(r'review_(?:report(?:_unshown)?|close_report) "\$wt" "\$slug"', RUN)), 10)
 check("checks-take-up-nothing", "run_took_up" in RUN, False)
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:

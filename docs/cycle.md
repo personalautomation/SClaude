@@ -141,12 +141,13 @@ the run points at one, a setting that would suit how you work. What a setting
 you chose does by design (`qa: auto` ticking the criteria, say) it does not
 report as something you missed. Where the feature's way left the process map,
 sclaude hands it the places, and it says whether the map or the code is wrong
-there and how to fix it. The monthly review
-can add the same, and also finds lines in CLAUDE.md, other instructions and
-Claude Code's memory that the tool's changes made untrue, and proposes tools to
-install or remove — each only on evidence, with how sure it is. It weighs a
-new rule against loosening or dropping one, and reads what was decided about
-sclaude's code before proposing to change it.
+there and how to fix it. The monthly review can add the same, and also finds
+lines in CLAUDE.md, other instructions and Claude Code's memory that the tool's
+changes made untrue, and proposes tools to install or remove — each only on
+evidence, with how sure it is. Before it counts, it sets aside the entries
+that work since overturned, applied or made moot, so a rule already settled is
+not counted again. It weighs a new rule against loosening or dropping one, and
+reads what was decided about sclaude's code before proposing to change it.
 
 ## What is measured
 

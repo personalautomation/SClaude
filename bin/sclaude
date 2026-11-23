@@ -326,6 +326,8 @@ main() {
       instruments_sync "$@"
       # And the units it installed, which an update changes under them.
       units_refresh
+      # A line, not a question: work in sclaude's checkout found nowhere else.
+      instruments_local_note
 
       # Through a temporary variable: an assignment inside the `if` itself would
       # leave ASK_DIR equal to "/.git/sclaude" where there is no repository at

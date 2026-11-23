@@ -990,7 +990,8 @@ friction_defer_proposals() {
   # Matched first against the classes put off already and against CLAUDE.md
   # (friction_classify.py): the same rule in other words takes its class, so
   # it counts as one rule seen again; one CLAUDE.md states goes under a class
-  # of its own, for the monthly review to drop.
+  # of its own, for the monthly review to read as a rule sessions do not
+  # follow, or a match that was wrong.
   # Each class is counted as it goes in. On any failure the rows stay as
   # they came. SCLAUDE_FRICTION_CLASSIFY=off skips it.
   if [[ "${SCLAUDE_FRICTION_CLASSIFY:-on}" != "off" ]]; then

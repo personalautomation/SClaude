@@ -109,6 +109,17 @@ The same holds at the end of a step's session, which may have run for hours:
 if `bin/sclaude` or a module changed on disk meanwhile, the process hands what
 follows claude's exit to the current sclaude (`code_reload`), so an `/exit`
 is handled by the new code. `SCLAUDE_NO_RELOAD=1` turns that off.
+After the update the start says, in a line it goes past, when a branch of the
+checkout holds work found nowhere else (`instruments_local_note`,
+`local_branches.py`): not on any remote, not checked out in a worktree, and
+with few of the lines it adds among those `origin/main` added to the same files
+since the two parted — a squash leaves none of a branch's commits on main, so
+the lines, not the commits, tell a squashed branch from a lost one; a branch
+with no line to judge by (only deletions, binary files or short lines) counts
+as lost; one whose tree is its base's cannot be judged by lines (main taken in
+after its squash, or work reverted) and is named at the start too, while
+doctor asks to read it rather than offering to delete it. `sclaude doctor` lists every
+such branch, a squashed one with the command that deletes it.
 `MAINTAINERS` names who may commit the orchestrator straight to `main`. The
 update leaves everybody on `main`; a branch of one's own, `dev/<name>` (the
 name comes from `developer.sh`), is for proposing a change to sclaude, and a
@@ -2864,7 +2875,8 @@ four rules seen once. So one call of a small model (`SCLAUDE_CLASSIFY_MODEL`,
 haiku) reads the proposals, the classes already put off and `CLAUDE.md`, and
 says of each: the same rule as a class already there (it takes that class),
 a rule `CLAUDE.md` states (put off under `claude-md-already-stated`, the line
-quoted, for the monthly review to drop), or new. The answer is checked, not
+quoted, for the monthly review to read as a rule sessions do not follow,
+or a match that was wrong), or new. The answer is checked, not
 trusted — a class must exist, a quote must be `CLAUDE.md`'s word for word
 and share at least two words with the proposal, so that a real line about
 something else does not put a new rule off as stated —

@@ -16,8 +16,8 @@ off (one example each) and CLAUDE.md, and says of each proposal:
 
     same     the rule of an existing class in other words: it takes that class
     covered  a rule CLAUDE.md already states: it is put off under one class,
-             COVERED, with the line quoted, for the monthly review to drop
-             or to read as a rule nobody follows
+             COVERED, with the line quoted, for the monthly review to read
+             as a rule sessions do not follow, or a match that was wrong
     new      neither: it keeps its own class
 
 The answer is checked, not trusted: a "same" must name a class that is there,

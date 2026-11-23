@@ -349,6 +349,27 @@ instruments_notify() {
   printf '%s\n' "$head" > "$mark" 2>/dev/null || true
 }
 
+# Said at a start, and the run goes on: branches of sclaude's checkout whose
+# work is found nowhere else (local_branches.py). The one warning such work
+# had before, workshop_remove's, was printed once at a tree's removal and
+# scrolled away; a change reviewed four times lay unpublished for weeks.
+# `sclaude doctor` lists every local branch with what to do about it.
+#
+# The terminal alone, not info: the line is about this machine's checkout, and
+# info hands what it prints to the feature's topic, which others read. Once
+# per run: sclaude re-executes itself at a session's end and between steps,
+# and the line would come again each time.
+instruments_local_note() {
+  [[ -z "${SCLAUDE_NO_SYNC:-}" && -z "${SCLAUDE_LOCAL_NOTED:-}" ]] || return 0
+  export SCLAUDE_LOCAL_NOTED=1
+  local line
+  if line="$(timeout 10 python3 "$INSTRUMENTS/sclaude/lib/improve/local_branches.py" note "$INSTRUMENTS" 2>/dev/null)"; then
+    [[ -z "$line" ]] || echo "${DIM}  $line${OFF}" >&2
+  elif [[ $? -eq 124 ]]; then
+    echo "${DIM}  instruments: the look for local branches took too long — sclaude doctor lists them${OFF}" >&2
+  fi
+}
+
 # sclaude update: takes sclaude's main now, whatever sclaude.update says.
 cmd_update() {
   git -C "$INSTRUMENTS" remote get-url origin >/dev/null 2>&1 \

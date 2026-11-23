@@ -177,6 +177,20 @@ try:
     # The workshop carries a reopened session's copy back by the tree alone.
     workshop = open(os.path.join(LIB, "improve", "workshop.sh")).read()
     check("workshop-reopen-carries-back", 'deferred_memory_back "$tree"' in workshop, True)
+    # An entry is written mid-feature and read again only here: the review
+    # checks each against what landed since before counting it, so
+    # one a later round overturned, or another change applied, is dropped
+    # rather than kept waiting on a count of one.
+    check("checks-entries-before-counting", "check every entry against what happened since it was written" in prompt, True)
+    check("reads-since-each-entry", "against what landed on or after its own date" in prompt, True)
+    check("drops-overturned-whatever-the-count", "dropped whatever its class's count" in prompt, True)
+    # The plan keeps on disk what step 2 names settled on an open branch:
+    # the two must spell the outcome alike, or its entries are deleted.
+    check("open-branch-outcome-named", "is **settled on an open branch**" in prompt, True)
+    check("open-branch-entries-kept", "but not an entry settled on an open branch" in prompt, True)
+    check("open-branch-entries-listed", "the ones settled on an open branch apart from them" in prompt, True)
+    check("open-branch-entries-reported", "which it found settled on an open branch" in prompt, True)
+    check("instruments-filled", "<instruments>" in prompt, False)
     # A review that changed nothing says so and leaves no tree or branch.
     check("nothing-says-so", "the review committed nothing to the product" in out, True)
     check("nothing-no-tree", trees(tmp), [])

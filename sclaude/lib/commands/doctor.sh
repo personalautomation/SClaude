@@ -175,6 +175,23 @@ doctor_identity() {
     doctor_warn "could not reach instruments' origin" \
       "no access? the repository must be readable to install from it"
   fi
+
+  # Branches of the checkout that exist on this machine alone
+  # (local_branches.py): lost with the laptop unless pushed, or only clutter
+  # when a squashed copy of their work is on main.
+  local name ahead date pct verdict qdir qname
+  qdir="$(printf %q "$INSTRUMENTS")"
+  while IFS=$'\t' read -r name ahead date pct verdict; do
+    qname="$(printf %q "$name")"
+    case "$verdict" in
+      main) doctor_warn "branch $name ($ahead commit(s), $date): its work is on main ($pct% of its lines)" \
+              "git -C $qdir branch -D $qname" ;;
+      unclear) doctor_warn "branch $name ($ahead commit(s), $date) ends where it began: main taken in after its squash, or work reverted" \
+              "read it before deleting it (git -C $qdir log -p origin/main..$qname)" ;;
+      *)    doctor_warn "branch $name ($ahead commit(s), $date) is on this machine alone; $pct% of its lines are on main" \
+              "read it (git -C $qdir log -p origin/main..$qname), then publish it, push it, or delete it" ;;
+    esac
+  done < <(python3 "$INSTRUMENTS/sclaude/lib/improve/local_branches.py" list "$INSTRUMENTS" 2>/dev/null)
 }
 
 doctor_claude() {

@@ -37,6 +37,17 @@ or commits in sclaude's checkout stand in the way. Commit or stash an edit and
 run `sclaude update`; move commits of your own to a branch with `sclaude
 propose`, which also sends them as a pull request.
 
+**`instruments: N local branch(es) hold work found nowhere else`** — branches
+of sclaude's checkout that are on this machine alone and whose work is not on
+`main`, most often a fix a session made in a workshop that was never sent. It
+is a note: the run goes on. `sclaude doctor` lists each branch with the command
+to read it; send it, push it, or delete it, and the note goes. A branch that
+ends where it began — `main` taken in after its work was squashed, or its work
+reverted — is named too, since its lines cannot tell which: read it before you
+delete it. Any other branch whose work did reach `main` (squashed) appears only
+in `sclaude doctor`, with the command that deletes it. **`the look for local branches took too long`** — the
+same look ran out of time at the start; `sclaude doctor` runs it without a limit.
+
 **Nothing new ever arrives** — the checkout may be a clone of a fork, which
 takes updates only from the fork ([Where updates come
 from](setup.md#where-updates-come-from)). `git -C <checkout> remote get-url

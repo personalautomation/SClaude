@@ -346,16 +346,20 @@ def redraw_cards(bot):
             redraw(bot, msg, name, slug, feats=feats, config=serve)
 
 
-def shown_state(name, slug, state=None):
-    """Record the session state a chat card of the feature now shows."""
+def shown_state(name, slug, state=None, place=None):
+    """Record the session state a chat card of the feature now shows, and
+    where the feature stood (sessions.feature_place) when it was drawn."""
     repo = repos.repo_path(name)
     if not repo or not topics.feature_dir(repo, slug):
         return
     if state is None:
         state = sessions.session_state(sessions.feature_session(repo, slug)[0])
+    if place is None:
+        place = sessions.feature_place(repo, slug)
     record = topics.load_record(repo, slug)
-    if (record.get("card_state") or "") != state:
+    if (record.get("card_state") or "") != state or (record.get("card_place") or "") != place:
         record["card_state"] = state
+        record["card_place"] = place
         topics.save_record(repo, slug, record)
 
 
@@ -400,7 +404,8 @@ def redraw_changed_cards(bot):
                 continue
             session, _step = sessions.feature_session(repo, slug)
             state = sessions.session_state(session)
-            if state == (record.get("card_state") or ""):
+            place = sessions.feature_place(repo, slug)
+            if state == (record.get("card_state") or "") and place == (record.get("card_place") or ""):
                 continue
             if feats is None:
                 feats, _ = repos.features_of_name(name)
@@ -409,9 +414,9 @@ def redraw_changed_cards(bot):
             if not redraw(bot, msg, name, slug, feats=feats, config=serve):
                 # Not drawn: what the card shows is still the old state, and
                 # the next look tries again.
-                shown_state(name, slug, record.get("card_state") or "")
+                shown_state(name, slug, record.get("card_state") or "", record.get("card_place") or "")
             else:
-                shown_state(name, slug, state)
+                shown_state(name, slug, state, place)
 
 
 def redraw_screens(bot):

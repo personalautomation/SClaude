@@ -716,6 +716,33 @@ def review_threads(cwd, pr, repo):
         after = info.get("endCursor")
 
 
+def fixed_findings(cwd, pr, repo):
+    """The review's findings the pull request fixed, one markdown line each,
+    "- `path:line` headline": its resolved threads whose replies end on the
+    resolver's word (RESOLVER_PREFIX, the fix applied) and carry no later
+    decline (decline_of). A thread resolved by hand with no such reply — a
+    wrong finding closed, a question answered — is no fix. Stricter than
+    decline_of, which reads only the last decision: any reply after the
+    resolver's ("still reproduces", even a "thanks") drops the thread, the
+    person's choice (2026-11-23) — a finding left out is safer for Current
+    behaviour than one written in that did not ship. For the
+    epilogue, which writes how the product behaves: a session told only to
+    read the pull request for itself did not, and a behaviour the review
+    changed went unsaid. [] when none or unreadable."""
+    out = []
+    for t in review_threads(cwd, pr, repo) or []:
+        if not t.get("isResolved"):
+            continue
+        comments = (t.get("comments") or {}).get("nodes") or []
+        replies = comments[1:]
+        said = [(c.get("body") or "").lstrip() for c in replies]
+        if decline_of(replies) is not None or not said or not said[-1].startswith(RESOLVER_PREFIX):
+            continue
+        first = (comments[0] or {}).get("body") if comments else ""
+        out.append("- `%s:%s` %s" % (t.get("path") or "?", thread_line(t) or "?", headline(first)))
+    return out
+
+
 def open_threads(cwd, pr, repo, nodes=None):
     # `nodes`: review_threads already read by the caller, not asked again.
     if nodes is None:
@@ -2140,6 +2167,14 @@ def main():
             return 0 if refresh_resolved(sys.argv[2], sys.argv[3], sys.argv[4]) else 1
         except Exception:
             return 1
+    # `--fixed <cwd> <pr> <repo>`: the findings fixed, see fixed_findings.
+    if len(sys.argv) >= 5 and sys.argv[1] == "--fixed":
+        try:
+            for line in fixed_findings(sys.argv[2], sys.argv[3], sys.argv[4]):
+                sys.stdout.write(line + "\n")
+        except Exception:
+            pass
+        return 0
     if len(sys.argv) >= 5 and sys.argv[1] == "--yours":
         try:
             for line in yours_open(sys.argv[2], sys.argv[3], sys.argv[4]):

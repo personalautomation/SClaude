@@ -2614,7 +2614,10 @@ and a description is never edited, so this section is the only place its drift
 is recorded. On the feature itself it is written when the build left the
 description behind — through the `User request` comment, a QA hand-back, a
 review decision — and for that the feature's discussion goes into the session
-along with the chain. On a parent it is written when the feature is a change
+along with the chain, and so do the findings the review fixed, one line each
+(`pr_context.py --fixed`, the `review-fixed` block): a session told only to
+read the pull request for itself did not, and what the review changed went
+unsaid. On a parent it is written when the feature is a change
 request to it: a child that renames or regroups the fields the parent
 describes. A child that only adds — more detail, a field more — leaves the
 parent without one, and the rewrite climbs the chain only as far as the

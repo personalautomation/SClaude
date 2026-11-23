@@ -341,8 +341,7 @@ issue_move_status() {
   if [[ -z "$from" || -z "$to" ]]; then
     if [[ -z "${BOARD_NOTED:-}" ]] && ! project_has board; then
       BOARD_NOTED=1
-      info "Issue #$issue is not moved on the board: .sclaude/config.json has no \`board\`"
-      info "  section naming its columns (see sclaude/config.example.json)."
+      info "Issue #$issue is not moved on the board: .sclaude/config.json has no \`board\` section naming its columns (see sclaude/config.example.json)."
     fi
     return 0
   fi

@@ -638,7 +638,7 @@ for stage in ("preview",):
         # how much prose sits above the `return`, which is not what it is for.
         window = [ln for ln in tail[1].splitlines()
                   if ln.strip() and not ln.strip().startswith("#")]
-        check_true("%s-red-path-returns" % stage, "return 0" in "\n".join(window[:20]))
+        check_true("%s-red-path-returns" % stage, "return 0" in "\n".join(window[:24]))
 
 # The prod path returns too, by each of its three exits.
 prod_tail = deploy[run_at:]
@@ -1702,7 +1702,7 @@ def held(regression):
 
 
 out = held({"status": "failed"})
-check_true("hold-red-alarms", "ALARM Production carries this feature, and its last regression was red." in out)
+check_true("hold-red-alarms", "ALARM Production carries this feature, and its last regression was red: what to do is on the terminal" in out)
 check_true("hold-red-offers-both", "sclaude regression demo prod" in out and "sclaude rollback demo" in out)
 out = held({"status": "failed", "unrunnable": True})
 check_true("hold-unrunnable-says-so", "could not run" in out)

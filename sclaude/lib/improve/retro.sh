@@ -566,7 +566,7 @@ retro_report() {
   if [[ -n "${3:-}" ]]; then
     [[ -n "$last" ]] || return 0
     echo ""
-    say "${BOLD}The retrospective's report, this pass:${OFF}"
+    say "${BOLD}The retrospective's report, this pass, is on the terminal, below.${OFF}"
     echo ""
     printf '%s\n' "$last" | sed 's/^/  /'
     echo ""
@@ -575,12 +575,15 @@ retro_report() {
   report="$(python3 "$LIB/cycle/session_end.py" first "$transcript" 2>/dev/null || true)"
   [[ -n "$report" ]] || return 0
   echo ""
-  say "${BOLD}The retrospective's report:${OFF}"
+  # The heading says where the report is: the report itself is printed with
+  # an indent, which the feed does not take, and a heading ending in ":"
+  # reached the phone with nothing after it.
+  say "${BOLD}The retrospective's report is on the terminal, below.${OFF}"
   echo ""
   printf '%s\n' "$report" | sed 's/^/  /'
   if [[ -n "$last" && "$last" != "$report" ]]; then
     echo ""
-    say "${BOLD}And its last message, after the conversation:${OFF}"
+    say "${BOLD}And its last message, after the conversation, below it.${OFF}"
     echo ""
     printf '%s\n' "$last" | sed 's/^/  /'
   fi

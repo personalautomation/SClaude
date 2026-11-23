@@ -175,6 +175,17 @@ else:
 PYMETHOD
 }
 
+# The merge said where the topic hears it too, with the commit it left on
+# the base: a plain echo reached the terminal alone, and the phone went from
+# "Merging" to the next step without a word that it had gone through.
+#
+#   merge_said <pr>
+merge_said() {
+  local pr="$1" sha
+  sha="$(gh pr view "$pr" --repo "$(gh_repo)" --json mergeCommit --jq '.mergeCommit.oid // empty' 2>/dev/null || true)"
+  say "${GREEN}✓ PR #$pr merged${sha:+ as ${sha:0:8}}.${OFF}"
+}
+
 # Offers the merge when QA has passed and GitHub says the way is clear; says
 # what is in the way when it is not. Returns 0 if the merge happened, 2 when
 # it was put and answered — a person said no, or GitHub refused the merge —
@@ -409,7 +420,7 @@ merge_offer() {
   fi
 
   echo ""
-  echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  merge_said "$pr"
   merge_way merged "$merge_by" "$merge_how"
   [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0
@@ -536,7 +547,7 @@ merge_wait() {
     fi
   done
   [[ -t 1 ]] && printf '\r\033[2K'
-  echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  merge_said "$pr"
   [[ -n "$wt" ]] && cycle_edge "$wt" merge_wait merged github "merged on GitHub"
   [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0

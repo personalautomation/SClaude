@@ -429,8 +429,36 @@ with_pr = render_prompt.render(status_md, prompts,
                                {"pr": "143", "pr-number": "143", "feature": "f",
                                 "issue": "1"}, {})
 check_true("status-prompt-names-the-pr", "gh pr diff 143" in with_pr)
+# The review's fixed findings are put before the session, read for it: told
+# only to read the pull request, a session did not, and the issue's Current
+# behaviour missed what the review changed. No findings, no sentence.
+check_true("status-prompt-no-fixed-no-sentence", "The findings it fixed" not in with_pr)
+fixed = render_prompt.render(status_md, prompts,
+                             {"pr": "143", "pr-number": "143", "feature": "f",
+                              "issue": "1"},
+                             {"review-fixed": "- `lib/a.py:3` **A count took rows nobody names**"})
+check_true("status-prompt-carries-the-fixed-findings",
+           "The findings it fixed" in fixed and "- `lib/a.py:3` **A count took rows nobody names**" in fixed)
 check_true("status-prompt-spells-both-sections",
            "## Current status\n\n…text…\n\n## Current behaviour" in status_md)
+# Only a thread the resolver closed as fixed counts: one resolved by hand
+# with no such reply (a wrong finding, a question answered) is no fix.
+import pr_context
+saved_threads = pr_context.review_threads
+def thread(body, replies, resolved=True):
+    return {"isResolved": resolved, "path": "lib/a.py", "line": 3,
+            "comments": {"nodes": [{"body": body}] + [{"body": r, "author": {"__typename": "User"}} for r in replies]}}
+pr_context.review_threads = lambda cwd, pr, repo: [
+    thread("**Fixed one**", [pr_context.RESOLVER_PREFIX + "applied"]),
+    thread("**Closed by hand**", []),
+    thread("**Left**", [pr_context.RESOLVER_PREFIX + "x", pr_context.DECLINE_PREFIX + " no"]),
+    thread("**Open**", [], resolved=False),
+    thread("**Reopened, closed by hand**", [pr_context.RESOLVER_PREFIX + "x", "Still reproduces"])]
+try:
+    check_true("fixed-findings-only-the-resolver-fixed",
+               pr_context.fixed_findings(".", "1", "o/r") == ["- `lib/a.py:3` **Fixed one**"])
+finally:
+    pr_context.review_threads = saved_threads
 
 # A new issue's body mentions none of our markers: nothing is ever spliced into
 # it, so there is nothing for a marker to mark.

@@ -159,6 +159,14 @@ def feed_groups(lines):
     return groups
 
 
+def headline(level, text):
+    """Whether a printed line goes to the phone: a headline or a warning, not
+    the indented detail under a headline. The one test for both the plain
+    message and a process's widget (processes.kept), so the two cannot
+    disagree. sclaude keeps what the phone must hear off an indent."""
+    return bool(text.strip()) and not (text[:1].isspace() and level not in FEED_SOUND)
+
+
 def feed_message(lines, shown=""):
     """The message for the gathered lines, and whether it should sound: (text,
     loud), or ("", False) when nothing is worth a message."""
@@ -170,7 +178,7 @@ def feed_message(lines, shown=""):
     for level, _pid, text, *_ in lines:
         # Indented lines are the detail under a headline; a line an open
         # question carries is already on the phone.
-        if not text.strip() or (text[:1].isspace() and level not in FEED_SOUND):
+        if not headline(level, text):
             continue
         # The prompt is a line of its own that ends in its form ("[y/n]"):
         # the printed question is the start of that line.

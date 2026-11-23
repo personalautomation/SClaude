@@ -428,10 +428,29 @@ try:
 finally:
     asks.pending_ask, sessions.feature_session = saved_pa, saved_fs
 
+# Past the steps, the session that is open now is the one whose last run is
+# not finished: the epilogue's conversation stays open beside the
+# retrospective's in the same worktree, and was taken for it.
+check("the open session after the steps is the unfinished one",
+      sessions.after_open({"epilogue": {"runs": [{"session": "e1", "started": "2026-01-01T10:00:00+00:00",
+                                                  "finished": "2026-01-01T10:05:00+00:00"}]},
+                           "retro": {"runs": [{"session": "r1", "started": "2026-01-01T10:06:00+00:00"}]}}),
+      ("retro", "r1"))
+check("none open, none named", sessions.after_open({"epilogue": {"runs": []}}), ("", ""))
+# The process map's rule (_open): a run taken up again after its end is open,
+# one sclaude closed (done) is not.
+check("a retrospective taken up again is open, a closed sync is not",
+      sessions.after_open({"retro": {"runs": [{"session": "r1", "started": "2026-01-01T10:00:00+00:00",
+                                               "finished": "2026-01-01T10:05:00+00:00",
+                                               "resumed": "2026-01-01T11:00:00+00:00"}]},
+                           "sync": {"runs": [{"session": "y1", "started": "2026-01-01T12:00:00+00:00",
+                                              "done": True}]}}),
+      ("retro", "r1"))
+
 # A topic's card follows its session: drawn again when the session changes,
 # left alone while it does not.
 names = ("agents", "serve_config", "known_repos", "feature_records", "feature_dir", "load_record", "save_record",
-         "feature_session", "session_state", "features_of_name", "card")
+         "feature_session", "feature_place", "session_state", "features_of_name", "card")
 def home(name):
     """The bot's module that defines name, the one to patch it in."""
     for module in (sessions, phone_access, repos, topics, card_view, asks, menus, shell):
@@ -442,7 +461,7 @@ def home(name):
 
 
 saved = {n: getattr(home(n), n) for n in names}
-records = {"alpha": {"card": 55}}
+records = {"alpha": {"card": 55, "card_place": "done/epilogue"}}
 states = {"now": ""}
 edits = []
 try:
@@ -456,6 +475,8 @@ try:
     topics.load_record = lambda repo, slug: dict(records[slug])
     topics.save_record = lambda repo, slug, record: records.__setitem__(slug, record)
     sessions.feature_session = lambda repo, slug: ("s1", "plan")
+    places = {"now": "done/epilogue"}
+    sessions.feature_place = lambda repo, slug: places["now"]
     sessions.session_state = lambda session, cache=None: states["now"]
     repos.features_of_name = lambda name: ([], "")
     card_view.card = lambda name, slug, **kw: ("card " + states["now"], [])
@@ -480,6 +501,25 @@ try:
     card_view.check_card_states(EditBot(), now=10 ** 9 + 122)
     check("once", len(edits), 1)
     check("the state shown is recorded", records["alpha"].get("card_state"), "waiting")
+    check("and where the feature stood", records["alpha"].get("card_place"), "done/epilogue")
+    # The next session in the same state: the card is drawn again for the
+    # place alone, or it went on naming the step before.
+    places["now"] = "done/retro"
+    card_view._CARD_LOOKED[0] = 0.0
+    card_view.check_card_states(EditBot(), now=10 ** 9 + 300)
+    check("a new place draws the card again, the state unchanged", len(edits), 2)
+    check("and is recorded", records["alpha"].get("card_place"), "done/retro")
+    # A redraw Telegram refused keeps the place the card shows, so the next
+    # look tries again.
+    places["now"] = "done/"
+    card_view._CARD_LOOKED[0] = 0.0
+    saved_redraw = card_view.redraw
+    card_view.redraw = lambda *a, **kw: False
+    try:
+        card_view.check_card_states(EditBot(), now=10 ** 9 + 500)
+    finally:
+        card_view.redraw = saved_redraw
+    check("a refused redraw keeps the old place", records["alpha"].get("card_place"), "done/retro")
 finally:
     for n, f in saved.items():
         setattr(home(n), n, f)

@@ -286,7 +286,13 @@ deferred_to_main() {
     ) >/dev/null 2>&1 \
       || warn "  the deferred entries are on main; put $branch's deferred folders back to ${side:0:8} by hand"
   fi
-  info "  the deferred entries' changes went to main${sha:+ as $sha}, past the pull request"
+  # Without an indent, so the topic hears it too: a push to main past the
+  # pull request is one the person may look for.
+  if [[ -n "$sha" ]]; then
+    info "✓ The deferred entries were pushed to main as $sha, past the pull request."
+  else
+    info "✓ The deferred entries: main already had them."
+  fi
   return 0
 }
 

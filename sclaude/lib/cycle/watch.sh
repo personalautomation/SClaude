@@ -120,8 +120,9 @@ watch_start() {
   state_set "$file" since "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
 
   echo ""
-  info "QA watch armed on issue #$issue: the timer keeps looking even with this"
-  info "  terminal closed, and Telegram will say when the column moves."
+  # One line: the feed takes no indented line, and a sentence carried on to
+  # one reached the phone cut in half.
+  info "QA watch armed on issue #$issue: the timer keeps looking even with this terminal closed, and Telegram will say when the column moves."
   return 0
 }
 

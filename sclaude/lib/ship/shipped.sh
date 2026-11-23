@@ -162,14 +162,14 @@ prod_red_hold() {
   echo ""
   if [[ "$(state_get "$state" regression.prod.unrunnable 2>/dev/null || true)" == "true" ]]; then
     why="its last regression could not run"
-    alarm "Production carries this feature, and $why."
+    alarm "Production carries this feature, and $why: what to do is on the terminal; \`$SELF regression $slug prod\` runs the suite again."
     info "  A suite that did not run says nothing about production. Run it again:"
     info "    $SELF regression $slug prod"
     info "  or, if what it found broken is the feature's, fix it from the review:"
     info "    $SELF return $slug"
   elif [[ -n "$(state_get "$state" regression.prod.intruded 2>/dev/null | grep -v '^null$')" ]]; then
     why="its last regression was red with another release on top"
-    alarm "Production carries this feature, and $why."
+    alarm "Production carries this feature, and $why: what to do is on the terminal; \`$SELF regression $slug prod\` runs the suite again."
     info "  Rolling back would take that release away too. Once whoever deployed"
     info "  it has had a look, run the suite again:"
     info "    $SELF regression $slug prod"
@@ -179,7 +179,7 @@ prod_red_hold() {
     info "    $SELF return $slug"
   else
     why="its last regression was red"
-    alarm "Production carries this feature, and $why."
+    alarm "Production carries this feature, and $why: what to do is on the terminal; \`$SELF regression $slug prod\` runs the suite again."
     info "  Mended by hand? Run the suite again:"
     info "    $SELF regression $slug prod"
     info "  Or roll it back, and the fix goes on from the review:"

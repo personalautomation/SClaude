@@ -377,7 +377,9 @@ if remind:
     # outside the retry loop (which lives in preview_ship), and on the skipped
     # path too: an unchanged tree deployed without them would otherwise stay
     # without them.
-    m = re.search(r'preview_apply_migrations "\$wt" \|\| true\n(?:\s*#.*\n)*\s*preview_ship "\$wt"', remind)
+    # Lines between the two are let through (the quiet stretch is set up
+    # there), so long as none of them deploys.
+    m = re.search(r'preview_apply_migrations "\$wt" \|\| true\n(?:(?!.*preview_ship).*\n){0,12}?\s*preview_ship "\$wt"', remind)
     apply_at = m.start() if m else -1
     check_true("preview-applies-migrations-before-the-retries", apply_at > -1)
     check_true("migrations-stay-outside-the-retries",

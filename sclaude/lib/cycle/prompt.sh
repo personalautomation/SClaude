@@ -148,6 +148,7 @@ render_prompt() {
   local -x SCLAUDE_B_PR_CONTEXT=""
   local -x SCLAUDE_B_FEATURE_IN_HISTORY=""
   local -x SCLAUDE_B_ISSUE_CHAIN=""
+  local -x SCLAUDE_B_REVIEW_FIXED=""
   local -x SCLAUDE_B_ACCEPTANCE=""
   local -x SCLAUDE_B_USER_REQUEST=""
   local -x SCLAUDE_B_REOPENED=""
@@ -222,6 +223,11 @@ sys.stdout.write(feature_in_history(sys.argv[2], sys.argv[3]))' "$LIB" "$wt" "$S
       # outcome of the blocks the human answered a minute ago.
       [[ -n "$issue" ]] && SCLAUDE_B_ISSUE_CHAIN="$(
         python3 "$LIB/github/issue_chain.py" "$issue" "$REPO" 2>/dev/null || true)"
+      # The review's fixes, read for the session: told to read the pull
+      # request for itself, a session did not, and a behaviour the review
+      # changed was missing from the issue's Current behaviour.
+      [[ -n "$pr" && "$pr" != null ]] && SCLAUDE_B_REVIEW_FIXED="$(
+        python3 "$LIB/review/pr_context.py" --fixed "$REPO" "$pr" "$(gh_repo)" 2>/dev/null || true)"
       ;;
   esac
 

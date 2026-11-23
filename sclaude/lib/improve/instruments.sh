@@ -61,7 +61,7 @@ instruments_propose() {
   pr="$(GH_PROMPT_DISABLED=1 gh pr list --repo "$slug" --head "$branch" \
           --state open --json url --jq '.[0].url // ""' 2>/dev/null)" || pr=""
   if [[ -n "$pr" ]]; then
-    info "  instruments: pushed; your pull request has it: $pr"
+    info "✓ instruments: pushed; your pull request has it: $pr"
     return 0
   fi
 
@@ -75,10 +75,9 @@ instruments_propose() {
     "$(git -C "$dir" log origin/main..HEAD --format='- %s' 2>/dev/null)")"
   if pr="$(GH_PROMPT_DISABLED=1 gh pr create --repo "$slug" --base main \
              --head "$head" --title "$title" --body "$body" 2>/dev/null)"; then
-    info "  instruments: pushed, and opened a pull request: $pr"
+    info "✓ instruments: pushed, and opened a pull request: $pr"
   else
-    warn "  instruments: pushed to $remote/$branch, but the pull request did not open"
-    warn "  open it by hand: gh pr create --repo $slug --base main --head $head --fill"
+    warn "instruments: pushed to $remote/$branch, but the pull request did not open — open it by hand: gh pr create --repo $slug --base main --head $head --fill"
   fi
   return 0
 }

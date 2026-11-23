@@ -463,6 +463,10 @@ ask_feed() {
   local level="$1" text="$2" dir
   # Unbound, or bound to a feature this process has ended: no forks for it.
   [[ -n "$text" && -n "${ASK_SLUG:-}" && "$ASK_SLUG" != "${ASK_ENDED:-}" ]] || return 0
+  # A stretch that ends on one line of its own (ASK_FEED_QUIET, set by the
+  # caller around it) keeps its say and info off the topic; a warning still
+  # goes. Eight lines of moves no one made by hand had one that mattered.
+  [[ -n "${ASK_FEED_QUIET:-}" && "$level" != warn && "$level" != alarm ]] && return 0
   # The path as ask_channel makes it, written out: a subshell per printed
   # line is what this function exists to avoid.
   [[ -n "${ASK_DIR:-}" && "$ASK_SLUG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 0

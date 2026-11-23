@@ -102,8 +102,7 @@ def kept(line):
     """Whether the feed shows a line: headlines and warnings, not the indented
     detail under them. The record keeps only these, so what it counts as cut
     is what the account would have shown."""
-    level, text = line[0], notices.ANSI.sub("", line[2] or "")
-    return bool(text.strip()) and not (text[:1].isspace() and level not in notices.FEED_SOUND)
+    return notices.headline(line[0], notices.ANSI.sub("", line[2] or ""))
 
 
 def shown(line):

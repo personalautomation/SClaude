@@ -701,7 +701,9 @@ workshop_push() {
   if developer_is_maintainer; then
     GIT_TERMINAL_PROMPT=0 "${G[@]}" push -q origin HEAD:main >/dev/null 2>&1 \
       || { WORKSHOP_WHY="the push to main was refused (main moved meanwhile?)"; return 1; }
-    info "  ${GREEN}Published to sclaude's main${OFF}: $("${G[@]}" log -1 --format='%h %s')"
+    # Without an indent: the topic takes no indented line, and the heading
+    # above reached the phone alone, with no word that the push went through.
+    info "${GREEN}✓ Published to sclaude's main${OFF}: $("${G[@]}" log -1 --format='%h %s')"
     return 0
   fi
   branch="$("${G[@]}" rev-parse --abbrev-ref HEAD)"

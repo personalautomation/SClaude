@@ -348,13 +348,13 @@ preview_apply_migrations() {
   cmd="$(project_get database.applyPreview "$wt" || true)"
   if [[ -z "$cmd" ]]; then
     echo ""
-    warn "The branch adds migrations and the project names no applyPreview command."
-    info "  The preview runs without the branch's schema; .sclaude/config.json"
-    info "  describes it under database.applyPreview."
+    warn "The branch adds migrations and the project names no applyPreview command: the preview runs without the branch's schema (database.applyPreview in .sclaude/config.json)."
     return 0
   fi
   echo ""
-  say "${BOLD}Preview database — the branch's migrations${OFF}"
+  # The heading for the terminal and a question alone: the topic hears how it
+  # ended, below, and the heading by itself told it nothing.
+  say_here "${BOLD}Preview database — the branch's migrations${OFF}"
   echo "${BLUE}\$ cd $(printf '%q' "$wt") && $cmd${OFF}"
   # The terminal, for a CLI that asks before it applies; in a tab a press on
   # the phone opened nobody is at it, and the command gets no input, as with
@@ -362,6 +362,7 @@ preview_apply_migrations() {
   if ( if person_at_terminal; then exec < /dev/tty
        elif [[ -n "${SCLAUDE_FROM_PHONE:-}" ]]; then exec < /dev/null; fi
        cd "$wt" && eval "$cmd" ); then
+    say "${GREEN}✓ Preview database: the branch's migrations applied.${OFF}"
     return 0
   fi
   alarm "  Applying the branch's migrations to the preview database failed."

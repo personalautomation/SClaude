@@ -656,6 +656,10 @@ db_main_up() {
          cd "$repo" && $cli migration up --include-all --workdir "$tmp" ) 9>"$repo/.sclaude/local/db-main.lock" >> "$log" 2>&1; then
     warn "  database: they did not apply — see $log"
     warn "  The main local database stays behind main; look before anything rebuilds it."
+  else
+    # Said when it went well too: the line above ends in "…", and the run
+    # ended on it with no word that the database caught up.
+    info "✓ database: main's $pending new migration(s) applied to the main local database."
   fi
   rm -rf "$tmp"
   return 0

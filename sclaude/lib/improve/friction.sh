@@ -964,17 +964,22 @@ friction_defer_proposals() {
   # for rows that would not be written.
   git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
   echo ""
-  say "${BOLD}The friction log after '$key' holds only proposed CLAUDE.md rules:${OFF}"
+  # The heading ends without a colon and the outcome below has no indent: the
+  # feed takes no indented line, and a heading ending in ":" reached the phone
+  # with nothing after it. The classes it names are what the phone keeps.
+  local classes
+  classes="$(cut -f5 <<< "$rows" | sort -u | paste -sd, - | sed 's/,/, /g')"
+  say "${BOLD}The friction log after '$key' holds only proposed CLAUDE.md rules: $n (${classes}).${OFF}"
   while IFS=$'\t' read -r _ _ _ _ _ text; do say "  - $text"; done <<< "$rows"
   # Only a "no" writes them in now. An ask that got no answer — the feature
   # ended elsewhere, no terminal — puts them off, as before the question.
   if [[ "${SCLAUDE_FRICTION_ASK:-off}" != "on" ]]; then
     # The switch named once in this process, not under every list.
     if [[ -z "${FRICTION_HINT_SAID:-}" ]]; then
-      info "  Put off to the monthly review (SCLAUDE_FRICTION_ASK=on asks first)."
+      info "Put off to the monthly review (SCLAUDE_FRICTION_ASK=on asks first)."
       FRICTION_HINT_SAID=1
     else
-      info "  Put off to the monthly review."
+      info "Put off to the monthly review."
     fi
   elif ask "${BOLD}Put them off to the monthly review? (n writes them into CLAUDE.md now) [y/n] ${OFF}" answer yn \
      && ! is_yes "$answer"; then

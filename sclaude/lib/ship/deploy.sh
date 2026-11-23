@@ -7,6 +7,24 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# One line for how a promote ended: that the project's promote command
+# went through, and the commit main stands at — and whether origin holds it.
+# Not a count of migrations: what the promote applied is the product's
+# tool's to say, and main's own movement across the block missed every
+# migration a pull before it (a failed try, a clean-up) had brought.
+#
+#   prod_promote_said
+prod_promote_said() {
+  local head up
+  head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" || return 0
+  up="$(git -C "$REPO" rev-parse '@{upstream}' 2>/dev/null || true)"
+  if [[ "$up" == "$head" ]]; then
+    printf '✓ promoted: the migrations went to production; main on origin at %s\n' "${head:0:8}"
+  else
+    printf '✓ promoted: the migrations went to production; main at %s, not on origin\n' "${head:0:8}"
+  fi
+}
+
 # A ship to production that failed, looked into at once: time is dear there.
 # Production keeps the release it had — vercel switches it whole — but a
 # promote that began may have put the new migrations under it, so its suite is
@@ -90,7 +108,7 @@ remind_prod() {
   # is over, or the ship is asked about again below.
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.after_failure null 2>/dev/null || true
-  local issue preview_done=0 prod_done=0 prod_tried=0 prod_unanswered=0 qa_skipped=0
+  local issue preview_done=0 prod_done=0 prod_tried=0 prod_unanswered=0 qa_skipped=0 prod_said="" qa_said="" qa_quiet="" ASK_FEED_QUIET="" QA_FELL_BACK=""
   # What `deployed-preview` is actually about, which is not preview_done.
   #
   # preview_done means "we shipped one in this run", and it is right for what it
@@ -280,9 +298,19 @@ remind_prod() {
     qa_skipped=1
   else
     preview_apply_migrations "$wt" || true
+    # Where QA is nobody's hand, the preview, the board's moves, QA's yes and
+    # the hand-off reach the topic as one line, said where the stretch ends
+    # (below the hand-off); warnings still go as they come. Quiet only around
+    # sclaude's own moves (qa_quiet): never over the regression's gate or the
+    # sync's, which may open a session whose start line — and the review's
+    # keys on it — the phone must have.
+    qa_settle "$wt" "$issue"
+    [[ "$QA_MODE" == auto ]] && qa_quiet=1
     # Deployed or not, the gate takes it on: a deploy that failed its tries
     # is its red, fixed as a red run is.
+    ASK_FEED_QUIET="$qa_quiet"
     preview_ship "$wt" || true
+    ASK_FEED_QUIET=""
     preview_done=1
   fi
 
@@ -313,6 +341,7 @@ remind_prod() {
   if [[ "$preview_done" -eq 1 ]]; then
     if regression_gate "$wt" "$slug" preview; then
       preview_live=1
+      ASK_FEED_QUIET="$qa_quiet"
       status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
       # Green, and before QA is sent to it: what changed and the whole feature,
       # for QA to see — where a person does QA.
@@ -386,6 +415,7 @@ remind_prod() {
   if [[ "${merged:-}" != "MERGED" && "$preview_live" -eq 1 ]]; then
     local qa_verdict=0
     qa_wait "$slug" "$issue" "$pr" "$branch" "$wt" || qa_verdict=$?
+    [[ "$qa_verdict" -eq 0 ]] || ASK_FEED_QUIET=""
     if [[ "$qa_verdict" -eq 3 ]]; then
       merged="MERGED"
       qa_skipped=1
@@ -397,9 +427,7 @@ remind_prod() {
       cycle_edge "$wt" qa_check qa_verdict "${QA_BY:-qa}" "${QA_HOW:-the board}"
       cycle_edge "$wt" qa_verdict review qa "the board" note="issue #$issue left $QA_TO"
       echo ""
-      say "${BOLD}Issue #$issue left '$QA_TO': the feature returns to development.${OFF}"
-      info "  What was said since — on the issue and on the pull request — goes into"
-      info "  the review session below."
+      say "${BOLD}Issue #$issue left '$QA_TO': the feature returns to development.${OFF} What was said since — on the issue and on the pull request — goes into the review session below."
       # The comments are collected by the watcher, verbatim, into the file
       # run_step hands to the session — asked to look now rather than at its
       # next sweep.
@@ -415,7 +443,10 @@ remind_prod() {
     # on it: the preview, its regression, and QA again (qa_retest).
     if [[ "${merged:-}" != "MERGED" ]]; then
       local resynced=0
+      local quiet_was="$ASK_FEED_QUIET"
+      ASK_FEED_QUIET=""
       sync_gate "$wt" "$slug" "$pr" || resynced=$?
+      [[ "$resynced" -eq 0 ]] && ASK_FEED_QUIET="$quiet_was"
       [[ "$resynced" -eq 1 ]] && return 0
       if [[ "$resynced" -eq 3 || "$resynced" -eq 5 ]]; then
         # Back to the preview on the synced code, from wherever the history
@@ -443,6 +474,13 @@ remind_prod() {
       # which runs in a subshell under its lock: the merge's question, for
       # this pull request, does not say it again (merge.sh).
       [[ "$handed" -eq 0 ]] && QA_ACCEPT_SAID="$pr"
+      # pr_qa_handoff's codes, each in words of its own.
+      case "$handed" in
+        0|3) qa_said="QA accepted (auto) → PR #$pr ready for the merge" ;;
+        1)   qa_said="QA accepted (auto); PR #$pr not handed over yet — another of its issues waits, or GitHub did not answer" ;;
+        2)   qa_said="QA accepted (auto); PR #$pr not handed over — it is merged or closed, or the board has no Done column" ;;
+        *)   qa_said="QA accepted (auto); PR #$pr handed over in part — the warning above says what is left" ;;
+      esac
       [[ "$handed" -eq 0 || "$handed" -eq 3 ]] \
         && once_edge "$wt" handoff merge sclaude "pr_qa_handoff" note="PR #$pr ready"
       # Done before — by an earlier run, or by the QA timer while this one
@@ -455,6 +493,17 @@ remind_prod() {
         fi
       fi
     fi
+  fi
+  # The quiet stretch's one line: the preview's address and how QA ended,
+  # or that the preview is up when the run went another way (merged
+  # meanwhile, no verdict). A preview that never went up said so in an alarm.
+  # A QA that fell back to a person (QA_FELL_BACK, qa_wait) said each step
+  # as it came, and needs no line to close it.
+  ASK_FEED_QUIET=""
+  if [[ -n "$qa_quiet" && -z "$QA_FELL_BACK" && "$preview_live" -eq 1 ]]; then
+    local preview_url
+    preview_url="$(state_get "$wt/.sclaude/local/feature/state.json" regression.preview.url 2>/dev/null | grep -v '^null$' || true)"
+    ask_feed say "🚀 Preview${preview_url:+ $preview_url}${qa_said:+ → $qa_said}"
   fi
   # Without a deploy no QA hand-off makes the pull request ready, so it is
   # made ready here: a draft cannot be merged.
@@ -777,6 +826,9 @@ remind_prod() {
       "${prod_cmds[@]}"; then
       prod_done=1
       deploy_remember "$wt" prod
+      # The block shows each command short, and the promote's outcome was
+      # among the lines not shown: said after it, on a line of its own.
+      [[ -n "$promote_cmd" ]] && prod_said="$(prod_promote_said)"
     else
       ship_rc=$?
       case $ship_rc in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
@@ -826,7 +878,8 @@ remind_prod() {
     state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
     history_add "$wt/.sclaude/local/feature/state.json" deploy.prod done
     local prod_url; prod_url="$(project_prod_url "$wt" 2>/dev/null || true)"
-    ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}"
+    [[ -n "$prod_said" ]] && info "$prod_said"
+    ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}${prod_said:+ · $prod_said}"
   elif [[ "$prod_tried" -eq 1 ]]; then
     history_add "$wt/.sclaude/local/feature/state.json" deploy.prod failed
     ask_feed alarm "$(phase_line failed deploy production) · the log is in the terminal"

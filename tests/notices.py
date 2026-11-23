@@ -117,9 +117,9 @@ notices.check(bot, [("shop", "feat-a", channel)], topic, log)
 check("a note older than a day is dropped, not sent", (bot.sent, laid()), ([], []))
 
 # --- the feed: what sclaude prints, shorter, a message a turn ------------------------
-def feed(level, text, slug="feat-a"):
+def feed(level, text, slug="feat-a", quiet=""):
     script = ('source "%s/core/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED=""\n'
-              'ask_feed "$1" "$2"' % (LIB, os.path.join(box, "sclaude"), slug))
+              'ASK_FEED_QUIET="%s"\nask_feed "$1" "$2"' % (LIB, os.path.join(box, "sclaude"), slug, quiet))
     subprocess.run(["bash", "-c", script, "_", level, text], check=True, timeout=20)
 
 
@@ -149,6 +149,17 @@ feed("warn", "✗ e2e failed")
 bot = FakeBot()
 notices.check(bot, [("shop", "feat-a", channel)], topic, log, at_terminal=lambda pid: True)
 check("at the terminal nothing sounds", bot.sent[0][2], True)
+
+# A quiet stretch (ASK_FEED_QUIET) keeps its say and info off the topic and
+# lets a warning through: it ends on one line of its own.
+feed("say", "Issue moved to Done", quiet="1")
+feed("info", "PR marked ready for review.", quiet="1")
+feed("warn", "QA watch could not be armed", quiet="1")
+feed("say", "🚀 Preview → QA accepted (auto) → PR #7 ready for the merge")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], topic, log, at_terminal=lambda pid: True)
+check("a quiet stretch sends its warnings and the line that ends it",
+      bot.sent[0][0], "🖥 ⚠️ QA watch could not be armed\n🚀 Preview → QA accepted (auto) → PR #7 ready for the merge")
 feed("info", "Deploying the preview")
 bot = FakeBot()
 notices.check(bot, [("shop", "feat-a", channel)], topic, log, at_terminal=lambda pid: False)

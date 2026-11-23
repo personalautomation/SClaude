@@ -4,6 +4,7 @@
 #
 # Part of the bot that keepawake/telegramd.py runs.
 
+import datetime
 import glob
 import json
 import logging
@@ -16,7 +17,7 @@ import time
 
 import statusline
 from keepawake.i18n import t
-from keepawake import asks, menus, project_config, repos, shell, status_report, topics
+from keepawake import asks, cycle_table, menus, project_config, repos, shell, status_report, topics
 
 
 log = logging.getLogger("keepawake")
@@ -142,9 +143,62 @@ def feature_session(repo, slug):
     node = (data.get("steps") or {}).get(step) or {}
     session = node.get("session") or ""
     if not session or not session_state(session):
+        # The session after the steps that is open now, by its own record:
+        # the epilogue's conversation stays open beside the retrospective in
+        # the same worktree, and the first one found there drew the card idle
+        # while the retrospective worked.
+        _place, after = after_open(data)
+        if after and session_state(after):
+            return after, step
         live = session_in(topics.feature_wt(repo, slug))
         session = live or session
     return session, step
+
+
+def _when(text):
+    try:
+        when = datetime.datetime.fromisoformat(text or "")
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else None
+
+
+def run_open(run):
+    """A run not ended, or taken up again after its end (session_runs'
+    resumed), and not closed by sclaude (done): the process map's rule,
+    _open in process_position.py, so the card and the map agree."""
+    if not run or run.get("done"):
+        return False
+    resumed, ended = _when(run.get("resumed")), _when(run.get("finished"))
+    return not ended or bool(resumed and resumed > ended)
+
+
+def after_open(data):
+    """The session after the four steps (the cycle table's AFTER: the sync,
+    the epilogue, the retrospective) whose last run is open (run_open), as
+    (its place, its session); of several, the one begun or taken up last;
+    ("", "") when none is."""
+    best = (None, "", "")
+    for place in (a["name"] for a in cycle_table.steps.AFTER):
+        runs = (data.get(place) or {}).get("runs")
+        last = runs[-1] if isinstance(runs, list) and runs and isinstance(runs[-1], dict) else {}
+        if not (last.get("session") and run_open(last)):
+            continue
+        when = _when(last.get("resumed")) or _when(last.get("started"))
+        if best[0] is None or (when and when >= best[0]):
+            best = (when or best[0], place, last["session"])
+    return best[1], best[2]
+
+
+def feature_place(repo, slug):
+    """Where the feature stands, as far as its card is drawn by it: the step,
+    and past the steps the session after them that is open. The card is
+    drawn again when this changes, not only when its session's state does:
+    a step that followed another with the same state left the old step on
+    the card."""
+    data = feature_state(repo, slug)
+    place, _session = after_open(data)
+    return "%s/%s" % (data.get("step") or "", place)
 
 
 def session_in(wt):

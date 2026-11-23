@@ -268,9 +268,7 @@ cmd_resume() {
       ;;
     returned)
       echo ""
-      say "${BOLD}This feature was returned to development.${OFF}"
-      info "  What was said since — on the issue and on the pull request — goes into"
-      info "  the review session below, and the session reads both for itself as well."
+      say "${BOLD}This feature was returned to development.${OFF} What was said since — on the issue and on the pull request — goes into the review session below, and the session reads both for itself as well."
       # The cycle goes back with them. Their comments are handed to the step's
       # session by run_step, and without this there is no session to hand them
       # to: the review is recorded as finished and nothing reopens it.

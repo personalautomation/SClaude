@@ -659,12 +659,13 @@ review_yours_report() {
   [[ -n "$lines" ]] || return 1
   echo ""
   say "${BOLD}Yours to resolve on GitHub — you decided to leave these as they are:${OFF}"
+  # Each thread on one line, without an indent, and the instruction too: the
+  # feed takes no indented line, and the heading reached the phone alone,
+  # naming threads it never listed.
   while IFS=$'\t' read -r link where note; do
-    say "  • $where${note:+ — $note}"
-    say "    $link"
+    say "• $where${note:+ — $note}: $link"
   done <<< "$lines"
-  info "  Open each link and press \"Resolve conversation\". Until then the review counts them as open,"
-  info "  and step 4 cannot close."
+  info "Open each link and press \"Resolve conversation\". Until then the review counts them as open, and step 4 cannot close."
   return 0
 }
 

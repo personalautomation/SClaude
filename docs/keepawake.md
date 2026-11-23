@@ -310,7 +310,15 @@ at the laptop. The feed goes only to the topic: with none yet the file waits,
 lines a failed send took go back to it for an hour (`FEED_KEEP`), and a long
 batch is cut by whole lines, never through an HTML entity. With widgets on, the
 lines of a running process go into its widget instead, and one message follows
-when it ends (the widgets paragraph below).
+when it ends (the widgets paragraph below). Which lines go is one test,
+`headline` in `notices.py`, for the message and the widget alike; so what the
+phone must hear stays off an indent in sclaude — a sentence on one line, a
+heading that does not end in a colon over an indented list, and every change
+made outside (a merge, a promote, a publication) ends on a line of success, as
+a failure always did. A stretch that ends on one line of its own sets
+`ASK_FEED_QUIET` around it: its say and info stay off the topic, warnings
+still go — an automatic QA reaches it as "🚀 Preview <address> → QA accepted
+(auto) → PR #N ready for the merge".
 
 Each of these lines opens with its kind's icon, the one its tab carries
 where it has one (`phase_icon` in `steps.sh`): 🛠 a review fix session, 🔍
@@ -710,7 +718,11 @@ actions, in the chat or on the page.
 **Cards follow their session.** A topic's card is a message drawn once, so the
 loop looks once a minute (`check_card_states`) at each card's session and
 redraws the card when its state changed from the one it shows (`card_state` in
-the record, written wherever a card is drawn). One `claude agents` answer serves
+the record, written wherever a card is drawn), or where the feature stands did
+(`card_place`, `feature_place`: the step, and past the steps the session after
+them whose run is open). Past the steps the session is that open run's
+(`after_open`), not the first conversation live in the worktree: the
+epilogue's stays open beside the retrospective's. One `claude agents` answer serves
 the whole pass; when Claude Code does not answer, nothing is redrawn. The
 minutes left of the session's prompt cache (`cache_left`, the status line's
 reckoning) are on the page only, drawn at each press.

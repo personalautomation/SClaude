@@ -74,7 +74,11 @@ Compare the description with what was actually built. The feature drifts from it
 
 - the `User request` comment — the whole request as agreed while scoping it, marking where it narrows or changes the description;
 - the discussion in the snapshot — QA hand-backs ("Returned from QA"), answers to questions, decisions taken during review; a later decision overrides an earlier one;
-- the pull request<if:pr-number> (#<pr-number>: `gh pr view <pr-number> --json body` and `gh pr view <pr-number> --comments`)</if:pr-number> — what the review changed;
+- the pull request<if:pr-number> (#<pr-number>: `gh pr view <pr-number> --json body` and `gh pr view <pr-number> --comments`)</if:pr-number> — what the review changed.
+<if:review-fixed-shown>  The findings it fixed, read for you — each one that changed how the product behaves belongs in Current behaviour; read its thread when the line does not say:
+
+<block:review-fixed>
+</if:review-fixed-shown>
 - the code itself, when the sources above disagree or leave it open.
 
 When any of it **contradicts** the description, or settles something the description leaves to be decided in a way a reader needs to know, write the section: the behaviour as it is now, whole, structured by area of the product — not a log of what changed when, and not a retelling of the parts of the description that still hold. Say at the top in one line that it supersedes the description where they differ.

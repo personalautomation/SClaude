@@ -145,8 +145,7 @@ qa_retest() {
   # stands, and is moved on to the new commit.
   if [[ -n "$sent" && "$sent" != "null" ]] && qa_product_same "$wt" "$sent" "$now"; then
     echo ""
-    info "Issue #$issue stays in '$QA_DONE': since QA looked (${sent:0:8} → ${now:0:8}), only main and"
-    info "  files that are not the product changed — this branch's product is what QA passed."
+    info "Issue #$issue stays in '$QA_DONE': since QA looked (${sent:0:8} → ${now:0:8}), only main and files that are not the product changed — this branch's product is what QA passed."
     [[ "$(state_get "$state" qa.accepted 2>/dev/null || true)" == "$sent" ]] \
       && state_set "$state" qa.accepted "$now" 2>/dev/null || true
     state_set "$state" qa.sha "$now" 2>/dev/null || true
@@ -517,6 +516,17 @@ qa_wait() {
 
     if [[ "$announced" -eq 0 ]]; then
       announced=1
+      # A wait for a person — the automatic accept refused, or never tried
+      # with the issue in another column: the quiet remind_prod keeps over an
+      # automatic QA ends here, so the topic hears the wait and the preview
+      # it is about, which the quiet had kept off it (QA_FELL_BACK tells
+      # remind_prod to leave its closing line out).
+      if [[ -n "${ASK_FEED_QUIET:-}" ]]; then
+        ASK_FEED_QUIET="" QA_FELL_BACK=1
+        local preview_url
+        preview_url="$(state_get "$wt/.sclaude/local/feature/state.json" regression.preview.url 2>/dev/null | grep -v '^null$' || true)"
+        [[ -n "$preview_url" ]] && say "The preview for QA: $preview_url"
+      fi
       echo ""
       say "${BOLD}Waiting for QA on issue #$issue.${OFF}"
       # Said only here, where a wait begins: an issue already accepted on

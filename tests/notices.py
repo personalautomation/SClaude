@@ -234,7 +234,8 @@ check("done-after-friction-goes-alone",
 check("a-start-alone-is-not-cut",
       len(notices.feed_groups([("warn", "1", "x"), ("say", "1", "💻 Step 2/7 development: session 1 started")])), 1)
 
-long_text, _ = notices.feed_message([("say", "1", "&" * 1000)] * 13)
+# Lines that differ: the same line twice is said once (below).
+long_text, _ = notices.feed_message([("say", "1", "&" * 1000 + str(i)) for i in range(13)])
 check("a long feed fits a message", len(long_text) <= notices.NOTE_MAX, True)
 check("cut between entities, the rest counted",
       (long_text.split("\n")[-2].endswith("&amp;…"), long_text.endswith("<i>… 12 more</i>")),
@@ -242,6 +243,31 @@ check("cut between entities, the rest counted",
 check("long runs are counted, not sent whole",
       notices.feed_message([("info", "1", "line %d" % i) for i in range(20)])[0].splitlines()[-1],
       "<i>… 8 more</i>")
+
+# A line the message already says is not said again: the same line twice,
+# or one a longer line carries whole; a number inside a word is not a match.
+check("a line said twice goes once",
+      notices.feed_message([("say", "1", "Regression started: local"),
+                            ("say", "2", "Regression started: local")])[0],
+      "🖥 Regression started: local")
+check("a line another carries goes",
+      notices.feed_message([("say", "1", "deployed"),
+                            ("say", "1", "preview deployed, 3m 02s")])[0],
+      "🖥 preview deployed, 3m 02s")
+check("a warning inside a quiet line stays, and sounds",
+      notices.feed_message([("warn", "1", "deploy failed"),
+                            ("info", "1", "preview deploy failed, 3m 02s")]),
+      ("🖥 ⚠️ deploy failed\npreview deploy failed, 3m 02s", True))
+check("a quiet line inside a warning goes",
+      notices.feed_message([("info", "1", "deploy failed"),
+                            ("warn", "1", "preview deploy failed")]),
+      ("🖥 ⚠️ preview deploy failed", True))
+check("of a line said twice the loudest copy stays",
+      notices.feed_message([("info", "1", "checks red"), ("warn", "2", "checks red")]),
+      ("🖥 ⚠️ checks red", True))
+check("not one inside another word",
+      notices.feed_message([("say", "1", "part 1"), ("say", "1", "part 10")])[0],
+      "🖥 part 1\npart 10")
 
 # A feature ended elsewhere gets no feed: its channel is being deleted.
 open(os.path.join(channel, "ended"), "w").close()

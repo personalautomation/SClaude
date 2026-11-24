@@ -626,6 +626,16 @@ STRINGS = {
                           "\n💾 The session cache has expired: the next request writes it again."),
     "feat.idle":         ("\n\n⚪ Сессия шага открыта, но простаивает.",
                           "\n\n⚪ The step's session is open but idle."),
+    # No session at work, and sclaude itself is (sessions.sclaude_busy): a
+    # regression, a review pass, a question. %(what)s is HTML already.
+    "feat.sclaude":      ("\n\n🔵 sclaude работает: %(what)s",
+                          "\n\n🔵 sclaude is working: %(what)s"),
+    "feat.sclauderegr":  ("идёт регрессия (%(stage)s)",
+                          "the regression is running (%(stage)s)"),
+    "feat.sclaudereview": ("идёт локальное ревью",
+                           "the local review is running"),
+    "feat.sclaudeask":   ("ждёт ответа на свой вопрос",
+                          "waiting for your answer to its question"),
     # No Claude session for the step is open: what that means depends on
     # whether a step is left — ▶️ opens one mid-step, and after the last there
     # is none to open.
@@ -641,6 +651,10 @@ STRINGS = {
                           "два разговора об одном шаге разойдутся.",
                           "The step is already open elsewhere. Carry on there — "
                           "two conversations about one step would diverge."),
+    "feat.busyregr":     ("sclaude сейчас гоняет регрессию (%(stage)s) по этой фиче. "
+                          "Дождитесь её конца: второй sclaude на ту же фичу не запускается.",
+                          "sclaude is running the %(stage)s regression for this feature. "
+                          "Wait for it to end: a second sclaude is not started on the same feature."),
 
     # a question from sclaude
     "ask.title":         ("<b>%(repo)s</b> спрашивает:\n\n%(prompt)s",

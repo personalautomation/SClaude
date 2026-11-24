@@ -71,6 +71,17 @@ review_github_followup() {
   local count
   count="$(LOCAL_REVIEW_FOLLOW="$follow" LOCAL_REVIEW_FILES="$files" local_review "$wt" "$pr")" || count="failed"
   if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+    # Its usage limit is said here: this pass is not waited for, and the
+    # topic's line about its end left the limit to whoever waits.
+    local limit_file; limit_file="$(local_review_file "$wt" -limit)"
+    if [[ -f "$limit_file" ]]; then
+      local reset; reset="$(cat "$limit_file" 2>/dev/null)"; rm -f "$limit_file"
+      local at="unknown"
+      [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt 0 ]] && at="$(date -d "@$reset" +%H:%M)"
+      warn "  Claude's usage limit (resets $at): the files the review in Actions did not open are not read here." >&2
+      [[ -n "${ASK_SLUG:-}" ]] && notify_feature "$ASK_SLUG" --wt "$wt" \
+        "Claude's usage limit (resets $at): the files the review in Actions did not open were not read on this machine." >/dev/null 2>&1
+    fi
     warn "  That pass did not complete; its log: $(local_review_file "$wt" .log). The review in Actions stands as it answered." >&2
     [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not complete" >&2
     return 1
@@ -386,9 +397,32 @@ review_close_gate() {
           [[ "${count:-0}" -gt 0 ]] && back_from=review_run
         fi
         if [[ "$count" == "failed" ]]; then
+          # Claude's usage limit (local_review_run): waited out here, and the
+          # pass run again — not the question, not [g]'s counted retries,
+          # which would meet the same limit until it resets. Not a failed
+          # review either: no edge out of the pass, which the map shows the
+          # feature still in, and the topic hears it once, from the wait.
+          local limit_file why_file why=""
+          limit_file="$(local_review_file "$wt" -limit)"
+          why_file="$(local_review_file "$wt" -why)"
+          [[ -s "$why_file" ]] && why="$(cat "$why_file" 2>/dev/null)"
+          rm -f "$why_file"
+          if [[ -f "$limit_file" ]]; then
+            local reset; reset="$(cat "$limit_file" 2>/dev/null)"
+            rm -f "$limit_file"
+            review_limit_wait "$wt" "${reset:-0}" "$slug"
+            local_due=1
+            continue
+          fi
           [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not complete"
           failed=$((failed + 1))
           warn ""
+          # The question carries why, and only that: what was printed before
+          # it (the flow, the pass's lines) is not its context, and the
+          # reason was printed in local_review's subshell, out of its reach.
+          # Here alone: the topic heard it from local_review already.
+          ask_forget
+          [[ -n "$why" ]] && warn_here "  $why"
           warn "  The review on this machine did not complete on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null) — it did not run, or a pass was refused (anything posted stays open); its log: $(local_review_file "$wt" .log)"
           # On the way in the session opens on what is open, as before the
           # gate was asked there; the pass runs again at its end.

@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -119,6 +120,62 @@ try:
     check("the refusal keeps what Telegram said", "message to edit not found" in got[-1]["error"], True)
     check("no token, chat id or address in the journal",
           [w for w in ("B" * 35, "chat_id", "api.telegram") if w in open(JOURNAL).read()], [])
+finally:
+    urllib.request.urlopen = saved
+
+# --- the same message twice is not sent twice (Bot.send, edit, caption) ------------
+urllib.request.urlopen = fake_urlopen
+_refuse.clear()
+try:
+    bot = botapi.Bot("123456789:%s" % ("B" * 35), 1)
+    _calls[:] = []
+    one = bot.send("🧪 Regression started: local, 1m 05s", thread=7)
+    again = bot.send("🧪 Regression started: local, 2m 10s", thread=7)
+    check("a plain message to a topic repeated, its times aside, is not sent again",
+          (again, [m for m, _p in _calls]), (one, ["sendMessage"]))
+    bot.send("🧪 Regression started: local", thread=8)
+    check("another topic is another conversation", len(_calls), 2)
+    keys = [[{"text": "Stop", "callback_data": "s"}]]
+    bot.send("🧪 Regression started: local, 1m 05s", keyboard=keys, thread=7)
+    bot.send("🧪 Regression started: local, 1m 05s", keyboard=keys, thread=7)
+    check("a message with buttons always goes", len(_calls), 4)
+    bot.send("ok")
+    bot.send("ok")
+    check("and so does a reply to the person, the topic not named", len(_calls), 6)
+    bot.send("finished", thread=7)
+    bot.send("started", thread=7)
+    bot.send("finished", thread=7)
+    check("a repeat after something else is new again", len(_calls), 9)
+    last = bot.send("done", thread=7)
+    bot.delete(last)
+    bot.send("done", thread=7)
+    check("and after the last one was deleted", [m for m, _p in _calls[-3:]],
+          ["sendMessage", "deleteMessage", "sendMessage"])
+    _calls[:] = []
+    bot.send("waiting for checks", thread=9, quiet=True)
+    bot.send("waiting for checks", thread=9, quiet=True)
+    check("equal and as quiet within the window is skipped", len(_calls), 1)
+    bot.send("waiting for checks", thread=9)
+    check("equal text but louder is sent", len(_calls), 2)
+    bot.said[9] = bot.said[9][:3] + (time.time() - botapi.SAID_WINDOW - 1,)
+    bot.send("waiting for checks", thread=9)
+    check("equal after the window is sent", len(_calls), 3)
+
+    _calls[:] = []
+    check("an edit goes", bot.edit(70, "card", keys), True)
+    check("the same edit again is done without Telegram", (bot.edit(70, "card", keys), len(_calls)), (True, 1))
+    bot.edit(70, "card", [[{"text": "Go", "callback_data": "g"}]])
+    check("new buttons are an edit", len(_calls), 2)
+    bot.caption(71, "caption")
+    bot.caption(71, "caption")
+    bot.widget_data(71, '{"w": 1}')
+    bot.widget_data(71, '{"w": 1}')
+    bot.widget_data(71, '{"w": 2}')
+    check("a caption and a widget's state likewise",
+          [m for m, _p in _calls[2:]], ["editMessageCaption", "editMessageWidgetData", "editMessageWidgetData"])
+    bot.shown[70] = bot.shown[70][:2] + (0,)
+    bot.edit(70, "card", [[{"text": "Go", "callback_data": "g"}]])
+    check("an old memory is not trusted: another process may have edited since", len(_calls), 6)
 finally:
     urllib.request.urlopen = saved
 

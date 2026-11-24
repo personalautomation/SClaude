@@ -79,6 +79,42 @@ blocked_note_keep() {
   rm -f "$note"
 }
 
+# A red run's rerun, from the part it failed on: `only` becomes that part
+# and the ones after it in the run's list (`ran`, the stage's own when
+# empty). A red e2e that is the last of them asks only the specs that
+# failed (`regression.<stage>.failed_tests`, through REGRESSION_TESTS to
+# regression_command); a part after `build` serves the build the red run made
+# (REGRESSION_BUILT), and so does one after a run that had it (`built`, a
+# rerun's REGRESSION_BUILT — the tree is the same). Sets the caller's `only`, REGRESSION_TESTS and
+# REGRESSION_BUILT — regression_gate's locals. A red part the list does not
+# hold (none recorded) repeats the red run as it was.
+#
+#   regression_rerun_from <wt> <stage> <ran parts> <red part> [<built>]
+regression_rerun_from() {
+  local wt="$1" stage="$2" ran="$3" red="$4" built="${5:-}" list p rest="" before=""
+  list="$ran"
+  [[ -n "$list" ]] || list="$(regression_parts "$stage" "$wt" 2>/dev/null || true)"
+  for p in $list; do
+    if [[ -n "$rest" || "$p" == "$red" ]]; then
+      rest+="${rest:+ }$p"
+    else
+      before+=" $p"
+    fi
+  done
+  if [[ -z "$rest" ]]; then
+    only="$ran"
+    return 0
+  fi
+  only="$rest"
+  [[ " $before " == *" build "* || ( -n "$built" && " $rest " != *" build "* ) ]] \
+    && REGRESSION_BUILT=1
+  if [[ "$rest" == "$red" ]] && regression_has_browser "$red"; then
+    REGRESSION_TESTS="$(state_get "$wt/.sclaude/local/feature/state.json" \
+      "regression.$stage.failed_tests" 2>/dev/null || true)"
+  fi
+  return 0
+}
+
 regression_gate() {
   local wt="$1" slug="$2" stage="$3"
   local state="$wt/.sclaude/local/feature/state.json"
@@ -146,7 +182,11 @@ regression_gate() {
   # minutes.
   local note="$wt/.sclaude/local/feature/regression.blocked"
   # A rerun before any fixing session, once a gate (below). A yes here is one.
-  local reran=0 rerun_part="" ran_only=""
+  local reran=0 rerun_part="" ran_only="" ran_tree="" ran_built=""
+  # What a rerun from the red part hands the run (regression_rerun_from):
+  # the failed specs alone, and a build the red run made. Locals, so the run
+  # this gate calls sees them and nothing after the gate does.
+  local REGRESSION_TESTS="" REGRESSION_BUILT=""
   if [[ -s "$note" ]]; then
     echo ""
     warn "  The last $stage run was blocked by a cause outside this branch:"
@@ -199,10 +239,11 @@ regression_gate() {
       state_set "$state" "regression.$stage.failed_at" "the deploy"
       state_set "$state" "regression.$stage.status" failed
     else
-      ran_only="$only"
+      ran_only="$only" ran_built="$REGRESSION_BUILT"
+      ran_tree="$(regression_tree "$wt")"
       regression_run "$wt" "$slug" "$stage" "$only"
       rc=$?
-      only=""
+      only="" REGRESSION_TESTS="" REGRESSION_BUILT=""
     fi
 
     if [[ "$rc" -eq 0 ]]; then
@@ -268,17 +309,23 @@ regression_gate() {
     # deploy that failed is not rerun here: preview_ship has tried it already.
     # "No session yet" is read from the state as well: a session whose friction
     # review fixed sclaude gives its attempt back, and on the preview restarts
-    # sclaude, which would take its red for a first one. The rerun repeats the
-    # red run, a manuals-only one included, not the whole stage.
+    # sclaude, which would take its red for a first one. The rerun starts at
+    # the part that went red, with the parts after it, which never ran: the
+    # parts before it went green on this same tree a minute ago, and a red e2e
+    # after a full run cost the whole stage again — lint, build, typecheck —
+    # to ask two specs once more. And a red e2e asks only its failed specs
+    # (regression_rerun_from). A green rerun records the tree green: no
+    # session ran between, so the parts it left out are green on it still.
     local red_at ofixes
     red_at="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
     ofixes="$(state_get "$state" "regression.$stage.orchestrator_fixes" 2>/dev/null || echo 0)"
     [[ "$ofixes" =~ ^[0-9]+$ ]] || ofixes=0
     if [[ "$reran" -lt 1 && "$attempts" -eq 0 && "$ofixes" -eq 0 && "$red_at" != "the deploy" ]]; then
       reran=1
-      only="$ran_only"
+      regression_rerun_from "$wt" "$stage" "$ran_only" "$red_at" "$ran_built"
       [[ -n "$red_at" && "$red_at" != "null" ]] && rerun_part="$red_at" || rerun_part="a part"
       info "  Running $stage again once before opening a fixing session: a flaky failure goes green on its own."
+      if [[ -n "$only" ]]; then info "  Running: $only${REGRESSION_TESTS:+, the failed specs alone}."; fi
       continue
     fi
     rerun_part=""
@@ -415,7 +462,16 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
       # writes its own.
       if [[ "$blocked_reruns" -lt 1 ]]; then
         blocked_reruns=$((blocked_reruns + 1))
+        # From the red part on, as the first rerun, while the tree is the one
+        # that went red: the session says it changed nothing, and the tree is
+        # what shows it. Moved, or dirty and so unnamed, the stage runs whole.
+        local tree_now; tree_now="$(regression_tree "$wt")"
+        if [[ -n "$ran_tree" && "$tree_now" == "$ran_tree" ]]; then
+          regression_rerun_from "$wt" "$stage" "$ran_only" \
+            "$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)" "$ran_built"
+        fi
         info "  Running $stage again, once: a flaky failure goes green on its own."
+        if [[ -n "$only" ]]; then info "  Running: $only${REGRESSION_TESTS:+, the failed specs alone}."; fi
         continue
       fi
       info "  Blocked again after a second run, so it is not noise."

@@ -52,6 +52,63 @@ RETRO_NOTHING_SAID="Nothing to act on: sclaude closes this session."
 # What the second pass is told when nothing ran since the first.
 RETRO_NOTHING_SINCE="Nothing but this clean-up: no step, review or sync ran, and no commit reached the branch. So this is me coming back to the conversation: carry on with it, and check your report against what is on disk now."
 
+# The person's list of declined proposals, in and out of a retrospective.
+# The session works on a copy in its tree, and `.base` beside it
+# (`.sclaude/local/feature/retro-declined.md.base`) is the list as the copy
+# was taken: what goes back is only the lines the session added
+# since, appended to the list as it is by then, so two retrospectives at once,
+# or the person's own edit meanwhile, lose nothing, and a session that wrote
+# nothing writes nothing.
+#
+#   retro_declined_in <copy> <list>     a copy is left from a pass that ended
+#                                       before carrying it back: carried back
+#                                       first; then a fresh copy, or none
+#   retro_declined_back <copy> <list>   the lines added since the copy, back
+
+# Lines appended to a file, each on a line of its own — after a last line
+# saved without a final newline too. Nothing for no lines.
+retro_declined_append() {
+  local file="$1" lines="$2"
+  [[ -n "$lines" ]] || return 0
+  { [[ ! -s "$file" || -z "$(tail -c 1 "$file")" ]] || printf '\n' >> "$file"; } \
+    && printf '%s\n' "$lines" >> "$file"
+}
+
+retro_declined_in() {
+  local here="$1" home="$2"
+  # A copy that could not go back stays, the one place its lines are, and
+  # takes in what the list gained meanwhile, so this pass reads it too.
+  if [[ -f "$here" ]] && ! retro_declined_back "$here" "$home"; then
+    if [[ -f "$home" ]]; then
+      local f; for f in "$here" "$here.base"; do
+        [[ -f "$f" ]] && retro_declined_append "$f" "$(grep -vxF -f "$f" "$home" 2>/dev/null || true)"
+      done
+    fi
+    return 0
+  fi
+  rm -f "$here" "$here.base"
+  [[ -f "$home" ]] || return 0
+  # A copy that could not be taken is no copy: nothing to carry back later.
+  { cp "$home" "$here" && cp "$home" "$here.base"; } 2>/dev/null || rm -f "$here" "$here.base"
+}
+
+retro_declined_back() {
+  local here="$1" home="$2" base="$1.base" added
+  [[ -f "$here" ]] || return 0
+  if [[ -f "$base" ]]; then
+    added="$(grep -vxF -f "$base" "$here" 2>/dev/null || true)"
+  else
+    added="$(cat "$here")"
+  fi
+  # Not twice: a line already in the list, from another hand, stays one line.
+  [[ -f "$home" && -n "$added" ]] && added="$(grep -vxF -f "$home" <<< "$added" || true)"
+  if [[ -n "$added" ]]; then
+    { mkdir -p "${home%/*}" && retro_declined_append "$home" "$added"; } 2>/dev/null \
+      || { warn "  The declined proposals the retrospective wrote could not reach your list ($home): copy them from $here before the clean-up removes the tree."; return 1; }
+  fi
+  cp "$here" "$base" 2>/dev/null || true
+}
+
 run_retro() {
   local wt="$1" slug="$2" pr="${3:-}" issue="${4:-}"
   RETRO_INSTRUMENTS_CHANGED=""
@@ -156,6 +213,14 @@ PY
   # (keepawake/tg_journal.py), when anything did.
   local tg_log="$wt/.sclaude/local/feature/telegram-log.jsonl"
   [[ -s "$tg_log" ]] || tg_log=""
+  # The person's own list of proposals declined at earlier retrospectives,
+  # kept in the main checkout so it outlives every feature. The session reads
+  # and writes a copy in its tree, where its file tools go without a question
+  # (and which is not the live checkout when the product is sclaude itself);
+  # what it added is carried back once it ends (retro_declined_back).
+  local declined="$REPO/.sclaude/local/retro-declined.md"
+  local declined_here="$wt/.sclaude/local/feature/retro-declined.md"
+  retro_declined_in "$declined_here" "$declined"
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
     SCLAUDE_V_TELEGRAM_LOG="$tg_log" \
     SCLAUDE_B_SINCE="$since_block" \
@@ -169,6 +234,7 @@ PY
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
     SCLAUDE_V_CONFIG="$config" \
+    SCLAUDE_V_RETRO_DECLINED="$declined_here" \
     SCLAUDE_V_NOTHING_SAID="$RETRO_NOTHING_SAID" \
     render_prompt "$template" "$slug" "$pr" "$issue" "$wt")" || return 0
 
@@ -211,6 +277,7 @@ PY
       --permission-mode plan --add-dir "$INSTRUMENTS" \
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
+  retro_declined_back "$declined_here" "$declined"
   # The live checkout moved on while it ran: what it published was brought in
   # (workshop_live_update), or another hand updated it.
   local instruments_moved=""

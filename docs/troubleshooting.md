@@ -37,6 +37,12 @@ or commits in sclaude's checkout stand in the way. Commit or stash an edit and
 run `sclaude update`; move commits of your own to a branch with `sclaude
 propose`, which also sends them as a pull request.
 
+**`instruments: update from origin put off — another sclaude runs from this
+checkout`** — another terminal runs sclaude from the same checkout, and
+replacing the files under it would break its sessions. The run goes on with the
+code on disk; the update is taken by the next start when no other sclaude runs.
+Said once a run.
+
 **`instruments: N local branch(es) hold work found nowhere else`** — branches
 of sclaude's checkout that are on this machine alone and whose work is not on
 `main`, most often a fix a session made in a workshop that was never sent. It
@@ -78,7 +84,9 @@ sclaude remembers the step and the conversation. `sclaude <name>` opens it
 again; `sclaude reset <name>` starts the step over without its conversation.
 
 **A session stopped at Claude's usage limit** — sclaude says when the limit
-resets and resumes the session where it stopped by itself.
+resets and resumes the session where it stopped by itself. A review pass on
+this machine that meets the limit is waited out the same way: sclaude says
+when the review runs again and runs it then, asking nothing.
 
 **`A merge is under way in the tree; the step has not been started.`** — a merge
 of main was left half done. Finish it with `sclaude sync <name>` or back it out
@@ -179,3 +187,9 @@ fill `~/.config/keepawake/env`; *readable by the group or everyone*: `chmod 600`
 it; *a second instance … (HTTP 409)*: the same token runs on another machine —
 each machine needs its own bot ([Configuration](tools.md#configuration)). While
 you are at the terminal, questions reach the chat silently, by design.
+
+**`Not sent to the phone: sclaude pid <pid> (<tty or no terminal>) holds this
+feature's questions.`** — another sclaude has a question waiting on the same
+channel, and this one asks in its terminal only. *no terminal* is one started
+by the bot, or one whose window was closed. Answer or end that one (`kill
+<pid>`), and the next question reaches the phone.

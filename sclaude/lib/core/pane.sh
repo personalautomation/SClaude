@@ -461,9 +461,16 @@ session_keys_legend() {
   for k in n N r R; do
     session_key_has "$k" && line+="${line:+ · }${BOLD:-}[$k]${OFF:-} $(session_key_label "$k")"
   done
-  # Once in this process: the keys stay the same from round to round.
-  [[ -n "$line" && "${KEYS_SAID:-}" != "$line" ]] && info "   ${DIM:-}Keys here, each pressed twice:${OFF:-} $line"
-  KEYS_SAID="$line"
+  # Once a run: the keys stay the same from round to round. The mark is a
+  # file, keyed by the run (SCLAUDE_RUN, kept across re-execs): this is
+  # called in the subshell a session is launched in, and code_reload execs a
+  # new sclaude, so a variable was lost every time and the line said after
+  # every session.
+  [[ -n "$line" ]] || return 0
+  local said="${TMPDIR:-/tmp}/sclaude-keys.${SCLAUDE_RUN:-$$}"
+  [[ "$(cat "$said" 2>/dev/null)" == "$line" ]] && return 0
+  printf '%s\n' "$line" > "$said" 2>/dev/null
+  info "   ${DIM:-}Keys here, each pressed twice:${OFF:-} $line"
   return 0
 }
 

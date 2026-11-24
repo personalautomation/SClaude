@@ -385,7 +385,8 @@ if gate is not None:
                        re.search(r'regression\.%s\.orchestrator_fixes"? 0\b' % re.escape(m.group(1)),
                                  near) is not None)
     check("new-round-resets-found", found, 3)
-    check_true("gate-first-rerun-repeats-the-red-run", 'only="$ran_only"' in first)
+    check_true("gate-first-rerun-starts-at-the-red-part",
+               'regression_rerun_from "$wt" "$stage" "$ran_only" "$red_at"' in first)
     check_true("gate-first-rerun-not-for-a-deploy", '!= "the deploy"' in first)
     check_true("gate-first-rerun-is-not-asked", "ask " not in first)
     check_true("gate-first-rerun-counter-is-per-gate", 'local reran=0' in blocked_body)
@@ -1266,6 +1267,23 @@ check("smoke-gets-the-base-and-cap-on-preview",
 check("smoke-gets-the-base-on-prod",
       command_for("smoke", "https://x.test", "npx playwright test --grep @smoke", stage="prod"),
       "export E2E_BASE_URL=https://x.test; npx playwright test --grep @smoke")
+# The rerun of a red suite hands it the failed specs after `--`, each quoted;
+# a part that is not the suite takes none.
+def command_with_tests(part, tests):
+    script = """
+project_command() { printf '%%s' 'npx playwright test'; }
+developer_name() { return 1; }
+source %s/sclaude/lib/ship/regression.sh
+REGRESSION_TESTS=%s regression_command %s '' '' local
+""" % (ROOT, shlex.quote(tests), part)
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+
+
+check("failed-specs-after-the-dashes",
+      command_with_tests("e2e", "e2e/a b.spec.ts:3\ne2e/c.spec.ts:9\n"),
+      "export E2E_MAX_FAILURES=10; npx playwright test -- e2e/a\\ b.spec.ts:3 e2e/c.spec.ts:9")
+check("failed-specs-not-for-another-part",
+      command_with_tests("lint", "e2e/c.spec.ts:9"), "npx playwright test")
 # The reason for export over a prefix: the second half of a chain sees it too.
 chained = command_for("e2e", "", "true && echo \"seen=$SCLAUDE_DEV\"",
                       dev_env="carol")
@@ -1422,7 +1440,26 @@ check_true("manual-subset-cleared-after-first-run",
 run_src = (re.search(r"regression_run\(\)\s*\{(.*?)\n\}", regression, re.S).group(1)
            + re.search(r"regression_run_body\(\)\s*\{(.*?)\n\}", regression, re.S).group(1))
 check_true("manual-subset-skips-the-dev-environment",
-           '[[ "$stage" == "local" && -z "$only" ]] && declare -F ensure_dev' in run_src)
+           '[[ "$stage" == "local" ]] && { [[ -z "$only" ]] || regression_has_browser "$only"; }'
+           in run_src)
+# A rerun of a few parts that holds the suite loads the machine and asks the
+# server as a whole run does: it queues, has the server restarted, and serves
+# the build the red run made.
+check_true("partial-run-with-e2e-takes-the-lock",
+           re.search(r'\{ \[\[ -z "\$only" \]\] \|\| regression_has_browser "\$only"; \}'
+                     r'\s*\\\n\s*&& declare -F lock_take', run_src) is not None)
+check_true("partial-run-serves-the-earlier-build",
+           '[[ " $parts " == *" build "* || -n "${REGRESSION_BUILT:-}" ]]' in run_src)
+check_true("failed-specs-run-not-remembered",
+           '[[ -n "$retried" || -n "${REGRESSION_TESTS:-}" ]]' in run_src)
+# Every failed spec is kept for the rerun, but not from a run cut off at its
+# cap, and only where Playwright writes the summary they are read from.
+check_true("failed-tests-recorded-for-the-rerun",
+           re.search(r'! regression_stopped_early "\$log"(?:.|\n){0,200}testRunner(?:.|\n){0,200}'
+                     r'regression_failed_specs "\$log" "\$from" all(?:.|\n){0,120}'
+                     r'regression\.\$stage\.failed_tests', run_src) is not None)
+check_true("failed-tests-cleared-at-a-run-start",
+           'state_set "$state" "regression.$stage.failed_tests" null' in run_src)
 check_true("manual-subset-replaces-the-parts", 'parts="$only"' in run_src)
 # A full local run restarts the server rather than trusting one up for hours.
 check_true("full-local-run-restarts-the-dev-server",
@@ -1585,6 +1622,101 @@ check("preview-gate-no-commit-no-deploy",
 # address: a fixing session, then the deploy again on its fix.
 check("preview-gate-failed-redeploy-is-fixed",
       preview_gate("f" * 40, [0], ship_ok="once"), ["SHIP", "FIX", "SHIP", "RAN", "rc=0"])
+# --- a red run is run again from the part that failed -------------------------
+#
+# A full local run red on e2e alone was run again whole before a fixing
+# session: lint, build, typecheck and the whole suite, to ask two specs once
+# more. Run for real: the gate, regression_rerun_from and regression_command
+# are the real ones; the run is a stub that prints the parts it was given and
+# the command each became, red the first time as `red` says.
+def rerun_gate(red, specs, blocked=False, commit=False):
+    with tempfile.TemporaryDirectory() as wt:
+        git = lambda *a: subprocess.run(["git", "-C", wt, *a], check=True,
+                                        capture_output=True)
+        git("init", "-q")
+        git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+            "--allow-empty", "-m", "base")
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        with open(os.path.join(wt, ".git", "info", "exclude"), "a") as fh:
+            fh.write(".sclaude/local/feature\n.sclaude/config.json\n")
+        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
+            json.dump({"regression": {"local": ["lint", "typecheck", "build", "e2e"]},
+                       "commands": {"lint": "npm run lint", "typecheck": "npm run typecheck",
+                                    "build": "npm run build", "e2e": "npx playwright test"}}, fh)
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
+            json.dump({}, fh)
+        body = "set -uo pipefail\n"
+        body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
+        body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude; REPO=%s\n' % shlex.quote(wt)
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "core/project", "tree/worktree",
+                     "ship/regression", "ship/regression_gate", "ship/regression_fix"):
+            body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
+        body += """
+warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
+regression_rewind() { :; }; regression_clear_mark() { :; }; sync_unpublished() { :; }
+developer_name() { return 1; }
+STATE=%(wt)s/.sclaude/local/feature/state.json
+N=0
+regression_run() {
+  local parts="${4:-$(regression_parts "$3" "$1")}" p
+  echo "RUN $parts${REGRESSION_BUILT:+ (built)}"
+  for p in $parts; do echo "CMD $(regression_command "$p" "" "$1" "")"; done
+  N=$((N + 1))
+  if [[ "$N" -le %(reds)d ]]; then
+    state_set "$STATE" regression.local.failed_at %(red)s
+    state_set "$STATE" regression.local.failed_tests %(specs)s
+    return 1
+  fi
+  return 0
+}
+regression_fix() {
+  echo FIX
+  %(commit)s
+  printf 'the cause is outside\n' > %(wt)s/.sclaude/local/feature/regression.blocked
+  return 3
+}
+regression_gate %(wt)s demo local
+echo "rc=$?"
+""" % {"wt": shlex.quote(wt), "red": shlex.quote(red), "specs": shlex.quote(specs),
+       "reds": 2 if blocked else 1,
+       "commit": ('git -C %s -c user.email=t@t -c user.name=t commit -q --allow-empty -m fix'
+                  % shlex.quote(wt)) if commit else ":"}
+        out = subprocess.run(["bash", "-c", body], capture_output=True,
+                             text=True, timeout=60)
+        # The feature's own address and the like, which every part is given.
+        return [re.sub(r"^CMD (?:export [^;]*; )*", "CMD ", line)
+                for line in out.stdout.splitlines() if line]
+
+
+FULL = ["RUN lint typecheck build e2e", "CMD npm run lint", "CMD npm run typecheck",
+        "CMD npm run build", "CMD npx playwright test"]
+# Red on e2e after a full run: only e2e again, its failed specs alone after
+# `--`, each quoted, against the build the red run made.
+check("rerun-red-e2e-runs-only-its-failed-specs",
+      rerun_gate("e2e", "e2e/my dir/a.spec.ts:14\ne2e/b.spec.ts:8"),
+      FULL + ["RUN e2e (built)",
+              "CMD npx playwright test -- e2e/my\\ dir/a.spec.ts:14 e2e/b.spec.ts:8", "rc=0"])
+# No specs recorded (a run cut off at its cap, another runner): e2e whole.
+check("rerun-red-e2e-without-specs-runs-it-whole",
+      rerun_gate("e2e", "null"),
+      FULL + ["RUN e2e (built)", "CMD npx playwright test", "rc=0"])
+# Red earlier: that part and the ones after it, which never ran.
+check("rerun-red-typecheck-runs-the-rest",
+      rerun_gate("typecheck", "null"),
+      FULL + ["RUN typecheck build e2e", "CMD npm run typecheck", "CMD npm run build",
+              "CMD npx playwright test", "rc=0"])
+# A session that changed nothing (blocked): from the red part again; the
+# failed specs are passed to that rerun alone, not to the next whole run.
+E2E_AGAIN = ["RUN e2e (built)", "CMD npx playwright test -- e2e/b.spec.ts:8"]
+check("blocked-rerun-from-the-red-part",
+      rerun_gate("e2e", "e2e/b.spec.ts:8", blocked=True),
+      FULL + E2E_AGAIN + ["FIX"] + E2E_AGAIN + ["rc=0"])
+# One that moved the tree all the same: the stage whole.
+check("blocked-rerun-on-a-moved-tree-runs-whole",
+      rerun_gate("e2e", "e2e/b.spec.ts:8", blocked=True, commit=True),
+      FULL + E2E_AGAIN + ["FIX"] + FULL + ["rc=0"])
+
+
 # A failed ship, run (ship_failed): production's suite first when the promote
 # began, then a fixing session, and what follows goes by what it did.
 def ship_failed(fix_rc, commits, began=""):
@@ -1964,13 +2096,13 @@ specs_fn = re.search(r"^regression_failed_specs\(\) \{.*?^\}", regression, re.S 
 check_true("failed-specs-helper-exists", specs_fn is not None)
 
 
-def failed_specs(log_text, start=1):
+def failed_specs(log_text, start=1, every=False):
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "regression.log")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(log_text)
-        script = specs_fn.group(0) + '\nregression_failed_specs "$1" "$2"'
-        return subprocess.run(["bash", "-c", script, "_", path, str(start)],
+        script = specs_fn.group(0) + '\nregression_failed_specs "$1" "$2" "$3"'
+        return subprocess.run(["bash", "-c", script, "_", path, str(start), "all" if every else ""],
                               capture_output=True, text=True).stdout
 
 
@@ -2001,6 +2133,18 @@ if specs_fn:
                        "  1 failed\n    b.spec.ts:2:1 › late\n", start=4),
           "late (b.spec.ts:2)\n")
     check("failed-specs-silent-without-playwright", failed_specs("error TS2304\n"), "")
+    # `all`: every failed spec, path whole and line, one a line, the flaky
+    # left out — what the rerun hands the suite.
+    check("failed-specs-all-from-the-summary", failed_specs(SUMMARY, every=True),
+          "e2e/login.spec.ts:14\ne2e/my dir/cart.spec.ts:8\n")
+    check("failed-specs-all-past-three",
+          failed_specs("  5 failed\n" + "".join("    [chromium] › e2e/s.spec.ts:%d:1 › t%d\n" % (i, i)
+                                                 for i in range(1, 6)), every=True),
+          "".join("e2e/s.spec.ts:%d\n" % i for i in range(1, 6)))
+    check("failed-specs-all-without-a-summary",
+          failed_specs(SUMMARY[:SUMMARY.index("  2 failed")], every=True), "e2e/login.spec.ts:14\n")
+    check("failed-specs-all-silent-without-playwright",
+          failed_specs("error TS2304\n", every=True), "")
 check_true("red-line-names-the-specs",
            "failed on $failed${failed_specs:+: $failed_specs}" in regression)
 
@@ -2045,7 +2189,7 @@ check_true("retry-restarts-the-server",
            re.search(r'retried=1(?:.|\n)*?stop_own_dev(?:.|\n)*?ensure_dev(?:.|\n)*?continue',
                      regression) is not None)
 check_true("retried-time-not-remembered",
-           '[[ -n "$retried" ]] || regression_remember' in regression)
+           '[[ -n "$retried" || -n "${REGRESSION_TESTS:-}" ]] \\\n        || regression_remember' in regression)
 
 # The production block stops at its first failure, so putting the main tree's
 # environment back cannot be one of its commands: a promote that failed halfway

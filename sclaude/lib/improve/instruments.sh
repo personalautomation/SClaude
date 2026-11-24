@@ -444,7 +444,10 @@ instruments_take() {
   [[ -n "$branch" && "$branch" != "HEAD" ]] || return 1
 
   if other="$(instruments_others)"; then
-    info "  instruments: not updated — another sclaude is running from it ($other)"
+    # Said once a run, not after every reload: SCLAUDE_SYNCED stops
+    # instruments_sync from coming here again.
+    info "  instruments: update from origin put off — another sclaude runs from this checkout ($other); this run goes on with the code on disk."
+    export SCLAUDE_SYNCED=1
     return 1
   fi
 

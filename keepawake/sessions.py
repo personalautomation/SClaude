@@ -9,6 +9,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -17,7 +18,7 @@ import time
 
 import statusline
 from keepawake.i18n import t
-from keepawake import asks, cycle_table, menus, project_config, repos, shell, status_report, topics
+from keepawake import asks, cycle_table, menus, processes, project_config, repos, shell, status_report, topics
 
 
 log = logging.getLogger("keepawake")
@@ -73,14 +74,25 @@ CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
 
 
 def feature_busy(repo, slug):
-    """Whether the feature is at work: its session in any state but idle, or
-    its orchestrator alive and waiting on a question — between steps there
-    is no session, and a second orchestrator would be two conversations
-    about one thing all the same."""
+    """Why the feature is at work, in words, or "" when it is free: its
+    session in any state but idle, its orchestrator alive and waiting on a
+    question, or sclaude running a regression for it, proved by the live
+    sclaude that runs it (regression_alive: the run's own pid in the state,
+    or the regression queue's holder). Between steps there is no
+    session, and a second orchestrator would be two conversations about one
+    thing all the same. Only what a live process proves stops Continue: a
+    guess by time alone, as the card may show, would hold the person back
+    with nothing running."""
     if asks.pending_ask(os.path.join(asks.ask_dir(repo), "ask", slug)):
-        return True
+        return t("feat.busy")
     session, _step = feature_session(repo, slug)
-    return bool(session) and session_state(session) not in ("", "idle")
+    if session and session_state(session) not in ("", "idle"):
+        return t("feat.busy")
+    data = feature_state(repo, slug)
+    for stage, run in sorted((data.get("regression") or {}).items()):
+        if regression_alive(slug, stage, run):
+            return t("feat.busyregr", stage=status_report.escape(stage))
+    return ""
 
 
 def cache_left(session_id, now=None):
@@ -140,6 +152,11 @@ def feature_session(repo, slug):
     # worktree is the feature's, whatever the state names.
     data = feature_state(repo, slug)
     step = data.get("step") or ""
+    # A regression's fix session open now is what works, beside the step's
+    # own conversation left idle in the same worktree.
+    _stage, fix = fix_open(data)
+    if fix and session_state(fix):
+        return fix, step
     node = (data.get("steps") or {}).get(step) or {}
     session = node.get("session") or ""
     if not session or not session_state(session):
@@ -202,15 +219,176 @@ def feature_place(repo, slug):
 
 
 def session_in(wt):
-    """The id of a live Claude session working in the worktree, or ""."""
+    """The id of a live Claude session working in the worktree, or "": one
+    not idle before an idle one, which a conversation left open beside the
+    working one is."""
     if not wt:
         return ""
     root = os.path.realpath(wt)
+    found = []
     for a in agents():
         cwd = os.path.realpath(a.get("cwd") or "") if isinstance(a, dict) else ""
-        if cwd == root or cwd.startswith(root + os.sep):
-            return a.get("sessionId") or ""
+        if (cwd == root or cwd.startswith(root + os.sep)) and a.get("sessionId"):
+            found.append(a)
+    busy = [a for a in found if (a.get("state") or a.get("status") or "idle") != "idle"]
+    return (busy or found or [{}])[0].get("sessionId") or ""
+
+
+def fix_open(data):
+    """(stage, session) of a regression's fix session that sclaude has open
+    (its last fix_status word is `open`, as _fix_open in process_position.py
+    reads it), ("", "") when none is."""
+    for stage, run in sorted((data.get("regression") or {}).items()):
+        if not isinstance(run, dict):
+            continue
+        words = str(run.get("fix_status") or "").split()
+        if words and words[-1] == "open" and run.get("fix_session"):
+            return stage, run["fix_session"]
+    return "", ""
+
+
+# How long a session just started or taken up again counts as working while
+# Claude Code still calls it idle, or does not list it yet: its first prompt
+# is on its way. Without it the card said "idle" three seconds after a fix
+# session opened.
+FRESH_START = 60
+# How long sclaude's own word that something runs is believed: the process
+# map's three hours (_recent in process_position.py). A run killed leaves
+# its "running" behind.
+BELIEVED = 3 * 3600
+# The machine-wide regression queue's holder note (lock_take in
+# sclaude/lib/core/lock.sh, beside DEV_REGISTRY's .regression.lock): "<slug>,
+# the <stage> regression, since HH:MM (pid N)", as regression_run in
+# sclaude/lib/ship/regression.sh names the holder. A live pid there that runs
+# sclaude is a run alive; Ctrl-C or a closed terminal leaves the note behind,
+# its pid dead or, later, another process's (_is_sclaude).
+REGRESSION_HOLDER = os.path.join(
+    os.environ.get("SCLAUDE_DEV_REGISTRY") or os.path.expanduser("~/.claude/sclaude/dev"),
+    ".regression.lock.holder")
+HOLDER_NOTE = re.compile(r"^(?P<slug>.+), the (?P<stage>\S+) regression, since .* \(pid (?P<pid>\d+)\)$")
+
+
+def regression_held(slug, stage):
+    """Whether the regression queue is held, by a live pid, for this
+    feature's stage."""
+    try:
+        with open(REGRESSION_HOLDER, encoding="utf-8") as fh:
+            m = HOLDER_NOTE.match(fh.readline().strip())
+    except OSError:
+        return False
+    return bool(m) and m.group("slug") == slug and m.group("stage") == stage \
+        and processes.alive(m.group("pid")) and _is_sclaude(m.group("pid"))
+
+
+def regression_alive(slug, stage, run):
+    """Whether a regression the state calls running is: the sclaude that
+    runs it (`regression.<stage>.pid`, written as it starts) alive, or the
+    queue held for it by a live sclaude. A run killed with Ctrl-C or a
+    closed terminal leaves "running" behind, and its pid dead or, later,
+    another process's."""
+    if not (isinstance(run, dict) and run.get("status") == "running"):
+        return False
+    pid = str(run.get("pid") or "")
+    if pid.isdigit() and processes.alive(pid) and _is_sclaude(pid):
+        return True
+    return regression_held(slug, stage)
+
+
+def _is_sclaude(pid):
+    """Whether pid runs sclaude: a note a killed run left behind outlives
+    it, and its pid may be another process's by now (after a reboot, or
+    when pids come round)."""
+    try:
+        args = subprocess.run(["ps", "-ww", "-o", "args=", "-p", str(pid)],
+                              capture_output=True, text=True, timeout=5).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if args and os.path.basename(args[0]) in ("bash", "sh"):
+        args = args[1:]
+    return bool(args) and os.path.basename(args[0]) == "sclaude"
+
+
+def _ago(text, now):
+    when = _when(text)
+    return now - when.timestamp() if when else None
+
+
+def started_lately(data, now=None):
+    """Whether the feature's session was started or taken up again less
+    than FRESH_START ago: the step's last run, an open run after the steps,
+    or an open fix session."""
+    now = time.time() if now is None else now
+    times = []
+    node = (data.get("steps") or {}).get(data.get("step") or "") or {}
+    for runs in [node.get("runs")] + [(data.get(a["name"]) or {}).get("runs")
+                                      for a in cycle_table.steps.AFTER]:
+        last = runs[-1] if isinstance(runs, list) and runs and isinstance(runs[-1], dict) else {}
+        if run_open(last):
+            times.append(last.get("resumed") or last.get("started"))
+    stage, _fix = fix_open(data)
+    if stage:
+        times += str(data["regression"][stage].get("fix_started") or "").split()[-1:]
+    ages = [_ago(x, now) for x in times]
+    return any(age is not None and 0 <= age < FRESH_START for age in ages)
+
+
+def sclaude_busy(repo, slug, data=None, now=None):
+    """What sclaude itself is doing for the feature with no session at
+    work, in words; "" when nothing. A regression or a local review pass
+    runs for twenty minutes and more, and the card said "no session is open,
+    press Continue" all that while. In order: the process its widget shows
+    (processes.py's record, kept with widgets on) while a process that
+    printed for it lives — its caption, HTML already; a regression running
+    by the state while a live sclaude proves it (regression_alive: the
+    run's own pid in the state, or the regression queue held for it); the local
+    review running by the state; the orchestrator alive and asking a
+    question (asks.pending_ask)."""
+    now = time.time() if now is None else now
+    channel = os.path.join(asks.ask_dir(repo), "ask", slug)
+    rec = processes.load(channel).get("open") or {}
+    live = any(processes.alive(p) for p in rec.get("pids") or [])
+    if rec.get("caption") and live:
+        return rec["caption"]
+    data = feature_state(repo, slug) if data is None else data
+    for stage, run in sorted((data.get("regression") or {}).items()):
+        if not (isinstance(run, dict) and run.get("status") == "running"):
+            continue
+        # "running" is left behind by a run killed with Ctrl-C or a closed
+        # terminal: believed only while a live process stands behind it.
+        if regression_alive(slug, stage, run):
+            return t("feat.sclauderegr", stage=status_report.escape(stage))
+    # The local review's mark is a time alone, cleared by its trap; three
+    # hours stand in for a pid where a kill skipped the trap.
+    age = _ago(((data.get("review") or {}).get("local") or {}).get("running"), now)
+    if age is not None and age < BELIEVED:
+        return t("feat.sclaudereview")
+    if asks.pending_ask(channel):
+        return t("feat.sclaudeask")
     return ""
+
+
+# What card_status starts the words of sclaude_busy with.
+BUSY = "sclaude:"
+
+
+def card_status(repo, slug, session=None):
+    """What the feature's card says it is doing — the value it is drawn
+    from and the one check_card_states compares, so the card changes when
+    sclaude's own work starts and ends: the session's state; "working" for
+    one idle or not listed yet within FRESH_START of its start; BUSY and
+    sclaude_busy's words where no session works and sclaude does."""
+    if not repo:
+        return ""
+    if session is None:
+        session = feature_session(repo, slug)[0]
+    state = session_state(session)
+    if state not in ("", "idle"):
+        return state
+    data = feature_state(repo, slug)
+    if session and started_lately(data):
+        return "working"
+    busy = sclaude_busy(repo, slug, data)
+    return BUSY + busy if busy else state
 
 
 def feature_links(repo, slug):
@@ -350,11 +528,13 @@ def feature_card(name, slug, feats=None, slim=False):
         return t("feat.gone", slug=status_report.escape(slug))
     repo = repos.repo_path(name)
     session, _step = feature_session(repo, slug) if repo else ("", "")
-    state = session_state(session)
+    state = card_status(repo, slug, session)
     # Claude Code names the states its own way and adds to them: "waiting" is
     # a session that asks the person something. A state not known here is
     # still an open session, never "none is open".
-    if not state:
+    if state.startswith(BUSY):
+        note = t("feat.sclaude", what=state[len(BUSY):])
+    elif not state:
         note = (t("feat.nosessiondone") if " done" in row[1] or row[1].startswith("all done")
                 else t("feat.nosession"))
     else:

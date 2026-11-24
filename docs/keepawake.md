@@ -308,7 +308,17 @@ warning or an alarm is in it and the person is not at the terminal that printed
 it — the same test of the terminal's last keystroke that keeps questions silent
 at the laptop. The feed goes only to the topic: with none yet the file waits,
 lines a failed send took go back to it for an hour (`FEED_KEEP`), and a long
-batch is cut by whole lines, never through an HTML entity. With widgets on, the
+batch is cut by whole lines, never through an HTML entity. A line the message
+already says goes: the same line twice, or one a longer line carries whole, by
+whole words (`said_in`), when the line that carries it is at least as loud
+(`loudness`), so a warning is never dropped into a quiet line; of a line twice
+the loudest copy stays. The bot itself sends a plain message to a topic — no
+buttons, the topic named, not a reply to the person — unless the last such
+message there said the same, its times ("4m 05s") aside, as quietly and within
+the past two minutes (`Bot.send`, `same_text`, `SAID_WINDOW`); and an edit, a caption or a widget's state equal to what that
+message was last given in the past ten minutes (`EDIT_TRUST`) is not sent at all —
+Telegram's "message is not modified" still answers the first after a
+restart. With widgets on, the
 lines of a running process go into its widget instead, and one message follows
 when it ends (the widgets paragraph below). Which lines go is one test,
 `headline` in `notices.py`, for the message and the widget alike; so what the
@@ -611,7 +621,12 @@ in the command line, and the old `pgrep` did not see it at all. The channel is
 also occupied by one orchestrator: whoever comes second gives way and asks the
 terminal (in a tab a press on the phone opened, nobody is there: the question
 goes unanswered), otherwise it would overwrite the first's question and that one would
-hang, waiting for an answer that would no longer go to it. A question that
+hang, waiting for an answer that would no longer go to it. It says so once in
+its terminal (*Not sent to the phone: sclaude pid … holds this feature's
+questions*). The owner holds it while its pid is a live sclaude, with a
+terminal or without one (the bot starts sclaude with none on purpose); it is
+never signalled. A live pid that is not a sclaude — reused after the owner
+died — holds nothing, and the newcomer takes the channel. A question that
 outlived its owner (killed with Ctrl-C, an ssh session dropped) is not shown by
 the bot — it checks the `pid` and removes it.
 
@@ -711,8 +726,11 @@ feature's card from another's topic. The feature's actions are sclaude's own que
 (`sclaude actions`): the page shows it with its buttons and answers it through
 the channel (`answer_page`), naming the question it answers so an answer cannot
 land on the next one; options are grouped by where they lead (`ACT_*`). A
-feature at work — a session in any state but idle, or an orchestrator waiting on
-a question (`feature_busy`) — gets no second orchestrator from Continue or the
+feature at work — a session in any state but idle, an orchestrator waiting on a
+question, or sclaude running a regression for it, proved by the live sclaude
+that runs it — its pid in the state, or the regression queue's holder note
+(`feature_busy`, `regression_alive`; a guess by time alone, as the
+card may show, stops nothing) — gets no second orchestrator from Continue or the
 actions, in the chat or on the page.
 
 **Cards follow their session.** A topic's card is a message drawn once, so the
@@ -722,7 +740,20 @@ the record, written wherever a card is drawn), or where the feature stands did
 (`card_place`, `feature_place`: the step, and past the steps the session after
 them whose run is open). Past the steps the session is that open run's
 (`after_open`), not the first conversation live in the worktree: the
-epilogue's stays open beside the retrospective's. One `claude agents` answer serves
+epilogue's stays open beside the retrospective's; a regression's fix session
+sclaude has open (`fix_open`) comes before the step's conversation left idle
+beside it, and of two sessions live in the worktree the one at work. A session
+idle within a minute of its run's start (`FRESH_START`) reads as working: its
+first prompt is on its way. With no session at work, the card says what
+sclaude itself does (`sclaude_busy`, "🔵 sclaude is working: …") instead of
+"no session" or "idle": the caption of the process its widget shows while a
+process that printed for it lives (`notes/process.json`), else a regression
+running by the state while a live sclaude proves it (`regression_alive`: the
+run's own pid, `regression.<stage>.pid`, or the regression queue's holder note
+naming the feature and stage, its pid running sclaude), else the local review running by the state (believed three hours, as
+the process map believes it), else a question the orchestrator asks. Those words are part
+of what the card is compared by (`card_status`), so the card changes when
+that work starts and ends. One `claude agents` answer serves
 the whole pass; when Claude Code does not answer, nothing is redrawn. The
 minutes left of the session's prompt cache (`cache_left`, the status line's
 reckoning) are on the page only, drawn at each press.

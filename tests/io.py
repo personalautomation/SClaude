@@ -120,16 +120,96 @@ def main():
         # that will no longer go to it.
         d = os.path.join(tmp, "busy")
         os.makedirs(d)
-        # A live foreign owner: we take the pid of a process that certainly
-        # exists — our own. It is not equal to the pid of the shell that will
-        # publish.
+        # A live foreign owner with a terminal of its own: a sleep given a
+        # pseudo-terminal as its controlling one, the way a sclaude in an open
+        # window has.
+        master, slave = os.openpty()
+        slave_name = os.ttyname(slave)
+
+        def take_tty():
+            os.setsid()
+            fd = os.open(slave_name, os.O_RDWR)
+            os.dup2(fd, 0)
+
+        # A sleep started under the name sclaude: ask_publish gives way only to
+        # a pid whose command line is a sclaude's.
+        held = subprocess.Popen(["sclaude", "60"], executable=shutil.which("sleep"),
+                                preexec_fn=take_tty,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
         with open(os.path.join(d, "ask.json"), "w", encoding="utf-8") as fh:
             json.dump({"prompt": "somebody else's question", "form": "yn", "context": "",
-                       "asked": 1, "pid": os.getpid()}, fh, ensure_ascii=False)
-        _, _, rc = run_bash('ASK_DIR=%s; ask_publish "my question" yn' % d, tmp)
+                       "asked": 1, "id": "aaaa", "pid": held.pid}, fh, ensure_ascii=False)
+        run = "busy-%d" % os.getpid()
+        said = os.path.join(tempfile.gettempdir(), "sclaude-held." + run)
+        _, err, rc = run_bash('export SCLAUDE_RUN=%s; ASK_DIR=%s; ask_publish "my question" yn; '
+                              'ask_publish "my next question" yn' % (run, d), tmp)
         check("busy-refused", rc, 1)
         with open(os.path.join(d, "ask.json"), encoding="utf-8") as fh:
             check("busy-kept-original", json.load(fh)["prompt"], "somebody else's question")
+        # Said in this terminal, once a run however many questions give way.
+        check("busy-said-once", err.count("Not sent to the phone: sclaude pid %d (" % held.pid), 1)
+        check("busy-owner-alive", held.poll(), None)
+        check("busy-not-closed", os.path.exists(os.path.join(d, "closed", "aaaa.json")), False)
+        held.kill()
+        held.wait()
+        os.close(master)
+        os.close(slave)
+        try:
+            os.unlink(said)
+        except OSError:
+            pass
+
+        # A live sclaude without a terminal — the bot starts one so, to be
+        # answered from the phone alone — holds the channel all the same: it is
+        # given way to, said with "no terminal", and never signalled.
+        d = os.path.join(tmp, "orphan")
+        os.makedirs(d)
+        orphan = subprocess.Popen(["sclaude", "60"], executable=shutil.which("sleep"),
+                                  start_new_session=True, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(os.path.join(d, "ask.json"), "w", encoding="utf-8") as fh:
+            json.dump({"prompt": "a phone run's question", "form": "yn", "context": "",
+                       "asked": 1, "id": "bbbb", "pid": orphan.pid}, fh, ensure_ascii=False)
+        run = "orphan-%d" % os.getpid()
+        said = os.path.join(tempfile.gettempdir(), "sclaude-held." + run)
+        _, err, rc = run_bash('export SCLAUDE_RUN=%s; ASK_DIR=%s; ask_publish "my question" yn > /dev/null'
+                              % (run, d), tmp)
+        check("ttyless-sclaude-refused", rc, 1)
+        with open(os.path.join(d, "ask.json"), encoding="utf-8") as fh:
+            check("ttyless-sclaude-kept", json.load(fh)["prompt"], "a phone run's question")
+        check("ttyless-sclaude-notice",
+              "Not sent to the phone: sclaude pid %d (no terminal) holds" % orphan.pid in err, True)
+        check("ttyless-sclaude-not-closed", os.path.exists(os.path.join(d, "closed", "bbbb.json")), False)
+        time.sleep(0.2)
+        check("ttyless-sclaude-alive", orphan.poll(), None)
+        orphan.kill()
+        orphan.wait()
+        try:
+            os.unlink(said)
+        except OSError:
+            pass
+
+        # A live pid that is not a sclaude — the owner died and its pid went
+        # to another process — holds nothing: the channel is taken, and the
+        # stranger is left alone.
+        d = os.path.join(tmp, "stranger")
+        os.makedirs(d)
+        stranger = subprocess.Popen(["sleep", "60"], start_new_session=True,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+        with open(os.path.join(d, "ask.json"), "w", encoding="utf-8") as fh:
+            json.dump({"prompt": "a dead owner's question", "form": "yn", "context": "",
+                       "asked": 1, "id": "cccc", "pid": stranger.pid}, fh, ensure_ascii=False)
+        _, err, rc = run_bash('ASK_DIR=%s; ask_publish "my question" yn > /dev/null' % d, tmp)
+        check("stranger-taken-rc", rc, 0)
+        with open(os.path.join(d, "ask.json"), encoding="utf-8") as fh:
+            check("stranger-taken", json.load(fh)["prompt"], "my question")
+        time.sleep(0.2)
+        check("stranger-not-signalled", stranger.poll(), None)
+        check("stranger-no-notice", "Not sent to the phone" in err, False)
+        stranger.kill()
+        stranger.wait()
 
         # A dead owner does not hold the channel: the orchestrator may have been
         # killed with Ctrl-C or cut off along with ssh, and a channel busy for

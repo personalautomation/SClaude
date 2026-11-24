@@ -555,6 +555,72 @@ check("prompt-names-the-branch", "own branch, `<branch>`" in rules
 with open(os.path.join(LIB, "improve", "retro.sh")) as fh:
     check("branch-passed-to-prompt", 'SCLAUDE_V_BRANCH=' in fh.read(), True)
 
+# --- the declined proposals go back to the person's list ---------------------------
+#
+# The session works on a copy; only the lines it added since the copy go
+# back, appended to the list as it is by then.
+dtmp = tempfile.mkdtemp()
+try:
+    home = os.path.join(dtmp, "repo", ".sclaude", "local", "retro-declined.md")
+    here = os.path.join(dtmp, "wt-retro-declined.md")
+    bin_d = os.path.join(dtmp, "bin")
+    os.makedirs(bin_d)
+
+    def back():
+        run_bash('retro_declined_back "%s" "%s"' % (here, home), dtmp, bin_d)
+
+    def into():
+        run_bash('retro_declined_in "%s" "%s"' % (here, home), dtmp, bin_d)
+
+    def read(path):
+        with open(path) as fh:
+            return fh.read()
+
+    # No list yet: whatever the session wrote is the list.
+    with open(here, "w") as fh:
+        fh.write("- A\n")
+    back()
+    check("declined-first-line", read(home), "- A\n")
+    # A copy taken, then another hand adds B; a session that wrote nothing
+    # leaves B in place, and one that added C adds C alone.
+    into()
+    with open(home, "a") as fh:
+        fh.write("- B\n")
+    back()
+    check("declined-untouched-copy-keeps-others", read(home), "- A\n- B\n")
+    with open(here, "a") as fh:
+        fh.write("- C\n")
+    back()
+    check("declined-only-added-lines", read(home), "- A\n- B\n- C\n")
+    # A copy left by a pass that ended before carrying it back is carried
+    # back before the next copy is taken.
+    with open(here, "a") as fh:
+        fh.write("- D\n")
+    into()
+    check("declined-leftover-carried-first", (read(home), read(here)),
+          ("- A\n- B\n- C\n- D\n", "- A\n- B\n- C\n- D\n"))
+    os.remove(here)
+    back()
+    check("declined-kept-without-a-copy", read(home), "- A\n- B\n- C\n- D\n")
+    # A list saved without a final newline takes the next line on its own.
+    into()
+    with open(home, "w") as fh:
+        fh.write("- A\n- B\n- C\n- D")
+    with open(here, "a") as fh:
+        fh.write("- E\n")
+    back()
+    check("declined-after-no-final-newline", read(home), "- A\n- B\n- C\n- D\n- E\n")
+    # A kept copy (the list could not be written) saved without a final
+    # newline takes the list's newer lines each on its own.
+    with open(here, "w") as fh:
+        fh.write("- A\n- F")
+    with open(here + ".base", "w") as fh:
+        fh.write("- A\n")
+    run_bash('retro_declined_append "%s" "- G"' % here, dtmp, bin_d)
+    check("declined-append-after-no-final-newline", read(here), "- A\n- F\n- G\n")
+finally:
+    shutil.rmtree(dtmp, ignore_errors=True)
+
 # --- a feature with no change of its own has a retrospective too -------------------
 #
 # Once a feature did all of its work in sclaude's own checkout, ended as one

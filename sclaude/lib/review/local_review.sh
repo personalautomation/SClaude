@@ -153,11 +153,21 @@ local_review() {
   # Why, when a pass's answer was refused: said instead of "see the terminal".
   local LOCAL_REVIEW_WHY=""
   local rc=0
+  # The gate calls this in a subshell: why it failed (-why) and the reset
+  # of a usage limit it stopped on (-limit) reach it in files, which the
+  # gate takes (review_close_gate). None left from an earlier run.
+  rm -f "$(local_review_file "$1" -why)" "$(local_review_file "$1" -limit)" 2>/dev/null
   local_review_run "$@" || rc=$?
   trap - INT TERM HUP
   local_review_mark "$1" null
+  [[ "$rc" -ne 0 && -n "$LOCAL_REVIEW_WHY" ]] \
+    && printf '%s\n' "$LOCAL_REVIEW_WHY" > "$(local_review_file "$1" -why)" 2>/dev/null
+  # On Claude's usage limit the topic hears the limit once, from the wait
+  # that follows (review_limit_wait): the pass only ends here.
+  local why="${LOCAL_REVIEW_WHY:-it did not complete, see the terminal}"
+  [[ -f "$(local_review_file "$1" -limit)" ]] && why=""
   [[ "$rc" -eq 0 || ${#LOCAL_REVIEW_TOLD[@]} -eq 0 ]] \
-    || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · ${LOCAL_REVIEW_WHY:-it did not complete, see the terminal}"
+    || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}")${why:+ · $why}"
   return "$rc"
 }
 
@@ -390,6 +400,23 @@ local_review_run() {
                                     python3 "$LIB/review/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                       "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
                                       2>>"$log") || [[ -z "${count:-}" ]]; then
+      # Claude's usage limit (LIMIT in local_review.py): not a refusal. Run
+      # again now it would meet the same limit, so it is not; journaled as a
+      # conversation that cost, without a reason the report counts refused;
+      # the reset goes to the gate (review_limit_wait) through a file, this
+      # running in its subshell.
+      local limit; limit="$(tail -n "+$((lines_before + 1))" "$log" 2>/dev/null | sed -n 's/^limit: //p' | tail -n 1)"
+      if [[ -n "$limit" ]]; then
+        python3 "$LIB/review/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
+          "$pass_session" "$pr" 2>/dev/null || true
+        [[ "$limit" =~ ^[0-9]+$ ]] || limit=0
+        printf '%s\n' "$limit" > "$(local_review_file "$wt" -limit)" 2>/dev/null || true
+        local resets="its reset time not given"
+        [[ "$limit" -gt 0 ]] && resets="resets $(date -d "@$limit" +%H:%M)"
+        warn "  Claude's usage limit — $resets: pass $pass of the local review did not run; the head is not taken as reviewed." >&2
+        LOCAL_REVIEW_WHY="⚠️ Claude's usage limit — $resets; the head is not taken as reviewed"
+        return 1
+      fi
       # Why (REFUSED in local_review.py), from what record just wrote: into
       # the journal, here and the topic. A failure that gave none (a crash)
       # points at the log, which keeps it.
@@ -791,6 +818,35 @@ review_go_on_pause() {
   keys_usable && printf '\r\033[2K' >&2
   # Asked again at the end: a night that ended meanwhile untick the box.
   review_go_on "$wt"
+}
+
+# Claude's usage limit stopped a pass (local_review_run left its reset in
+# local-review-limit): the review waits until a minute past the reset — half
+# an hour from now when the answer did not say when — as a step's session on
+# its limit does (session_watch.sh), and the gate then runs it again. A reset
+# already past (the clock, or a time read as today's) waits LIMIT_RETRY too:
+# a wait of nothing would run the pass and this notice again at once. Neither
+# the question nor [g]'s retries: any answer before the reset meets the same
+# limit. The terminal and the feature's topic are told when; Ctrl-C leaves,
+# as during any wait, and the next `sclaude` starts it again.
+#
+#   review_limit_wait <wt> <reset, seconds since the epoch, or 0> [slug]
+review_limit_wait() {
+  local wt="$1" reset="$2" slug="${3:-${ASK_SLUG:-}}" due="" now at
+  now="$(date +%s)"
+  [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt 0 ]] && due=$(( reset + ${LIMIT_MARGIN:-60} ))
+  [[ -n "$due" ]] && (( due > now )) || due=$(( now + ${LIMIT_RETRY:-1800} ))
+  at="$(date -d "@$due" +%H:%M)"
+  warn_here "  Claude's usage limit — the review runs again by itself at $at; Ctrl-C leaves."
+  [[ -n "$slug" ]] && notify_feature "$slug" --wt "$wt" \
+    "Claude's usage limit — the review runs again by itself at $at." >/dev/null 2>&1
+  while now="$(date +%s)"; (( now < due )); do
+    keys_usable && printf '\r\033[2K\033[?7l  %sWaiting for Claude%s — its usage limit; the review runs again at %s (%dm left) · Ctrl-C leaves\033[?7h' \
+      "$DIM" "$OFF" "$at" $(( (due - now + 59) / 60 )) >&2
+    poll_pause $(( due - now < 10 ? due - now : 10 ))
+  done
+  keys_usable && printf '\r\033[2K' >&2
+  return 0
 }
 
 # A box for a key's word: ticked when the word is given.

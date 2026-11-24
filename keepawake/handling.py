@@ -731,8 +731,9 @@ class Handler(object):
             # feature is two conversations about one thing. busy belongs here
             # too: the card shows it as running (🟢). So does any state but
             # idle: one Claude Code adds later is not a free feature.
-            if sessions.feature_busy(repo, slug):
-                note = t("feat.busy")
+            busy = sessions.feature_busy(repo, slug)
+            if busy:
+                note = busy
             elif action == "go":
                 # The orchestrator decides what to do itself: `sclaude <feature>`
                 # returns to the current step.

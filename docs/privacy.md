@@ -55,7 +55,7 @@ when the tree is next opened.
 each feature's history and its DORA page, the journal of what went to a feature's Telegram topic and came back (`.sclaude/local/feature/telegram-log.jsonl`, with no token, address or key in it), and your cycle records
 (`~/.claude/sclaude/`) when no `metrics` repository is set. The product's
 `.sclaude/local/` is kept out of git and out of every Vercel upload; a
-feature's friction log lives there and goes with its tree. What the reviews
+feature's friction log lives there and goes with its tree. The proposals you declined at retrospectives are kept in the main checkout's `.sclaude/local/retro-declined.md`, written only on your word and read by every later retrospective of the product; a retrospective works on a copy in its feature's `.sclaude/local/feature/`, which goes with the tree. What the reviews
 keep from it — the deferred friction and the rules sclaude learns — goes to
 the product's `.sclaude/` and is committed to the product, never to this
 repository.

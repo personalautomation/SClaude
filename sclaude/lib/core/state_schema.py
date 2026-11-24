@@ -100,8 +100,10 @@ FIELDS = [
     # --- regression, deploy, QA, rollback ------------------------------------
     ("regression.<stage>.status", (FEATURE,), "the last run's outcome: passed, failed, running"),
     ("regression.<stage>.started", (FEATURE,), "when the last run began"),
+    ("regression.<stage>.pid", (FEATURE,), "the sclaude that runs it while status is running: the bot believes running only while it lives"),
     ("regression.<stage>.finished", (FEATURE,), "when it ended"),
     ("regression.<stage>.failed_at", (FEATURE,), "the part of the suite that failed"),
+    ("regression.<stage>.failed_tests", (FEATURE,), "the specs that failed in it, path:line a line, for the rerun before a fixing session to ask alone"),
     ("regression.<stage>.reason", (FEATURE,), "what the person said of the last red"),
     ("regression.<stage>.tree", (FEATURE,), "the tree the last run tested, so an unchanged tree is not run twice"),
     ("regression.<stage>.attempts", (FEATURE,), "fix sessions opened in this round"),

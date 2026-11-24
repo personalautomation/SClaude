@@ -150,7 +150,9 @@ echo "rc=$?"
                    PANE_TEST_PROMPT=PROMPT, PANE_TEST_FOO="a b;c",
                    WT_SESSION="test", WSL_DISTRO_NAME="Test",
                    WSL_INTEROP="/run/WSL/1_interop", TMPDIR=tmp)
-        for name in ("SCLAUDE_PANE", "SSH_CONNECTION", "SSH_TTY", "TERM_PROGRAM"):
+        # SCLAUDE_RUN keys the once-a-run legend: a bench run inside sclaude
+        # inherits one, and every case here is a run of its own.
+        for name in ("SCLAUDE_PANE", "SSH_CONNECTION", "SSH_TTY", "TERM_PROGRAM", "SCLAUDE_RUN"):
             env.pop(name, None)
         env.update(extra_env or {})
         env = {k: v for k, v in env.items() if v is not None}
@@ -430,6 +432,22 @@ echo "$*" | tr '\n' ' ' >> "$PANE_TEST_LAUNCHES"; echo >> "$PANE_TEST_LAUNCHES"
     # No watcher: [n], [N], [R] and [k] are not offered.
     check("keys-legend-without-watcher",
           any(k in text for k in ("[n]", "[N]", "[R]", "[k]")), False)
+
+    # Once a run, not once a process: each session is launched in a subshell
+    # and code_reload execs a new sclaude, and the legend after every one of
+    # eleven sessions buried the lines it stood between.
+    legend = subprocess.run(["bash", "-c", r'''
+info() { echo "INFO $*"; }
+source "%s/core/steps.sh"; source "%s/core/pane.sh"
+session_key_has() { [[ "$1" == r ]]; }
+( session_keys_legend ); ( session_keys_legend )
+bash -c 'source "%s/core/steps.sh"; source "%s/core/pane.sh"; info() { echo "INFO $*"; }
+         session_key_has() { [[ "$1" == r ]]; }; session_keys_legend'
+SCLAUDE_RUN=other bash -c 'source "%s/core/steps.sh"; source "%s/core/pane.sh"; info() { echo "INFO $*"; }
+         session_key_has() { [[ "$1" == r ]]; }; session_keys_legend'
+''' % ((LIB,) * 6)], env=dict(os.environ, TMPDIR=tmp, SCLAUDE_RUN="legend-run"),
+                            capture_output=True, text=True, timeout=30).stdout
+    check("keys-legend-once-a-run", legend.count("Keys here"), 2)
 
     os.remove(launches)
     # The press is said on the status line, drawn once a second: room for

@@ -66,8 +66,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import fits, pr_file, pr_folder, write_pr_file  # noqa: E402
 from pr_context import (LOCAL_SIGNATURE, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
-                        decline_of, gh, headline, review_threads, signed_locally,
-                        split_yours, thread_line, yours)
+                        QUOTA_LIMIT, decline_of, gh, headline, quota_reset,
+                        review_threads, signed_locally, split_yours, thread_line, yours)
 
 JOURNAL = ".sclaude/local/feature/review-rounds.jsonl"
 
@@ -78,6 +78,9 @@ JOURNAL = ".sclaude/local/feature/review-rounds.jsonl"
 HEADING = re.compile(r"^###\s+`?(.+?):(\d+)(?:[-–]\d+)?`?\s+[—–-]\s+(.*)$")
 RESOLVED = re.compile(r"^\s*RESOLVED:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
 COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
+# The files a reviewer read in full (sreview asks for it): ends the finding
+# above it, as FINDINGS does, and is no part of any.
+COVERED = re.compile(r"^\s*COVERED:")
 # The line a review's answer ends with once the code-review skill and every
 # agent it started are done (local_review_prompt in local_review.sh asks for
 # it): a session that hands back an interim answer — "FINDINGS: 0" before its
@@ -89,6 +92,12 @@ DONE = "REVIEW: complete"
 # by its words, so a reason carries no number (the details go on a line of
 # their own).
 REFUSED = "refused: "
+# An answer that is Claude's usage limit ("You've hit your weekly limit ·
+# resets 3am (Europe/Lisbon)") is not refused but told apart, on a line of
+# its own with the reset (seconds since the epoch, 0 when it did not say):
+# the shell neither runs the pass again at once nor counts it refused, and
+# the gate waits for the reset (review_limit_wait in local_review.sh).
+LIMIT = "limit: "
 
 
 def gh_try(args, cwd):
@@ -271,6 +280,9 @@ def parse(answer):
             resolved[r.group(1)] = r.group(2).strip()
             current = None
             continue
+        if COVERED.match(line):
+            current = None
+            continue
         c = COUNT.match(line)
         if c:
             count = int(c.group(1))
@@ -379,6 +391,9 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     with open(answer_path, encoding="utf-8") as fh:
         text = fh.read()
     found, resolved, count = parse(text)
+    if count is None and QUOTA_LIMIT.search(text):
+        sys.stderr.write("%s%d\n" % (LIMIT, quota_reset(text)))
+        return 1
     if count is None:
         sys.stderr.write(REFUSED + "the answer has no `FINDINGS: <n>` line it could read (an error, no answer, or the line in another form)\n")
         return 1

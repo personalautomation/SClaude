@@ -3,6 +3,7 @@
 #
 # Part of the bot that keepawake/telegramd.py runs.
 
+import html
 import logging
 import os
 import re
@@ -197,8 +198,12 @@ def card_state(name, slug, feats=None, state=None):
     else:
         current = -1
     if state is None:
-        session = sessions.feature_session(repo, slug)[0] if repo else ""
-        state = sessions.session_state(session)
+        state = sessions.card_status(repo, slug)
+    if state.startswith(sessions.BUSY):
+        # sclaude's own work: its words are HTML (a process's caption), and
+        # the widget shows text.
+        words = html.unescape(re.sub(r"<[^>]+>", "", t("feat.sclaude", what=state[len(sessions.BUSY):])))
+        return widgets.state({"p": icons, "c": current, "n": shown, "w": words.strip()}, trim="n")
     word = ({"working": "feat.working", "busy": "feat.working", "blocked": "feat.blocked",
              "waiting": "feat.blocked"}.get(state, "feat.idle") if state
             else "feat.nosessiondone" if done else "feat.nosession")
@@ -222,7 +227,6 @@ def card_caption(name, slug, note="", feats=None, config=None):
     text = ("\n".join(lines).rstrip() + tail).strip()
     if _asks.visible_length(text) > _asks.CAPTION_MAX:
         # One line still too long: its markup goes, and it is cut.
-        import html
         # Counted as Telegram counts it, in UTF-16.
         plain = html.unescape(re.sub(r"<[^>]+>", "", text))
         while plain and _asks.visible_length(html.escape(plain) + "…") > _asks.CAPTION_MAX:
@@ -347,13 +351,14 @@ def redraw_cards(bot):
 
 
 def shown_state(name, slug, state=None, place=None):
-    """Record the session state a chat card of the feature now shows, and
+    """Record the state a chat card of the feature now shows
+    (sessions.card_status: its session's, or sclaude's own work), and
     where the feature stood (sessions.feature_place) when it was drawn."""
     repo = repos.repo_path(name)
     if not repo or not topics.feature_dir(repo, slug):
         return
     if state is None:
-        state = sessions.session_state(sessions.feature_session(repo, slug)[0])
+        state = sessions.card_status(repo, slug)
     if place is None:
         place = sessions.feature_place(repo, slug)
     record = topics.load_record(repo, slug)
@@ -370,7 +375,7 @@ _CARD_LOOKED = [0.0]
 
 def check_card_states(bot, now=None):
     """A topic's card drawn again when its session changed: none, running,
-    waiting for the person, idle. A card is a message, drawn once; left as
+    waiting for the person, idle — or sclaude's own work started or ended. A card is a message, drawn once; left as
     it was it says "no session is open" beside one working."""
     now = time.time() if now is None else now
     if now - _CARD_LOOKED[0] < CARD_LOOK:
@@ -402,8 +407,9 @@ def redraw_changed_cards(bot):
             msg = record.get("card") or 0
             if not msg:
                 continue
-            session, _step = sessions.feature_session(repo, slug)
-            state = sessions.session_state(session)
+            # sclaude's own work counts: a regression starting and ending
+            # changes the card as a session does.
+            state = sessions.card_status(repo, slug)
             place = sessions.feature_place(repo, slug)
             if state == (record.get("card_state") or "") and place == (record.get("card_place") or ""):
                 continue

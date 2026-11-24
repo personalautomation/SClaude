@@ -236,9 +236,21 @@ def main():
                                           "the same thing said twice or more" in none),
               (False, False, True))
 
+        # Both retrospectives name the person's own list of proposals declined
+        # before, at the path sclaude hands them, and say what never to do with it.
+        with open(os.path.join(prompts, "retro-again.md"), encoding="utf-8") as fh:
+            again = fh.read()
+        declined = "/repo/.sclaude/local/retro-declined.md"
+        for name, text in (("retro", retro), ("retro-again", again)):
+            got = render(text, prompts, {"retro-declined": declined, "terminal": "/wt/terminal.txt"}, {})
+            check("%s-names-the-declined" % name,
+                  ("`%s`" % declined in got, "propose nothing it holds" in got,
+                   "nothing goes in without my saying so" in got),
+                  (True, True, True))
+
         # Five assemblies with the blocks filled, five with them empty, and the
         # rest are the checks above.
-        total = 39
+        total = 41
         for name, want, got in failures:
             print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
         print("%d/%d passed" % (total - len(failures), total))

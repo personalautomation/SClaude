@@ -878,7 +878,8 @@ remind_prod() {
     state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
     history_add "$wt/.sclaude/local/feature/state.json" deploy.prod done
     local prod_url; prod_url="$(project_prod_url "$wt" 2>/dev/null || true)"
-    [[ -n "$prod_said" ]] && info "$prod_said"
+    # The terminal's line alone: the topic hears it in the finished line.
+    [[ -n "$prod_said" ]] && say_here "$prod_said"
     ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}${prod_said:+ · $prod_said}"
   elif [[ "$prod_tried" -eq 1 ]]; then
     history_add "$wt/.sclaude/local/feature/state.json" deploy.prod failed

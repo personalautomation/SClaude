@@ -12,6 +12,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -24,7 +25,7 @@ os.environ["KEEPAWAKE_STATE"] = os.path.join(box, "state.json")
 os.environ["KEEPAWAKE_LOCK"] = os.path.join(box, ".lock")
 
 from keepawake import webmenu  # noqa: E402
-from keepawake import asks, botapi, card_view, handling, menus, phone_access, repos, services, sessions, shell, state, status_report, topics, units  # noqa: E402
+from keepawake import asks, botapi, card_view, handling, menus, phone_access, processes, repos, services, sessions, shell, state, status_report, topics, units  # noqa: E402
 
 REAL_CARD = card_view.card
 from keepawake.i18n import STRINGS, t  # noqa: E402
@@ -345,13 +346,13 @@ try:
         card_view.feature_dev, phone_access.gate_origin = saved_dev, saved_origin
     asks.pending_ask = lambda channel: None
     saved_busy = sessions.feature_busy
-    sessions.feature_busy = lambda repo, slug: True
+    sessions.feature_busy = lambda repo, slug: t("feat.busy")
     try:
         view = press("fc:acts:shop/alpha")
         check("a step at work gets no second sclaude from the page", started, [])
     finally:
         sessions.feature_busy = saved_busy
-    sessions.feature_busy = lambda repo, slug: False
+    sessions.feature_busy = lambda repo, slug: ""
     try:
         view = press("fc:acts:shop/alpha")
     finally:
@@ -422,9 +423,35 @@ try:
     sessions.feature_session = lambda repo, slug: ("", "review")
     asks.pending_ask = lambda channel: {"id": "q", "prompt": "Run the regression? "}
     check("an orchestrator waiting on a question is busy",
-          sessions.feature_busy("/nowhere/shop", "alpha"), True)
+          sessions.feature_busy("/nowhere/shop", "alpha"), t("feat.busy"))
     asks.pending_ask = lambda channel: None
-    check("and nothing at all is free", sessions.feature_busy("/nowhere/shop", "alpha"), False)
+    saved_st, saved_held = sessions.feature_state, sessions.regression_held
+    try:
+        sessions.feature_state = lambda repo, slug: {"regression": {"local": {"status": "running"}}}
+        sessions.regression_held = lambda slug, stage: True
+        check("a regression a live sclaude holds, no session, is busy, and says so",
+              sessions.feature_busy("/nowhere/shop", "alpha"), t("feat.busyregr", stage="local"))
+        sessions.regression_held = lambda slug, stage: False
+        check("a regression nothing holds any more is free",
+              sessions.feature_busy("/nowhere/shop", "alpha"), "")
+        saved_is_sc = sessions._is_sclaude
+        try:
+            sessions.feature_state = lambda repo, slug: {"regression": {"prod": {"status": "running", "pid": os.getpid()}}}
+            sessions._is_sclaude = lambda pid: True
+            check("one without the queue, its own pid a live sclaude, is busy",
+                  sessions.feature_busy("/nowhere/shop", "alpha"), t("feat.busyregr", stage="prod"))
+            sessions._is_sclaude = lambda pid: False
+            check("and one whose pid is no sclaude any more is free",
+                  sessions.feature_busy("/nowhere/shop", "alpha"), "")
+        finally:
+            sessions._is_sclaude = saved_is_sc
+        sessions.feature_state = lambda repo, slug: {"review": {"local": {"running": "2026-01-01T00:00:00+00:00"}}}
+        check("a review mark, a guess by time alone, does not stop Continue",
+              sessions.feature_busy("/nowhere/shop", "alpha"), "")
+        sessions.feature_state = lambda repo, slug: {}
+        check("and nothing at all is free", sessions.feature_busy("/nowhere/shop", "alpha"), "")
+    finally:
+        sessions.feature_state, sessions.regression_held = saved_st, saved_held
 finally:
     asks.pending_ask, sessions.feature_session = saved_pa, saved_fs
 
@@ -447,10 +474,112 @@ check("a retrospective taken up again is open, a closed sync is not",
                                               "done": True}]}}),
       ("retro", "r1"))
 
+# A regression's fix session sclaude has open is the feature's, before the
+# step's conversation left idle beside it; of two sessions in the worktree,
+# the one at work.
+saved_agents, saved_state, saved_wt = sessions.agents, sessions.feature_state, topics.feature_wt
+try:
+    topics.feature_wt = lambda repo, slug: "/nowhere/shop-alpha"
+    sessions.feature_state = lambda repo, slug: {
+        "step": "code", "steps": {"code": {"session": "s-code"}},
+        "regression": {"local": {"fix_session": "s-fix", "fix_status": "red open"}}}
+    sessions.agents = lambda: [{"sessionId": "s-code", "cwd": "/nowhere/shop-alpha", "status": "idle"},
+                               {"sessionId": "s-fix", "cwd": "/nowhere/shop-alpha", "status": "busy"}]
+    check("an open fix session is the feature's",
+          sessions.feature_session("/nowhere/shop", "alpha"), ("s-fix", "code"))
+    sessions.feature_state = lambda repo, slug: {"step": "done", "steps": {}}
+    check("of two in the worktree, the one at work",
+          sessions.feature_session("/nowhere/shop", "alpha"), ("s-fix", "done"))
+finally:
+    sessions.agents, sessions.feature_state, topics.feature_wt = saved_agents, saved_state, saved_wt
+
+# A session just started still reads idle for a moment: it is working.
+import datetime  # noqa: E402
+def _iso(ago):
+    return (datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(seconds=ago)).isoformat(timespec="seconds")
+check("a run started ten seconds ago is lately",
+      sessions.started_lately({"step": "code", "steps": {"code": {"runs": [{"session": "s", "started": _iso(10)}]}}}),
+      True)
+check("one started five minutes ago is not",
+      sessions.started_lately({"step": "code", "steps": {"code": {"runs": [{"session": "s", "started": _iso(300)}]}}}),
+      False)
+check("a fix session opened just now is",
+      sessions.started_lately({"regression": {"prod": {"fix_session": "f", "fix_status": "open",
+                                                        "fix_started": "- " + _iso(5)}}}), True)
+
+# What sclaude itself does with no session at work: its process's caption
+# while a process that printed for it lives, a regression by the state while
+# a live pid proves it, the local review by the state (believed three
+# hours), a question it asks.
+box = tempfile.mkdtemp(prefix="sclaude-busy-")
+channel = os.path.join(box, ".git", "sclaude", "ask", "alpha")
+os.makedirs(os.path.join(channel, "notes"))
+proc_file = os.path.join(channel, "notes", processes.PROC_FILE)
+try:
+    check("nothing at all, no words", sessions.sclaude_busy(box, "alpha", {}), "")
+    with open(proc_file, "w") as fh:
+        json.dump({"open": {"caption": "🧪 Regression started: local", "pids": [str(os.getpid())]}}, fh)
+    check("a live process says its caption", sessions.sclaude_busy(box, "alpha", {}),
+          "🧪 Regression started: local")
+    with open(proc_file, "w") as fh:
+        json.dump({"open": {"caption": "🧪 Regression started: local", "pids": ["999999999"]}}, fh)
+    check("a dead one says nothing", sessions.sclaude_busy(box, "alpha", {}), "")
+    # A regression's "running" is believed only while a live pid proves it:
+    # the run's own pid in the state, or the queue's holder note naming this
+    # feature and stage.
+    running = {"regression": {"preview": {"status": "running", "started": _iso(60)}}}
+    saved_holder, saved_is = sessions.REGRESSION_HOLDER, sessions._is_sclaude
+    sessions.REGRESSION_HOLDER = os.path.join(box, ".regression.lock.holder")
+    # This process stands for the sclaude holding the queue.
+    sessions._is_sclaude = lambda pid: str(pid) == str(os.getpid())
+    try:
+        check("a regression running by the state, nothing alive behind it",
+              sessions.sclaude_busy(box, "alpha", running), "")
+        with open(sessions.REGRESSION_HOLDER, "w") as fh:
+            fh.write("alpha, the preview regression, since 10:00 (pid %d)\n" % os.getpid())
+        check("one the queue holds for it by a live pid",
+              sessions.sclaude_busy(box, "alpha", running), t("feat.sclauderegr", stage="preview"))
+        check("the queue held for another feature proves nothing",
+              sessions.sclaude_busy(box, "beta", running), "")
+        sessions._is_sclaude = lambda pid: False
+        check("a live pid that is no sclaude any more proves nothing",
+              sessions.sclaude_busy(box, "alpha", running), "")
+        sessions._is_sclaude = lambda pid: str(pid) == str(os.getpid())
+        with open(sessions.REGRESSION_HOLDER, "w") as fh:
+            fh.write("alpha, the preview regression, since 10:00 (pid 999999999)\n")
+        check("a note left by a run killed minutes ago proves nothing",
+              sessions.sclaude_busy(box, "alpha", running), "")
+        own = {"regression": {"preview": dict(running["regression"]["preview"], pid=os.getpid())}}
+        check("the run's own pid in the state, a live sclaude, proves it",
+              sessions.sclaude_busy(box, "alpha", own), t("feat.sclauderegr", stage="preview"))
+    finally:
+        sessions.REGRESSION_HOLDER, sessions._is_sclaude = saved_holder, saved_is
+    check("the local review running",
+          sessions.sclaude_busy(box, "alpha", {"review": {"local": {"running": _iso(60)}}}),
+          t("feat.sclaudereview"))
+    with open(os.path.join(channel, "ask.json"), "w") as fh:
+        json.dump({"id": "q", "prompt": "Ship it? ", "pid": os.getpid()}, fh)
+    check("a question sclaude asks", sessions.sclaude_busy(box, "alpha", {}), t("feat.sclaudeask"))
+    # The card says so instead of "no session" or "idle".
+    saved_ss, saved_fs = sessions.session_state, sessions.feature_state
+    sessions.feature_state = lambda repo, slug: {}
+    try:
+        for state in ("", "idle"):
+            sessions.session_state = lambda session, cache=None, state=state: state
+            check("the card's status with a session %r" % state, sessions.card_status(box, "alpha", "s1"),
+                  sessions.BUSY + t("feat.sclaudeask"))
+        sessions.session_state = lambda session, cache=None: "busy"
+        check("a session at work is what the card says", sessions.card_status(box, "alpha", "s1"), "busy")
+    finally:
+        sessions.session_state, sessions.feature_state = saved_ss, saved_fs
+finally:
+    shutil.rmtree(box, ignore_errors=True)
+
 # A topic's card follows its session: drawn again when the session changes,
 # left alone while it does not.
 names = ("agents", "serve_config", "known_repos", "feature_records", "feature_dir", "load_record", "save_record",
-         "feature_session", "feature_place", "session_state", "features_of_name", "card")
+         "feature_session", "feature_place", "session_state", "features_of_name", "card", "sclaude_busy")
 def home(name):
     """The bot's module that defines name, the one to patch it in."""
     for module in (sessions, phone_access, repos, topics, card_view, asks, menus, shell):
@@ -520,6 +649,17 @@ try:
     finally:
         card_view.redraw = saved_redraw
     check("a refused redraw keeps the old place", records["alpha"].get("card_place"), "done/retro")
+    # sclaude's own work starting and ending, the session idle all along,
+    # draws the card again each time.
+    places["now"] = "done/retro"
+    states["now"] = "idle"
+    busy = {"now": ""}
+    sessions.sclaude_busy = lambda repo, slug, data=None, now=None: busy["now"]
+    for words, n in (("", 3), ("🧪 Regression started: local", 4), ("", 5)):
+        busy["now"] = words
+        card_view._CARD_LOOKED[0] = 0.0
+        card_view.check_card_states(EditBot(), now=10 ** 9 + 600 + n)
+        check("sclaude's work %r draws the card" % words, len(edits), n)
 finally:
     for n, f in saved.items():
         setattr(home(n), n, f)

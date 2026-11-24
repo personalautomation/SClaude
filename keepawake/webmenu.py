@@ -746,11 +746,11 @@ def press(bot, user, action, context, now, home=""):
         channel = channel_of(key)
         name, slug = asks.split_key(key)
         if action.startswith("fc:acts") and channel and not asks.pending_ask(channel) \
-                and sessions.feature_busy(repos.repo_path(name), slug):
+                and (busy := sessions.feature_busy(repos.repo_path(name), slug)):
             # The step is at work: a second orchestrator is not started, as
             # the chat's card does not start one.
             bot.untraced = True
-            bot.screen = card_view.card(name, slug, note=t("feat.busy"), in_topic=False)
+            bot.screen = card_view.card(name, slug, note=busy, in_topic=False)
             return key
         if action.startswith("fc:acts") and channel and not asks.pending_ask(channel):
             sessions.start_sclaude(repos.repo_path(asks.split_key(key)[0]),

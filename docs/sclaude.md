@@ -2255,7 +2255,16 @@ approved for the person: that plan is their yes to loosening a rule.
 
 Without `g`, a pass that did not run asks whether to go on unreviewed, and a
 "no" runs the review again instead of leaving: the person was there and wants
-the review, and leaving made them type `sclaude` to get it. `s` is cleared
+the review, and leaving made them type `sclaude` to get it. The question's
+context is only why (`local-review-why`, written by `local_review` from its
+subshell; `ask_forget` drops the lines before it). A pass whose answer is
+Claude's usage limit is neither refused nor retried at once: `record` writes
+`limit: <reset>` (`LIMIT`, read with `quota_reset`), the journal gets a
+`spent` row without a refused reason, the reset goes to `local-review-limit`,
+and the gate, instead of the question and `g`'s counted retries, waits
+(`review_limit_wait`) until `LIMIT_MARGIN` past the reset, or `LIMIT_RETRY`
+from now when it is unknown or already past, telling the terminal and the topic, then runs
+the pass again. `s` is cleared
 when step 4 closes or the cycle is sent back; `g` is not. It has three states
 in `steps.review.go_on`: `true` and `false`, the person's own, which outlast
 step 4 closing and a hand-back — to them it is all one review, the sessions
@@ -2766,6 +2775,20 @@ by itself before spending a session on it (a deploy that failed aside, since
 flaked on a loaded machine; one session spent half an hour to conclude just
 that. The flake stays on record as a line in `regression.notes`, so a stage
 green by itself is not taken for one that never went red.
+
+The rerun starts at the part that went red, with the parts after it, which
+never ran (`regression_rerun_from`): the parts before it went green on the
+same tree a minute earlier, and a full run red on e2e alone used to cost the
+whole stage again — lint, build, typecheck — to ask two specs once more. A red
+e2e (Playwright the `testRunner`) asks only its failed specs: the run keeps
+every one, path and line, in `regression.<stage>.failed_tests`
+(`regression_failed_specs … all`, not from a run cut off at its cap of
+failures), and the rerun hands them to the suite's command after `--`. A rerun
+after `build` serves the build the red run made rather than building again,
+and still queues and restarts the server as a whole run does. A green rerun
+records the tree green: no session ran between. The rerun after a session
+that ended blocked starts at the red part the same way, while the tree is the
+one that went red; moved, the stage runs whole.
 
 Every run keeps its own log, so the rerun leaves the red run before it in
 place (see "Logs" under the worktree). The fixing prompt names the folders and

@@ -62,7 +62,8 @@ no direct pushes.
 The product's tests run at up to four points: locally, on the preview, on
 production, and once more after a production rollback. Each point runs what the
 product declares. A failed run is run once more by itself, since the commonest
-red is a flaky test; if it fails again, a fixing session opens, at most twice,
+red is a flaky test — from the part that failed on, and for a failed browser
+suite only the tests that failed; if it fails again, a fixing session opens, at most twice,
 and then a person is asked rather than looping for ever.
 
 A branch that changes only files no test and no deployment reads skips the local

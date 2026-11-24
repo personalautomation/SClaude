@@ -1318,6 +1318,7 @@ echo "watcher=[$SESSION_WATCHER]"
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
+                 'ask_forget() { echo FORGOT; }\nwarn_here() { echo "HERE: $*"; }\n'
                  'run_step() { echo "RUN_STEP $3"; }\nreview_reopen() { echo REOPEN; }\n'
                  'SESSION_AUTO_CLOSED=%s; SESSION_EXITED=%s\n'
                  'review_skippable() { %s; }\ncycle_edge() { echo "EDGE $2 $3 $5 $6"; }\n%s\n'
@@ -1528,6 +1529,29 @@ echo "watcher=[$SESSION_WATCHER]"
     out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("y",), go_on=True)
     check("go-on-retries", out.count("REVIEWED"), 11)
     check("go-on-asks-after-retries", out.count("ASKED: Go on with this head unreviewed"), 1)
+    # The question carries why the pass failed and nothing printed before
+    # it: the context is dropped, the reason (left by local_review in a
+    # file, its subshell's) said here alone, then the question.
+    why_stub = ('local_review() { echo REVIEWED >&2; [[ -f %s/done ]] && { echo 0; return 0; }; : > %s/done; '
+                'echo "⚠️ pass 1 refused twice: no count" > "$(local_review_file "$1" -why)"; return 1; }'
+                % (tmp, tmp))
+    for f in ("done",):
+        if os.path.exists(os.path.join(tmp, f)):
+            os.remove(os.path.join(tmp, f))
+    out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("n",), stubs=why_stub)
+    forgot, here, asked = (out.find("FORGOT"), out.find("HERE:   ⚠️ pass 1 refused twice"),
+                           out.find("ASKED: Go on with this head unreviewed"))
+    check("failed-question-carries-why", 0 <= forgot < here < asked, True)
+    # Claude's usage limit: no question, no counted retry — the gate waits
+    # for the reset (review_limit_wait) and reviews again by itself.
+    os.remove(os.path.join(tmp, "done"))
+    limit_stub = ('local_review() { echo REVIEWED >&2; [[ -f %s/done ]] && { echo 0; return 0; }; : > %s/done; '
+                  'echo 0 > "$(local_review_file "$1" -limit)"; return 1; }\n'
+                  'review_limit_wait() { echo "WAIT $2 $3"; }' % (tmp, tmp))
+    out, left = enough_gate("", "open: 3 review thread(s) open", "failed", stubs=limit_stub)
+    check("limit-waits-not-asks", ("ASKED" in out, "WAIT 0 x" in out, out.count("REVIEWED")),
+          (False, True, 2))
+    os.remove(os.path.join(tmp, "done"))
 
     # In Actions: only threads posted after the session began are left open.
     out, left = enough_gate("pass", "open: 2 review thread(s) open", 0, mode="github", split="0 2")

@@ -162,7 +162,7 @@ ask_publish() {
   # left without a channel and will ask the terminal — that is, behave as it did
   # before this whole undertaking.
   if [[ -f "$file" ]]; then
-    local owner
+    local owner tty
     owner="$(python3 -c '
 import json, sys
 try:
@@ -173,8 +173,30 @@ except Exception:
     # conversation. Someone else's, alive — we give way. Someone else's, dead
     # (the orchestrator was killed, the session dropped) — we take the channel:
     # there is no reason to hold it for the deceased.
+    #
+    # Alive means a sclaude: a pid a crashed owner left behind may have been
+    # given to an unrelated process since, which holds nothing. A sclaude is
+    # given way to whatever its terminal — the bot starts one with none on
+    # purpose, to be answered from the phone alone — and is never signalled.
+    # Its command line is read the way instruments_others reads it: the first
+    # word, past a bash or sh that runs the script. ps prints "?" on Linux and
+    # "??" on macOS for no terminal.
     if [[ -n "$owner" && "$owner" != "$$" ]] && kill -0 "$owner" 2>/dev/null; then
-      return 1
+      local cmd rest
+      read -r cmd rest <<<"$(ps -ww -o args= -p "$owner" 2>/dev/null)"
+      [[ "${cmd##*/}" == bash || "${cmd##*/}" == sh ]] && read -r cmd rest <<<"$rest"
+      if [[ "${cmd##*/}" == sclaude ]]; then
+        tty="$(ps -o tty= -p "$owner" 2>/dev/null | tr -d ' ')"
+        [[ -z "$tty" || "$tty" == "?" || "$tty" == "??" ]] && tty="no terminal"
+        # Said once per run and holder, not before every question: ask_publish
+        # runs in a $( ), so the mark is a file.
+        local said="${TMPDIR:-/tmp}/sclaude-held.${SCLAUDE_RUN:-$$}"
+        if [[ "$(cat "$said" 2>/dev/null)" != "$owner" ]]; then
+          printf '%s\n' "$owner" > "$said" 2>/dev/null
+          warn_here "  Not sent to the phone: sclaude pid $owner ($tty) holds this feature's questions."
+        fi
+        return 1
+      fi
     fi
   fi
 

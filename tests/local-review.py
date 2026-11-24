@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -408,6 +409,11 @@ try:
         "### src/c.ts:7 - a hyphen\nz\nFINDINGS: 3\n")
     check("headings-drift", [(f["path"], f["line"]) for f in found],
           [("src/a.ts", 12), ("src/b.ts", 3), ("src/c.ts", 7)])
+    # The files a reviewer read in full (sreview's COVERED line) end the
+    # finding above them and go into none.
+    found, _, count = local_review.parse(
+        "### src/a.ts:12 — one\nthe scenario\nCOVERED: src/a.ts, src/b.ts\nFINDINGS: 1\n")
+    check("covered-not-in-a-finding", (found[0]["body"], count), ("the scenario", 1))
     write(os.path.join(repo, "a.txt"), "e3\n")
     git("commit", "-qam", "more3", cwd=repo)
     git("push", "-q", cwd=repo)
@@ -580,6 +586,58 @@ try:
     check("github-refusal-run-again", prompts().count("---\n"), 2)
     with open(journal) as fh:
         check("failures-not-recorded", recorded(fh.read()), recorded(before))
+
+    # Claude's usage limit as the answer: not refused, not run again at once;
+    # journaled spent without a refused reason (the report's "Answers
+    # refused" does not count it), the reset left for the gate, which waits
+    # for it rather than asking (review_limit_wait).
+    write(os.path.join(repo, "a.txt"), "limit\n")
+    git("commit", "-qam", "limit", cwd=repo)
+    git("push", "-q", cwd=repo)
+    refused_md = os.path.join(repo, ".sclaude", "local", "feature", "local-review-refused.md")
+    with open(refused_md) as fh:
+        refused_before = fh.read()
+    prompts()
+    told()
+    write(os.path.join(tmp, "answer"), "You've hit your weekly limit · resets 3am (Europe/Lisbon)\n")
+    _, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"ASK_DIR": ask_dir, "ASK_SLUG": "demo"})
+    check("limit-fails", rc, 1)
+    check("limit-not-run-again", prompts().count("---\n"), 1)
+    check_true("limit-said", "Claude's usage limit — resets " in err and "refused" not in err)
+    with open(journal) as fh:
+        last_row = json.loads(fh.read().splitlines()[-1])
+    check("limit-journaled-unrefused", (last_row.get("spent"), "refused" in last_row), (True, False))
+    with open(refused_md) as fh:
+        check("limit-not-kept-as-refused", fh.read(), refused_before)
+    limit_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-limit")
+    with open(limit_file) as fh:
+        reset = int(fh.read())
+    check_true("limit-reset-left", reset > time.time())
+    why_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-why")
+    with open(why_file) as fh:
+        check_true("limit-why-left", "Claude's usage limit" in fh.read())
+    # The topic hears the pass end, and the limit once — from the wait.
+    ended = told()
+    check_true("limit-pass-ends-in-topic", any("ended" in line for line in ended))
+    check_true("limit-not-in-topic-twice", not any("Claude's usage limit" in line for line in ended))
+    # The wait: told when, no question; an unknown reset is LIMIT_RETRY away.
+    notified = os.path.join(tmp, "notified")
+    out, err, rc = run_bash('REPO=%s; notify_feature() { echo "$*" > %s; }; LIMIT_RETRY=0 review_limit_wait %s 0 demo; echo RC=$?'
+                            % (repo, notified, repo))
+    with open(notified) as fh:
+        check_true("limit-wait-told", "the review runs again by itself at" in err
+                   and "demo" in fh.read() and "RC=0" in out)
+    # A reset already past waits LIMIT_RETRY from now, not nothing: the
+    # first tick of the wait says half an hour is left.
+    out, err, rc = run_bash('REPO=%s; notify_feature() { :; }; keys_usable() { true; }; '
+                            'poll_pause() { exit 7; }; review_limit_wait %s %d demo'
+                            % (repo, repo, int(time.time()) - 600))
+    check_true("limit-past-reset-waits-retry", rc == 7 and "(30m left)" in err)
+    # The next call starts clean: neither file outlives it.
+    write(os.path.join(tmp, "answer"), "FINDINGS: 0\n" + local_review.DONE + "\n")
+    _, _, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo))
+    check("limit-then-reviewed", (rc, os.path.exists(limit_file), os.path.exists(why_file)), (0, False, False))
+    prompts()
 
     # A head GitHub does not have yet: no run.
     write(os.path.join(repo, "a.txt"), "g\n")

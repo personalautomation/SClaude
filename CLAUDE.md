@@ -229,6 +229,23 @@ breaks the other silently — grep before you edit:
   retrospective: Telegram kept no history to tell a message sent twice from
   one sent once, and the retrospective is to read what went there. -->
 
+- The regression queue's holder note, `.regression.lock.holder` in the dev
+  registry, is written by `lock_take` (`sclaude/lib/core/lock.sh`, worded at
+  its call in `sclaude/lib/ship/regression.sh`: "<slug>, the <stage>
+  regression, since HH:MM (pid N)") and read by `regression_held` in
+  `keepawake/sessions.py` (`HOLDER_NOTE`), which believes a running
+  regression only while that pid, or the run's own `regression.<stage>.pid`
+  that `regression_run_body` writes beside its status, lives and runs
+  sclaude (`regression_alive`) — on the feature's
+  card (`sclaude_busy`) and in the check that keeps Continue from starting a
+  second sclaude (`feature_busy`); `tests/webmenu.py` writes the shape
+  regression.sh writes. Reworded on one side alone, the card stops saying a
+  regression is running, and Continue starts a second sclaude mid-run.
+
+  <!-- Added by Claude on 2026-11-24 at the user's request, in a
+  retrospective: the card said no session was open while sclaude ran a
+  regression, and then said one ran for hours after it was killed. -->
+
 - The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
   (`KEEPAWAKE_TOPICS` in tests), is named once, by `topic_ledger` in
   `keepawake/state.py`. It is written by `remember_in_topic` in

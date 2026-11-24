@@ -102,6 +102,16 @@ regression_command() {
   # (project_stage_regression): it looks at the same host the same way.
   local browser=""
   [[ "$part" == "e2e" || "$part" == "smoke" ]] && browser=1
+  # The gate's rerun of a red suite asks only the specs that failed
+  # (REGRESSION_TESTS, one path:line a line, as regression_failed_specs
+  # `all` printed them): the rest went green a minute ago on the same tree.
+  if [[ -n "$browser" && -n "${REGRESSION_TESTS:-}" ]]; then
+    local test args=""
+    while IFS= read -r test; do
+      [[ -n "$test" ]] && args+=" $(printf '%q' "$test")"
+    done <<< "$REGRESSION_TESTS"
+    [[ -n "$args" ]] && cmd="$cmd --$args"
+  fi
   if [[ -n "$browser" && -n "$base" ]]; then
     cmd="export E2E_BASE_URL=$base; $cmd"
   fi
@@ -473,12 +483,16 @@ regression_duration() {
 # "Login › signs in (login.spec.ts:14)": the first three, and how many more;
 # nothing for a part whose log has neither.
 #
-#   regression_failed_specs <log> <first line of the attempt>
+# With `all`, every one of them as the suite's own command takes it back, its
+# path whole and its line, one a line — "e2e/login.spec.ts:14" — for the
+# gate's rerun to ask those specs alone (REGRESSION_TESTS).
+#
+#   regression_failed_specs <log> <first line of the attempt> [all]
 regression_failed_specs() {
-  python3 - "$1" "${2:-1}" <<'PY' 2>/dev/null || true
+  python3 - "$1" "${2:-1}" "${3:-}" <<'PY' 2>/dev/null || true
 import re, sys
 
-path, start = sys.argv[1], int(sys.argv[2])
+path, start, every = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "all"
 try:
     with open(path, encoding="utf-8", errors="replace") as fh:
         lines = fh.read().splitlines()[start - 1:]
@@ -488,11 +502,13 @@ lines = [re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line) for line in lines]
 
 # "[project] › path:line:col › title", the project optional, the path ending
 # at the first " › " so that a space inside it is the path's.
-SPEC = re.compile(r"^(?:\[[^\]]*\] › )?(?:.*/)?([^/]+?):(\d+)(?::\d+)? › (.+)$")
+SPEC = re.compile(r"^(?:\[[^\]]*\] › )?((?:.*/)?([^/]+?)):(\d+)(?::\d+)? › (.+)$")
 
 def named(text):
     m = SPEC.match(text.strip())
-    return "%s (%s:%s)" % (m.group(3), m.group(1), m.group(2)) if m else text.strip()
+    if every:
+        return "%s:%s" % (m.group(1), m.group(3)) if m else None
+    return "%s (%s:%s)" % (m.group(4), m.group(2), m.group(3)) if m else text.strip()
 
 names = []
 summary = None
@@ -517,9 +533,12 @@ else:
 
 seen = []
 for name in names:
-    if name not in seen:
+    if name and name not in seen:
         seen.append(name)
-if seen:
+if every:
+    for name in seen:
+        print(name)
+elif seen:
     more = " (+%d more)" % (len(seen) - 3) if len(seen) > 3 else ""
     print("; ".join(seen[:3]) + more)
 PY
@@ -742,7 +761,8 @@ REGRESSION_LOG_DIR=".sclaude/local/feature/logs/regression"
 # cannot be checked.
 #
 # `only` replaces the stage's list for this one run — regression_gate passes
-# the project's `regression.manual` when nothing but the manuals changed.
+# the project's `regression.manual` when nothing but the manuals changed, and
+# the red part with the parts after it when it runs a red stage again.
 #
 # One run on the machine at a time, whichever feature it belongs to: see
 # lock.sh. On 2026-10-06 one feature's local e2e timed out while another's work loaded the
@@ -753,7 +773,9 @@ REGRESSION_LOG_DIR=".sclaude/local/feature/logs/regression"
 # the queue is for.
 #
 # Only the runs that load the machine wait: a full local run and a preview's
-# e2e. A run of `only` is a few seconds of reading the code; production and
+# e2e. A run of `only` without the suite (regression_has_browser) is a few
+# seconds of reading the code; one with it — the gate's rerun of a red e2e —
+# loads the machine as a whole run does, and waits; production and
 # the check after a rollback are about a live site, and must not stand behind
 # another feature's ten-minute suite; and a stage with nothing to run has
 # nothing to queue for.
@@ -761,9 +783,12 @@ regression_run() {
   local wt="$1" slug="$2" stage="$3" only="${4:-}" rc lock_pid=""
   local lock_file="${DEV_REGISTRY:-}/.regression.lock"
 
-  if [[ -n "${DEV_REGISTRY:-}" && -z "$only" ]] && declare -F lock_take >/dev/null \
+  if [[ -n "${DEV_REGISTRY:-}" ]] && { [[ -z "$only" ]] || regression_has_browser "$only"; } \
+     && declare -F lock_take >/dev/null \
      && [[ "$stage" == "local" || "$stage" == "preview" ]] \
      && [[ -n "$(regression_parts "$stage" "$wt" 2>/dev/null)" ]]; then
+    # The holder note's words are read by the bot (HOLDER_NOTE in
+    # keepawake/sessions.py): a live pid there is this run alive.
     lock_take lock_pid "$lock_file" "$slug, the $stage regression" "a regression"
   fi
 
@@ -773,9 +798,10 @@ regression_run() {
   # race the proxy's own start for the same port, and nothing would bring the
   # database back for check:rls at all. A no-op when both are already up.
   #
-  # Not for a run of `only`: those are the checks that read the code, and
-  # waiting for a server and a database nobody will ask would spend part of
-  # the time the shorter run exists to save.
+  # Not for a run of `only` without the suite: those are the checks that read
+  # the code, and waiting for a server and a database nobody will ask would
+  # spend part of the time the shorter run exists to save. A rerun from a red
+  # e2e asks both, so it has them restarted as a whole run does.
   #
   # And restarted first, not merely found running. A server that has been up
   # through hours of step work is not the one the suite should judge the code
@@ -789,7 +815,8 @@ regression_run() {
   # A restart before the run does not cover a server that wedges during it —
   # one did, on 2026-10-09, minutes after this one. That case is
   # regression_server_wedged's, and regression_run_body retries e2e on it.
-  if [[ "$stage" == "local" && -z "$only" ]] && declare -F ensure_dev >/dev/null; then
+  if [[ "$stage" == "local" ]] && { [[ -z "$only" ]] || regression_has_browser "$only"; } \
+     && declare -F ensure_dev >/dev/null; then
     declare -F stop_own_dev >/dev/null && stop_own_dev "$wt"
     ensure_dev "$wt"
   fi
@@ -800,7 +827,18 @@ regression_run() {
   return "$rc"
 }
 
+# Whether a list of parts drives the product in a browser (e2e, or its
+# `smoke`): such a run, whole or a rerun of a few parts, loads the machine
+# and asks the feature's server.
+regression_has_browser() {
+  [[ " $1 " == *" e2e "* || " $1 " == *" smoke "* ]]
+}
+
 # The run itself, inside the queue regression_run holds.
+#
+# REGRESSION_BUILT, set by the gate for its rerun from a part after `build`,
+# says the build that part made in the red run is the tree's still, and may be
+# served to e2e (regression_serve_build) without building again.
 regression_run_body() {
   local wt="$1" slug="$2" stage="$3" only="${4:-}"
   local state="$wt/.sclaude/local/feature/state.json"
@@ -887,6 +925,9 @@ regression_run_body() {
 
   log_new "$wt" regression.log "$stage"
   state_set "$state" "regression.$stage.status" running
+  # The run's own pid, for the bot to believe "running" only while it lives
+  # (regression_alive in keepawake/sessions.py): a kill leaves the status.
+  state_set "$state" "regression.$stage.pid" "$$"
   # What the person said of the last red (`sclaude return` on a held
   # production) was for the fix it led to, which is this run's to judge.
   state_set "$state" "regression.$stage.reason" null
@@ -898,6 +939,7 @@ regression_run_body() {
     prod)    history_edge "$state" r_prod prod_ok sclaude "" stage=prod ;;
   esac
   state_set "$state" "regression.$stage.failed_at" null
+  state_set "$state" "regression.$stage.failed_tests" null
   # And the previous run's finishing time, or the state reads as a run that
   # ended before it began: started 13:56, finished 09:21.
   state_set "$state" "regression.$stage.finished" null
@@ -970,7 +1012,8 @@ regression_run_body() {
     # declare it as a chain, and a whole green suite is what the fixing session
     # would have proved.
     retried="" why="" served=""
-    if [[ "$stage" == "local" && "$part" == "e2e" && " $parts " == *" build "* ]] \
+    if [[ "$stage" == "local" && "$part" == "e2e" ]] \
+       && [[ " $parts " == *" build "* || -n "${REGRESSION_BUILT:-}" ]] \
        && [[ -n "$(regression_serve_command "$wt" 2>/dev/null)" ]]; then
       if regression_serve_build "$wt"; then
         served=1
@@ -1060,11 +1103,22 @@ regression_run_body() {
       # doing; the median of the last runs takes care of a single slow one.
       #
       # Not a retried one either: its time is two runs of the suite.
-      [[ -n "$retried" ]] || regression_remember "$wt" "$stage" "$part" "$part_total"
+      # Nor a run of a few failed specs (REGRESSION_TESTS): its time is theirs.
+      [[ -n "$retried" || -n "${REGRESSION_TESTS:-}" ]] \
+        || regression_remember "$wt" "$stage" "$part" "$part_total"
     else
       regression_line "$stage" "$parts" "$part" failed "$part_total" "$wt"
       failed="$part"
       failed_specs="$(regression_failed_specs "$log" "$from")"
+      # Every failed spec, path and line, for the gate's rerun to ask those
+      # alone — from Playwright's summary, so only where it is the runner,
+      # and not from a run cut off at its cap of failures: those are what a
+      # broken server looks like, and the rerun needs the whole suite.
+      if regression_has_browser "$part" && ! regression_stopped_early "$log" \
+         && [[ "$(project_get testRunner "$wt" 2>/dev/null || echo playwright)" == playwright ]]; then
+        local failed_tests; failed_tests="$(regression_failed_specs "$log" "$from" all)"
+        [[ -n "$failed_tests" ]] && state_set "$state" "regression.$stage.failed_tests" "$failed_tests"
+      fi
       # We stop at the first failure. The parts are ordered cheapest first, and
       # a failing typecheck makes everything after it noise — the session that
       # comes next has one thing to fix, not a page of consequences.

@@ -33,6 +33,8 @@ FILES = [
     ("prompt-<block>.md", "a block of a step's prompt too long to sit in it (an issue's request comment, …), which the prompt names instead (spilled in render_prompt.py)"),
     ("pr", "the pull request's snapshot for a review session, in parts too long for the prompt: threads.md every open thread whole, resolved.md every resolved one by file, discussion.md, unposted.md, left.md the threads the person left when many, and settled.md the local review's settled findings (PR_DIR in pr_context.py)"),
     ("prompt-rest-<session>.md", "the end of a launch's prompt too long for the command line, which the prompt's head sends the session to read; named by the session and the text's checksum, and kept for a later resume (prompt_overflow in pane.sh)"),
+    ("retro-declined.md", "the retrospective's copy of the person's declined proposals (the main checkout's .sclaude/local/retro-declined.md): the lines it adds go back to the list when it ends, or at the next pass's start"),
+    ("retro-declined.md.base", "the declined proposals as the copy was taken: what is new in the copy is measured against it"),
     ("main-config.json", "the project config as this machine reads it (the main checkout's, its local choices over it), copied where the retrospective reads it"),
 
     # --- friction --------------------------------------------------------------
@@ -50,7 +52,7 @@ FILES = [
     ("review-logs", "a review run on GitHub's conversation, one file a run and attempt, kept from its job's log once it has answered: what it opened, for the review map and for the pass that reads what it did not open (LOG_DIR in review_log.py)"),
     ("review-rounds.jsonl", "the review's journal, one line per run wherever it ran (review_journal, JOURNAL in local_review.py)"),
     ("local-review<suffix>", "a review run on this machine: -unposted.json "
-                             "findings GitHub would not take yet, -answer.md the last answer, -refused.md every answer it refused, -blocks.md the cut's answer, .log its stderr"),
+                             "findings GitHub would not take yet, -answer.md the last answer, -refused.md every answer it refused, -blocks.md the cut's answer, .log its stderr, -limit the reset of Claude's usage limit a pass stopped on and -why why the last review failed, both for the gate (review_close_gate) to take"),
 
     # --- regression and deploy -------------------------------------------------
     ("regression.log", "the latest regression run's log: a link into logs/"),

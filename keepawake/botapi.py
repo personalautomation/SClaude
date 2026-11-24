@@ -5,6 +5,8 @@
 
 import json
 import logging
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -26,6 +28,25 @@ POLL_TIMEOUT = 25
 BACKOFF_MAX = 60
 
 log = logging.getLogger("keepawake")
+
+# The times a line counts ("4m 05s", "12s"): a message said again with only
+# its time grown is the same message (Bot.send).
+DURATION = re.compile(r"\b\d+m \d{2}s\b|\b\d+s\b")
+
+
+# How long what a message was last edited to is trusted (Bot.unchanged):
+# another process — the menu page, sclaude-notify — may have edited it
+# since, and an edit back to this would then be skipped.
+EDIT_TRUST = 600
+
+# How long a plain message to a topic stands for a repeat of it (Bot.send):
+# the same line twice in a burst is one, the same line an hour later is news.
+SAID_WINDOW = 120
+
+
+def same_text(text):
+    """text as Bot.send compares it with the last message sent to a topic."""
+    return DURATION.sub("⌚", text or "")
 
 
 def profile_halves():
@@ -59,6 +80,14 @@ class Bot(object):
         # What Telegram said to the last send that failed, lowercased; "" after
         # one that went through.
         self.last_error = ""
+        # The last plain message sent to each topic, {thread: (same_text,
+        # quiet, message id, when)}, and what each message was last edited to, {message
+        # id: (kind, what and keyboard, when)}: the same again is not sent
+        # (send, edit, caption, widget_data). In memory: after a restart the
+        # first edit goes, and Telegram's "message is not modified" answers
+        # it.
+        self.said = {}
+        self.shown = {}
 
     # --- transport ----------------------------------------------------------
 
@@ -137,6 +166,22 @@ class Bot(object):
         # lower case, and there is no reason to rely on the parser's leniency.
         # When a sound is wanted we put None — call does not send such
         # parameters at all, so the request stays exactly as it was.
+        #
+        # What the bot sends to a topic by itself (thread named), without
+        # buttons, is not sent again when it says what the topic's last
+        # such message said, its times aside, as quietly, within SAID_WINDOW:
+        # the feed's lines came twice. A louder copy goes: a warning that
+        # follows the quiet line it repeats must sound.
+        # Not a reply to the person (thread None: they asked again), and not
+        # a message with buttons — a card is sent anew before the old one is
+        # deleted, and the old one's id would come back.
+        plain = thread is not None and not keyboard
+        if plain:
+            last = self.said.get(thread)
+            if (last and last[:2] == (same_text(text), bool(quiet))
+                    and time.time() - last[3] < SAID_WINDOW):
+                log.info("not sent again to topic %s: %s", thread, text[:80])
+                return last[2]
         try:
             out = self.call("sendMessage", chat_id=self.chat_id, text=text,
                             parse_mode="HTML",
@@ -147,7 +192,14 @@ class Bot(object):
                             disable_notification="true" if quiet else None,
                             reply_markup={"inline_keyboard": keyboard} if keyboard else None)
             self.last_error = ""
-            return (out.get("result") or {}).get("message_id", 0)
+            msg = (out.get("result") or {}).get("message_id", 0)
+            target = self.thread if thread is None else thread
+            # Anything else said in the topic since makes a repeat new again.
+            if plain and msg:
+                self.said[thread] = (same_text(text), bool(quiet), msg, time.time())
+            else:
+                self.said.pop(target, None)
+            return msg
         except Exception as exc:
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
             log.warning("did not send: %s %s", exc, getattr(exc, "telegram", ""))
@@ -173,6 +225,7 @@ class Bot(object):
                             disable_notification="true" if quiet else None,
                             reply_markup={"inline_keyboard": keyboard} if keyboard else None)
             self.last_error = ""
+            self.said.pop(self.thread if thread is None else thread, None)
             return (out.get("result") or {}).get("message_id", 0)
         except Exception as exc:
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
@@ -191,10 +244,13 @@ class Bot(object):
     def widget_data(self, message_id, data):
         # The widget's new state: an open one redraws at once, silently.
         # Whether it went through; the same state again counts as done.
+        if self.unchanged(message_id, "data", data):
+            return True
         try:
             self.call("editMessageWidgetData", chat_id=self.chat_id,
                       message_id=message_id, chat_data=data)
             self.last_error = ""
+            self.edited(message_id, "data", data)
             return True
         except Exception as exc:
             # Kept: "message to edit not found" says the widget is gone, which
@@ -208,10 +264,13 @@ class Bot(object):
 
     def caption(self, message_id, text, keyboard=None):
         # A widget's caption, which a state change leaves as it was.
+        if self.unchanged(message_id, "caption", text, keyboard):
+            return True
         try:
             self.call("editMessageCaption", chat_id=self.chat_id,
                       message_id=message_id, caption=text, parse_mode="HTML",
                       reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            self.edited(message_id, "caption", text, keyboard)
             return True
         except Exception as exc:
             if "not modified" in (getattr(exc, "telegram", "") or str(exc)).lower():
@@ -246,6 +305,7 @@ class Bot(object):
                             message_thread_id=self.thread or None,
                             reply_markup={"force_reply": True,
                                           "input_field_placeholder": placeholder})
+            self.said.pop(self.thread, None)
             return (out.get("result") or {}).get("message_id", 0)
         except Exception as exc:
             log.warning("the question did not send: %s", exc)
@@ -357,12 +417,31 @@ class Bot(object):
             except Exception as exc:
                 log.warning("setChatMenuButton: %s", exc)
 
+    def unchanged(self, message_id, kind, what, keyboard=None):
+        """Whether the message was last edited to exactly this (edited):
+        then the edit is not sent — a card redrawn each minute as it was is
+        a call for nothing."""
+        last = self.shown.get(message_id) if message_id else None
+        return bool(last) and time.time() - last[2] < EDIT_TRUST and last[:2] == (
+            kind, json.dumps([what, keyboard], sort_keys=True, ensure_ascii=False))
+
+    def edited(self, message_id, kind, what, keyboard=None):
+        self.shown[message_id] = (kind, json.dumps([what, keyboard], sort_keys=True,
+                                                   ensure_ascii=False), time.time())
+        if len(self.shown) > 500:
+            # The oldest go: a long-lived bot edits many messages.
+            for old in sorted(self.shown, key=lambda m: self.shown[m][2])[:100]:
+                del self.shown[old]
+
     def edit(self, message_id, text, keyboard=None):
         # Whether the edit went through.
+        if self.unchanged(message_id, "text", text, keyboard):
+            return True
         try:
             self.call("editMessageText", chat_id=self.chat_id,
                       message_id=message_id, text=text, parse_mode="HTML",
                       reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            self.edited(message_id, "text", text, keyboard)
             return True
         except Exception as exc:
             # The message already shows that text: it is as asked. Telegram's
@@ -420,6 +499,7 @@ class Bot(object):
 
     def unbutton(self, message_id, keyboard=None):
         # The message's text stays, its buttons go — or become keyboard.
+        self.shown.pop(message_id, None)
         try:
             self.call("editMessageReplyMarkup", chat_id=self.chat_id,
                       message_id=message_id,
@@ -432,6 +512,11 @@ class Bot(object):
         # once the message is 48 hours old — see retire for what happens then.
         if not message_id:
             return False
+        # Gone, it is neither the topic's last message nor one to edit.
+        self.shown.pop(message_id, None)
+        for thread, last in list(self.said.items()):
+            if last[2] == message_id:
+                del self.said[thread]
         try:
             out = self.call("deleteMessage", chat_id=self.chat_id,
                             message_id=message_id)

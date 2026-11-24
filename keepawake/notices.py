@@ -167,6 +167,17 @@ def headline(level, text):
     return bool(text.strip()) and not (text[:1].isspace() and level not in FEED_SOUND)
 
 
+def said_in(text, other):
+    """Whether other carries text whole, not cutting a word at either end."""
+    return bool(re.search(r"(?<!\w)%s(?!\w)" % re.escape(text), other))
+
+
+def loudness(level):
+    """How loud a line is, as feed_message weighs one against another: a
+    warning (⚠️ and a sound) over a line that only sounds, over a quiet one."""
+    return 2 if level in FEED_LOUD else 1 if level in FEED_SOUND else 0
+
+
 def feed_message(lines, shown=""):
     """The message for the gathered lines, and whether it should sound: (text,
     loud), or ("", False) when nothing is worth a message."""
@@ -185,6 +196,22 @@ def feed_message(lines, shown=""):
         if any(ln == text.strip() or ln.startswith(text.strip() + " ") for ln in shown):
             continue
         kept.append((level, text.strip()))
+    # A line another line of the message already says — the same line
+    # printed twice, or a short one a longer one carries whole, by whole
+    # words ("line 1" is not in "line 10") — goes, when that line is at least
+    # as loud: a warning inside a plain line stays, or the message would go
+    # quiet. Of two alike the loudest stays, the first of equals.
+    def drowned(i, level, text):
+        for j, (other_level, other) in enumerate(kept):
+            if j == i or not said_in(text, other):
+                continue
+            if loudness(other_level) > loudness(level):
+                return True
+            if loudness(other_level) == loudness(level) and (text != other or j < i):
+                return True
+        return False
+    kept = [(level, text) for i, (level, text) in enumerate(kept)
+            if not drowned(i, level, text)]
     if not kept:
         return "", False
     # Cut by whole lines, each escaped within what is left: a cut through

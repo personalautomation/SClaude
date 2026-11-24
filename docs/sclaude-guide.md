@@ -291,8 +291,11 @@ and the box shows `auto ☑ (night)` or `auto ☐`), `on` (☑) and `off` (☐);
 and off are yours and stay for the whole review, step 4 reopened included. `[n n]` (forward, now — the letter of the session keys below) stops the pass at once and ends the search for new findings, as `[s]` would after it: what is open goes to the fix session, and its fixes are checked only if you say so. A pass whose answer was refused (unfinished, or not in the review's
 format) runs once more at once; one that did not run, or was refused again,
 asks whether to go on with the head unreviewed — its reason in the terminal
-and the feature's topic — and `n` reviews it again rather than leaving
-sclaude. The review on GitHub is treated the same way when it hands back
+and the feature's topic, and on the phone the question carries that reason
+alone — and `n` reviews it again rather than leaving sclaude. A pass that met
+Claude's usage limit asks nothing: sclaude says in the terminal and the topic
+when the limit resets, waits until a minute past it (half an hour when the
+answer gave no time), and reviews the head again by itself; Ctrl-C leaves. The review on GitHub is treated the same way when it hands back
 before it finished (its findings check says "review did not finish"): no
 session opens for it; it runs again once by itself, and if that does not
 finish either you are asked whether to go on with the head unreviewed — `n`
@@ -422,6 +425,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `.sclaude/local/feature/` | one feature's working state: the plan, logs, its database settings | the feature's worktree | never | never |
 | `.sclaude/local/demo/` | the feature's recorded demos: videos, steps, the page | the feature's worktree | never | never |
 | `.sclaude/local/terminal/` | terminal recordings the retrospective reads | the product's main checkout | never | never |
+| `.sclaude/local/retro-declined.md` | the proposals you turned down at a retrospective, never offered again — written only on your word, one line each | the product's main checkout (a retrospective's copy in its feature's tree) | never | never |
 | `.sclaude/local/dora/` | the product's DORA page and what it was built from | the product's main checkout | never | never |
 | `.vercelignore` | keeps `.env*` and sclaude's files out of a deploy | each tree sclaude deploys | no, unless the product tracks its own | — |
 | `~/.claude/sclaude/` | your cycle records, remembered choices, running dev servers | your home | never | — |

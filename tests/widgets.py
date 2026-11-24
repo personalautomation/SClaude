@@ -877,6 +877,10 @@ try:
             check("the place of %r" % label, json.loads(card_view.card_state("shop", "alpha"))["c"], place)
         repos.features_of_name = lambda name: ([("alpha", "2/7 development", "/nowhere/shop-alpha")], None)
         check_true("and what its session does", "running" in state_now["w"])
+        # sclaude's own work, its words HTML (a process's caption), as text.
+        check("or what sclaude does",
+              json.loads(card_view.card_state("shop", "alpha", state=sessions.BUSY + "🧪 <b>a</b> &amp; b"))["w"],
+              "🔵 sclaude is working: 🧪 a & b")
         bot = Bot()
         msg = card_view.post_card(bot, "shop", "alpha")
         check("the topic's card is a widget", (msg, len(bot.widgets), bot.sent), (800, 1, []))

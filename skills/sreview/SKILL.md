@@ -123,14 +123,17 @@ project's `CLAUDE.md`, else the `typecheck` / `lint` / `test` scripts it has.
 ## 1. Review — a fresh subagent every iteration
 
 Spawn a new subagent (Agent tool; the sclaude model when there is one) that has
-not seen your fixes. It invokes the `code-review` skill at the level above, and
-changes no file and posts nothing. Its scope, in plain words:
+not seen your fixes. It invokes the `code-review` skill at the level above with
+`--max-findings all` (without it the skill stops at its default cap of 10 and the
+rest of the scope goes unread), and changes no file and posts nothing. Its scope,
+in plain words:
 
 - iteration 1: this session's work (step 0.6) — its commits by SHA and its
   uncommitted files, or under `/scontrib` the whole pull request; the rest of
   the branch only as context, not to report on;
 - later iterations: this session's commits since the last reviewed head —
-  your fixes are where new bugs come from;
+  your fixes are where new bugs come from — **plus whatever the previous review
+  may have left unread** (see "A review that may have stopped early" below);
 - **what was settled**, verbatim, so it does not raise it again: every policy in
   `policies.md` (stances included), and from the branch log every finding
   declined, with its reason, and every finding fixed. Tell it: a finding that
@@ -150,7 +153,8 @@ It answers in sclaude's format, so PR mode can post it unchanged:
 ```
 
 then `RESOLVED: <id> — <how>` for each earlier open finding the code no longer
-has (PR mode), then `FINDINGS: <n>`, and last the line `REVIEW: complete` —
+has (PR mode), then `COVERED: <the files of the scope it read in full>`, then
+`FINDINGS: <n>`, and last the line `REVIEW: complete` —
 written only once the `code-review` skill and every agent it started have
 finished. Tell it so: it answers once, at the end, never with an interim list.
 
@@ -167,6 +171,23 @@ skill is done — "FINDINGS: 0" first, the real list after. So:
 
 In PR mode `local_review.py record` refuses an answer without that line, as
 it does sclaude's own headless review.
+
+**A review that may have stopped early.** A whole answer can still be a partial
+review: the reviewer or its skill stops at a cap and never reads the rest. Treat
+the round as possibly truncated when it returned **10 or more findings** (the
+`code-review` default cap, also when the flag was passed — it may not have been
+honoured), when its `COVERED` line misses files of the scope, or when it has no
+`COVERED` line. Then:
+
+- the files of the scope it did not cover (all of the scope, without a `COVERED`
+  line) go into the next iteration's scope next to your fixes, named as such, so
+  the next reviewer reads them first;
+- the round is never the last one: step 6 does not stop on it, and no mark of a
+  finished run is written on it;
+- say in the branch log and the report which files were carried over and why.
+
+When the user says a review stopped short, run the next reviewer on the unread
+part at once, without waiting for the iteration to end.
 
 ## 2. Triage — yours, not the subagent's
 
@@ -264,6 +285,8 @@ commit, policies added.
 
 ## 6. Go on, or stop
 
+- **Never stop on a possibly truncated round** (10+ findings, or files of the
+  scope left out of `COVERED`): run the next iteration with the unread files.
 - **Stop by itself** when an iteration's review found nothing substantive (only
   nits, or nothing) and everything it found is handled.
 - **Ask** every N iterations: "N iterations done: <found / fixed / declined per

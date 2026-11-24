@@ -48,6 +48,13 @@ blocks_label() {
   if [[ "$id" == "$k" ]]; then echo "block $k/$total"; else echo "block $id ($k/$total)"; fi
 }
 blocks_total() { state_get "$1/.sclaude/local/feature/state.json" blocks.total 2>/dev/null || true; }
+# Whether blocks are read and the one read now is not the last (the seams):
+# closing it opens the next rather than ending step 4.
+blocks_before_last() {
+  blocks_active "$1" || return 1
+  local bk bt; bk="$(blocks_now "$1")"; bt="$(blocks_total "$1")"
+  [[ "$bk" =~ ^[0-9]+$ && "$bt" =~ ^[0-9]+$ ]] && (( bk < bt ))
+}
 
 # The commit the review reads from: where the branch left main.
 blocks_base() {
@@ -357,10 +364,14 @@ with open(path) as fh:
     data = json.load(fh)
 steps = data.setdefault("steps", {})
 block = data.setdefault("blocks", {}).setdefault(k, {})
+# Kept when there already: a block closed again is a close cut off before
+# blocks.current moved on, and steps.review is the reset one by then — the
+# first pass's record is the block's.
 if "steps" not in block and steps.get("review"):
     block["steps"] = {"review": steps.get("review")}
-runs = (steps.get("review") or {}).get("runs")
-steps["review"] = {"runs": runs} if runs else {}
+review = steps.get("review") or {}
+# The conversations (the polish round taken is the feature's, `polished`).
+steps["review"] = {"runs": review["runs"]} if review.get("runs") else {}
 state_file.write(path, data)
 PY
   state_set "$state" blocks.current $((k + 1))

@@ -55,11 +55,20 @@ coupled = {
     "decline-prefix": pr_context.DECLINE_PREFIX,
     "no-review-label": "no-review",
     "review-comment": "/review",
+    "minor-mark": pr_context.MINOR_MARK,
 }
 for name, text in coupled.items():
     check("template-carries-%s" % name, text in template, True)
     bare = text.strip('"')
     check("doc-carries-%s" % name, bare in section, True)
+
+# Both minor marks the template has the review write are the ones
+# pr_context reads back (minor_of), and the doc names both.
+for kind in pr_context.MINOR_KINDS:
+    line = pr_context.minor_mark(kind)
+    check("template-writes-minor-%s" % kind, line in template, True)
+    check("doc-names-minor-%s" % kind, line in section, True)
+    check("minor-%s-read" % kind, pr_context.minor_of(line + "\n\n**finding**"), kind)
 
 # The counted title is read by a pattern: the template's wording must match it.
 check("counted-title-read", bool(re.search(r"(\d+) unresolved review finding",

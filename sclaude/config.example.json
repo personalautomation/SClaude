@@ -8,7 +8,7 @@
     "work out, and for reading before you agree to what it proposes.",
     "",
     "The committed file is what the project recommends. A setting with choices",
-    "(`review`, `qa`, `merge`, `ship`, the regressions, `demo`, `sleep_mode`,",
+    "(`review`, `qa`, `merge`, `ship`, the regressions, `demo`, `simplify`, `sleep_mode`,",
     "`metricsTeam`) set from `sclaude config` or the bot is this machine's: it",
     "goes to .sclaude/local/config.json beside this file, outside git, and wins",
     "key by key. So one person's taste neither reaches the team nor leaves main's",
@@ -227,6 +227,12 @@
     "            and each scenario's card read aloud on the video, in English,",
     "            by a model run on this machine's CPU — fetched once, ~350 MB,",
     "            through uv; the default) or \"off\" (silent videos).",
+    "simplify  — whether /simplify (Claude Code's own skill: reuse, simpler",
+    "            code, efficiency) cleans the feature: \"on\" (step 2 runs it",
+    "            before its question, each part's session over its part;",
+    "            step 4 runs it once more over the whole pull request in a",
+    "            polish round once the review has nothing left open; the",
+    "            default) or \"off\" (no /simplify, and no polish round).",
     "partAccept — a feature built in parts: \"whole\" (the person sees it",
     "            once, when every part is built, and accepts it then; the",
     "            parts become one pull request; the default) or",
@@ -262,6 +268,8 @@
   "demo": "on",
 
   "demoVoice": "on",
+
+  "simplify": "on",
 
   "partAccept": "whole",
 

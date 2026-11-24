@@ -547,8 +547,11 @@ def tab_file(path):
 
 
 def headline(body):
-    m = re.search(r"\*\*(.+?)\*\*", body or "")
-    text = m.group(1) if m else (body or "").strip().splitlines()[0] if (body or "").strip() else ""
+    # A minor finding's mark (MINOR_MARK) is its first line, not its title.
+    lines = pr_context.body_lines(body)[1]
+    body = "\n".join(lines)
+    m = re.search(r"\*\*(.+?)\*\*", body)
+    text = m.group(1) if m else lines[0] if lines else ""
     return text[:200]
 
 

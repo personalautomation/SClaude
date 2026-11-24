@@ -529,7 +529,7 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
         return ""
     start = parse_ts(since) if since else None
     mine = yours(cwd)
-    fixed = declined = older = newer = outdated = kept = 0
+    fixed = declined = older = newer = outdated = kept = minor = 0
     for t in nodes:
         comments = (t.get("comments") or {}).get("nodes") or []
         first = comments[0] if comments else {}
@@ -550,6 +550,9 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
                 else:
                     fixed += 1
             continue
+        # Open like any, and told apart: how much of what is open is minor.
+        if minor_of(first.get("body")):
+            minor += 1
         when = parse_ts(first.get("createdAt"))
         if start and when and when >= start:
             newer += 1
@@ -577,6 +580,9 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
     if outdated and not handed and not done:
         found.append("%d on lines since changed" % outdated)
     parts = ["findings: " + ", ".join(found)]
+    # Its own item: appended to the list, it read as qualifying the last count.
+    if minor:
+        parts.append("%d open minor (a nit or an older bug)" % minor)
     if kept and not handed:
         parts.append("%d left to you" % kept)
     red = red_rows(cwd, pr, repo, view, nodes) if view else []
@@ -637,14 +643,42 @@ LOCAL_SIGNATURE = "<sub>Local review"
 # with nothing to tell one from another.
 OUTSIDE_DIFF = "Line %d (outside the diff)."
 OUTSIDE_DIFF_LINE = re.compile(r"^Line (\d+) \(outside the diff\)\.$")
+# The first line of a minor finding: `/code-review` marks each finding
+# important, pre-existing (a bug the change did not bring) or a nit, and the
+# last two are posted with this marker — by local_review.py's post and by the
+# prompt of the project's claude-code-review.yml. A minor finding is open
+# work like any other for now; the mark tells the fix session how much it
+# weighs (review.md) and the topic's line how many of the open ones are
+# minor (brief).
+MINOR_MARK = "<!-- sclaude:minor"
+MINOR_KINDS = ("nit", "pre-existing")
+MINOR_LINE = re.compile(r"^%s (%s) -->$" % (re.escape(MINOR_MARK), "|".join(MINOR_KINDS)))
+
+
+def minor_mark(kind):
+    """The first line a minor finding of this kind is posted with."""
+    return "%s %s -->" % (MINOR_MARK, kind)
+
+
+def body_lines(body):
+    """(the minor kind or None, the comment's other non-blank lines): the
+    mark is a first line of its own, which no title or place is read from."""
+    lines = [l.strip() for l in (body or "").splitlines() if l.strip()]
+    m = MINOR_LINE.match(lines[0]) if lines else None
+    return (m.group(1), lines[1:]) if m else (None, lines)
 
 
 def outside_diff(body):
     """The line a local finding taken only on its file names in its first
     line, or None — for a comment the local review signed alone."""
-    first = next((l.strip() for l in (body or "").splitlines() if l.strip()), "")
-    m = OUTSIDE_DIFF_LINE.match(first)
+    lines = body_lines(body)[1]
+    m = OUTSIDE_DIFF_LINE.match(lines[0]) if lines else None
     return int(m.group(1)) if m and signed_locally(body) else None
+
+
+def minor_of(body):
+    """`nit` or `pre-existing` for a finding posted with MINOR_MARK, else None."""
+    return body_lines(body)[0]
 
 
 def thread_line(t):
@@ -680,7 +714,7 @@ def signed_locally(body):
 
 
 def headline(body):
-    lines = [l.strip() for l in (body or "").splitlines() if l.strip()]
+    lines = body_lines(body)[1]
     if outside_diff(body) is not None:
         lines = lines[1:]
     line = lines[0] if lines else ""
@@ -1713,18 +1747,28 @@ def behind_head(cwd, head):
 
 def close_state(cwd, pr, repo):
     """Whether step 4 may close, as one line: `ok`, `pending`, `open: <why>`,
-    or `yours: <n>` when only threads the person decided to keep are open.
+    `yours: <n>` when only threads the person decided to keep are open,
+    `gone: merged` or `gone: closed` for a pull request no longer open, and
+    `unknown` when GitHub did not answer about it.
 
     Narrower than review_state, which asks whether a session is needed at all
     and counts any comment a person ever left. This asks only whether the
     review has finished with this head and left anything open: a check still
     running, a red one (the findings check among them), or a review thread not
-    resolved. Whatever cannot be read is `ok` — the step closed on a human's
-    word before this existed, and a network fault must not hold it shut.
+    resolved. Neither `gone` nor `unknown` holds the step — it closed on a
+    human's word before this existed, and a network fault must not hold it
+    shut — but each is its own word, so that the gate says why it closed
+    rather than calling it a clean review, and owes no polish round on a pull
+    request that is gone (review_polish_due).
     """
     view = pr_view(cwd, pr, "headRefOid,statusCheckRollup,state,createdAt")
-    if view is None or (view.get("state") or "") != "OPEN":
-        return "ok"
+    if view is None:
+        return "unknown"
+    state = (view.get("state") or "").upper()
+    if not state:
+        return "unknown"
+    if state != "OPEN":
+        return "gone: " + state.lower()
     ahead = unpushed(cwd, view)
     if ahead:
         return "open: %d commit(s) here are not pushed, so the pull request does not carry them" % ahead
@@ -2199,7 +2243,7 @@ def main():
         try:
             sys.stdout.write(close_state(sys.argv[2], sys.argv[3], sys.argv[4]) + "\n")
         except Exception:
-            sys.stdout.write("ok\n")
+            sys.stdout.write("unknown\n")
         return 0
     # `--wait <cwd> <pr> <repo> <seconds>`: `sclaude checks`, see wait_checks.
     # SCLAUDE_CHECKS_PERIOD sets the seconds between reads.

@@ -89,6 +89,15 @@ render_prompt() {
   # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
   local -x SCLAUDE_V_DEMO=""
   [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1
+  # Whether /simplify runs (project_simplify_mode): <if:simplify> in code.md
+  # alone, so it is read for step 2 alone — every step 2 session, a part's
+  # included, over its own change. A prompt of another step that takes the
+  # key widens the test below.
+  # <if:polish>: step 4's polish round, owed while steps.review.polish is
+  # `due` (review_polish_owe in review_gate.sh).
+  local -x SCLAUDE_V_SIMPLIFY="" SCLAUDE_V_POLISH=""
+  [[ "$step" == code && "$(project_simplify_mode "$wt")" == on ]] && SCLAUDE_V_SIMPLIFY=1
+  [[ "$step" == review && -n "$wt" ]] && review_polish_is_due "$wt" && SCLAUDE_V_POLISH=1
   # A feature built in parts (parts.sh). <if:in-parts> while a part is built
   # (step 2): <part> of <parts>, its branch built on <part-base> — the part
   # before it, the feature's branch <umbrella> for part 1. <if:parts-built>

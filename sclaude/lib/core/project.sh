@@ -246,6 +246,14 @@ project_demo_mode() {
   [[ "$(project_get demo "${1:-}" 2>/dev/null || true)" == off ]] && echo off || echo on
 }
 
+# Whether `/simplify` runs over the feature — in step 2 before the person
+# accepts it (<if:simplify> in code.md) and once more in step 4's polish
+# round (review_polish_due in review_gate.sh, <if:polish> in review.md):
+# `on`, the default, or `off`. Read like `demo`.
+project_simplify_mode() {
+  [[ "$(project_get simplify "${1:-}" 2>/dev/null || true)" == off ]] && echo off || echo on
+}
+
 # Whether a feature built in parts is shown to the person after each part
 # (parts.sh): `whole`, the default — the person accepts the whole feature
 # once every part is built — or `each`, where every part's session ends on

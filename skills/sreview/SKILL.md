@@ -148,9 +148,14 @@ in plain words:
 It answers in sclaude's format, so PR mode can post it unchanged:
 
 ```
-### <path>:<line> — <the finding in one line>
+### <path>:<line> — [<severity>] <the finding in one line>
 <the failure scenario: concrete inputs or state, and the wrong result>
 ```
+
+`<severity>` is the mark the `code-review` skill gave the finding —
+`important`, `pre-existing` (a bug that was there before the change) or `nit` —
+and `important` when it gave none. In PR mode a `nit` or `pre-existing` one is
+posted as a minor finding, marked so for whoever weighs it.
 
 then `RESOLVED: <id> — <how>` for each earlier open finding the code no longer
 has (PR mode), then `COVERED: <the files of the scope it read in full>`, then
@@ -192,7 +197,11 @@ part at once, without waiting for the iteration to end.
 ## 2. Triage — yours, not the subagent's
 
 Read the code behind every finding before deciding; a finding is a claim.
-Sort each one:
+The reviewer's mark is where you start, not the verdict: an `important` one is a
+candidate for **substantive**, a `nit` for **nit**; a `pre-existing` bug is not
+this change's — fix it when the fix is small and safe in code the change
+touches, otherwise report it under **Not ours** for its own issue. Sort each
+one:
 
 - **not a bug** — the scenario cannot happen. Decline with the reason.
 - **covered by a policy or stance** — apply it; no question.
@@ -288,7 +297,15 @@ commit, policies added.
 - **Never stop on a possibly truncated round** (10+ findings, or files of the
   scope left out of `COVERED`): run the next iteration with the unread files.
 - **Stop by itself** when an iteration's review found nothing substantive (only
-  nits, or nothing) and everything it found is handled.
+  nits, or nothing) and everything it found is handled — after one more step,
+  once a run: **simplify**. Run the `simplify` skill (`/simplify`) over this
+  session's work (step 0.6's commits since the run began, and what is not
+  committed), keep what it changes only where behaviour stays as it is, run the
+  checks and commit it as an iteration of its own (`refactor: simplify after
+  review`). `code-review` looks for bugs and leaves cleaning to `/simplify`.
+  When it changed anything, one more fresh review iteration reads that commit
+  alone, and the run stops after it by the same rule, without a second
+  simplify. The mark of a finished run then names the head after it.
 - **Ask** every N iterations: "N iterations done: <found / fixed / declined per
   iteration>. Go on for N more?" — options: go on, stop. A round that keeps
   finding the same class (third time) is said in that question, with what was

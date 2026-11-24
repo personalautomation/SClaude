@@ -44,7 +44,9 @@ deploys.
 
 `/sreview [N]` runs iterations of review and fixing on the current branch, in
 any repository, and asks whether to go on every N iterations (5 by default). It
-stops by itself once a review finds nothing substantive.
+stops by itself once a review finds nothing substantive — after one last
+`/simplify` over the session's work, committed as an iteration of its own and
+read by one more review when it changed anything.
 
 Each review is a fresh subagent that has not seen the fixes, told what was
 already decided so it does not raise it again. Fixes go to subagents where they

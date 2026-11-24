@@ -564,6 +564,25 @@ BLOCK = dict(DONE, SCLAUDE_V_IN_BLOCKS="1", SCLAUDE_V_BLOCK="2", SCLAUDE_V_BLOCK
 review = render("review", BLOCK)
 check("block-review-knows-its-block", "block 2 of 4: Taking a ticket" in review, True)
 check("block-review-names-the-cut", ".sclaude/local/feature/review-blocks.json" in review, True)
+# Step 4's polish round (review_polish_owe): told it is the polish, which
+# is /simplify; every round weighs a minor finding by its mark and fixes it.
+review = render("review", DONE)
+check("ordinary-round-weighs-minor", ("This round is the polish round" in review,
+                                      "is fixed all the same" in review,
+                                      "<!-- sclaude:minor pre-existing -->" in review), (False, True, True))
+review = render("review", dict(DONE, SCLAUDE_V_POLISH="1", SCLAUDE_V_ISSUE="41"))
+check("polish-round-told", ("This round is the polish round" in review, "/simplify" in review,
+                            "git diff origin/main...HEAD" in review, "issues/41/sub_issues" in review),
+      (True, True, True, True))
+# The polish round is read from the feature's state, so a round after it
+# is an ordinary one again (review_polish_taken).
+with open(os.path.join(LIB, "cycle", "prompt.sh")) as fh:
+    check("polish-key-from-state", 'review_polish_is_due "$wt" && SCLAUDE_V_POLISH=1' in fh.read(), True)
+# /simplify in step 2 runs in a part's session too, over the part's change.
+code = render("code", dict(IN_PART, SCLAUDE_V_SIMPLIFY="1"))
+check("part-session-simplifies-its-part", "/simplify" in code and "git diff feat/t-1...HEAD` and what is not committed" in code, True)
+code = render("code", dict(WHOLE, SCLAUDE_V_SIMPLIFY="1"))
+check("whole-session-simplifies-the-feature", "the feature's whole change" in code, True)
 plan = render("plan", dict(DONE, SCLAUDE_V_IN_PARTS=""))
 check("plan-asks-for-the-parts-section", "`### Part <n> — <title>`" in plan, True)
 check("plan-files-no-issue-for-a-part", "gh issue create" in plan, False)

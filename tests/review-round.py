@@ -1227,7 +1227,7 @@ echo "watcher=[$SESSION_WATCHER]"
                  'review_keep() { echo "WHY"; return %d; }\n'
                  'run_rounds() { echo "RUN_ROUNDS $2 $3"; }\n'
                  'run_step() { echo "RUN_STEP $3 [${4:0:40}] $5"; }\n'
-                 'review_reopen "%s" feat 7 o/r 0\n') % (fake, 0 if kept else 1, rwt)
+                 'review_reopen "%s" feat 7 o/r ""\n') % (fake, 0 if kept else 1, rwt)
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout
         with open(rst) as fh:
             review = json.load(fh)["steps"]["review"]
@@ -1268,7 +1268,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # out) and says what it was asked.
     def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
                     auto=False, exited=False, entry=False, skippable=True, open_count=3, known="",
-                    stubs="", unread=None):
+                    stubs="", unread=None, extra=None, top=None):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -1278,7 +1278,8 @@ echo "watcher=[$SESSION_WATCHER]"
             review = dict({"enough": said} if said else {}, **({"go_on": True} if go_on else {}))
             if go_on is not True and go_on:
                 review["go_on_rounds"] = go_on
-            json.dump({"steps": {"review": review}} if review else {}, fh)
+            review.update(extra or {})
+            json.dump(dict({"steps": {"review": review}} if review else {}, **(top or {})), fh)
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             # A list of words: one each look, the last kept (a run that
             # finishes while the gate waits).
@@ -1332,6 +1333,93 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(state) as fh:
             left = json.load(fh)
         return out.stdout + out.stderr, left
+
+    # Nothing left open: one polish round before the step closes — owed in
+    # the feature's state (steps.review.polish `due`, which the prompt reads
+    # and the way in does not skip), sent back to a fresh session the way any
+    # open work is, taken by the gate after it; once a feature, only with
+    # `simplify` on, on a head the review read, on a pull request still open,
+    # at the last block, and never once the search was ended.
+    def polish_gate(word="ok", simplify="on", extra=None, said="", mode="github", more="", exited=False, top=None, auto=False, go_on=False, answers=()):
+        stubs = ('project_simplify_mode() { echo %s; }\n'
+                 'gh() { echo "GH $*" >&2; }\nask_feed() { echo "FEED $*"; }\n'
+                 'run_step() { echo "RUN_STEP $3 POLISH=$(state_get "$1/.sclaude/local/feature/state.json" steps.review.polish)"; }\n'
+                 '%s\n%s') % (simplify, functions(["review_polish_due", "review_polish_owe", "review_polish_taken",
+                                                    "review_polish_is_due", "blocks_before_last"]), more)
+        return enough_gate(said, word, 0, mode=mode, extra=extra, stubs=stubs, exited=exited, top=top, auto=auto, go_on=go_on, answers=answers)
+    out, left = polish_gate()
+    check("polish-opened", "RC=1" in out and "RUN_STEP review POLISH=due" in out
+          and "a polish round is owed" in out and "FEED say Nothing is left open" in out, True)
+    check("polish-edge", "EDGE review_close review back unasked note=a polish round is owed" in out, True)
+    check("polish-asks-github-nothing-more", "GH " in out, False)
+    check("polish-said-calmly", ("\n  Nothing is left open on PR #143: a polish round" in out,
+                                 "Step 4 is not done" in out), (True, False))
+    # A session sclaude closed itself: the fresh session review_polish_owe
+    # left, not review_reopen, which reads GitHub again and may say "stuck".
+    out, left = polish_gate(auto=True)
+    check("polish-after-auto-close-runs", ("RUN_STEP review POLISH=due" in out, "REOPEN" in out), (True, False))
+    # Declined at [g]'s ceiling: closed, and the round not counted taken.
+    out, left = polish_gate(go_on=30, answers=("n", "y"))
+    check("polish-declined-not-taken", ("RC=0" in out, left["steps"]["review"].get("polish"), left.get("polished")),
+          (True, None, None))
+    # The person left the last session with [g] off: held like any open work,
+    # owed for the next `sclaude <name>`, whose way in opens it.
+    out, left = polish_gate(exited=True)
+    check("polish-held-when-you-left", ("RUN_STEP" not in out, "RC=1" in out, "held: a polish round" in out,
+                                        left["steps"]["review"].get("polish")), (True, True, True, "due"))
+    check("polish-fresh-session", left["steps"]["review"].get("session", "unset"), None)
+    out, left = polish_gate(extra={"polish": "due"})
+    check("polish-taken-by-the-gate-after-it", ("RUN_STEP" not in out, "RC=0" in out,
+                                                left["steps"]["review"].get("polish"), left.get("polished")),
+          (True, True, None, True))
+    out, left = polish_gate(top={"polished": True})
+    check("polish-once-then-closes", "RC=0" in out and "RUN_STEP" not in out, True)
+    out, left = polish_gate(simplify="off")
+    check("polish-off-closes", "RC=0" in out and "RUN_STEP" not in out, True)
+    out, left = polish_gate(said="pass")
+    check("polish-not-after-search-ended", "RUN_STEP" not in out and "polish" not in out, True)
+    out, left = polish_gate(word="yours: 1")
+    check("polish-not-for-yours", "polish round" not in out, True)
+    out, left = polish_gate(word="open: 2 review thread(s) open")
+    check("polish-not-while-open", "polish round" not in out, True)
+    out, left = polish_gate(mode="off")
+    check("polish-not-unreviewed", "polish round" not in out, True)
+    for st in ("merged", "closed"):
+        out, left = polish_gate(word="gone: " + st)
+        check("polish-not-on-a-pr-%s" % st, ("polish round" not in out, "RC=0" in out,
+                                              "PR #143 is %s: step 4 closes" % st in out), (True, True, True))
+    out, left = polish_gate(word="unknown")
+    check("polish-a-failed-look-keeps-it", "RUN_STEP review POLISH=due" in out, True)
+    out, left = polish_gate(word="unknown", top={"polished": True})
+    check("unknown-closes-saying-so", ("RC=0" in out, "GitHub did not answer about PR #143" in out), (True, True))
+    out, left = polish_gate(more='blocks_active() { return 0; }\nblocks_now() { echo; }\nblocks_total() { echo 3; }')
+    check("polish-blocks-unread-quiet", "operand expected" in out, False)
+    blocks = 'blocks_active() { return 0; }\nblocks_now() { echo %s; }\nblocks_total() { echo 3; }'
+    out, left = polish_gate(more=blocks % 2)
+    check("polish-not-before-the-last-block", "polish round" not in out and "RC=0" in out, True)
+    out, left = polish_gate(more=blocks % 3)
+    check("polish-at-the-last-block", "RUN_STEP review POLISH=due" in out, True)
+    # The way in does not skip the owed round: nothing open is its point.
+    skip = os.path.join(tmp, "skip-wt")
+    os.makedirs(os.path.join(skip, ".sclaude", "local", "feature"), exist_ok=True)
+    def skippable_with(polish):
+        with open(os.path.join(skip, ".sclaude", "local", "feature", "state.json"), "w") as fh:
+            json.dump({"steps": {"review": {"polish": polish}}}, fh)
+        return subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nwatch_verdict() { :; }\nwatch_notes() { :; }\n'
+                               'review_skippable "%s" x && echo SKIPPABLE || echo OWN'
+                               % (LIB, functions(["review_skippable", "review_polish_is_due"]), skip)],
+                              capture_output=True, text=True, timeout=30).stdout.strip()
+    check("polish-due-not-skippable", (skippable_with("due"), skippable_with(None)), ("OWN", "SKIPPABLE"))
+    # A rewind forgets a round owed, as the round's other fields; one taken
+    # is the feature's, and stays.
+    with open(os.path.join(skip, ".sclaude", "local", "feature", "state.json"), "w") as fh:
+        json.dump({"step": "review", "polished": True, "steps": {"review": {"polish": "due"}}}, fh)
+    subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nstep_rewind_to "%s" code review'
+                    % (LIB, functions(["step_rewind_to"]), skip)],
+                   capture_output=True, text=True, timeout=30)
+    with open(os.path.join(skip, ".sclaude", "local", "feature", "state.json")) as fh:
+        left = json.load(fh)
+    check("polish-rewind", (left["steps"]["review"].get("polish"), left.get("polished")), (None, True))
 
     # The same gate opens step 4 (entry): it closes the step with no session
     # when nothing is open, else hands run_step the session to open — asking
@@ -1513,6 +1601,15 @@ echo "watcher=[$SESSION_WATCHER]"
     out, left = enough_gate("", "open: 3 review thread(s) open", 2, auto=True)
     check("auto-closed-unasked-without-go-on",
           "REOPEN" in out and "ASKED" not in out and "RUN_STEP" not in out and "RC=1" in out, True)
+    # The wait ran past its maximum, and the look after the last poll found
+    # the review finished with threads open: they go to a session, not
+    # dropped as "nothing to fix until it has finished".
+    out, left = enough_gate("", ["pending", "open: 3 review thread(s) open"], 2, auto=True,
+                            stubs='REVIEW_WAIT_MAX=1\npoll_pause() { SECONDS=$((SECONDS + 2)); }\nreview_reopen() { echo "REOPEN ran_out=$5."; }')
+    check("auto-closed-finished-after-the-wait", "REOPEN ran_out=." in out, True)
+    out, left = enough_gate("", "pending", 2, auto=True,
+                            stubs='REVIEW_WAIT_MAX=1\npoll_pause() { SECONDS=$((SECONDS + 2)); }\nreview_reopen() { echo "REOPEN ran_out=$5."; }')
+    check("auto-closed-wait-ran-out", "REOPEN ran_out=1." in out, True)
     out, left = enough_gate("", "open: 3 review thread(s) open", 2)
     check("unasked-without-go-on",
           "RUN_STEP review" in out and "ASKED" not in out, True)
@@ -1895,8 +1992,10 @@ echo "watcher=[$SESSION_WATCHER]"
           close(dict(base, headRefOid=older, statusCheckRollup=green), cwd=repo),
           "open: PR #143 still names %s as its head, behind this branch" % older[:8])
     pc.recent = RECENT
-    check("close-merged", close(dict(base, state="MERGED", statusCheckRollup=red), 3), "ok")
-    check("close-unreadable", close(None), "ok")
+    # Neither holds the step, but each says why, not "ok".
+    check("close-merged", close(dict(base, state="MERGED", statusCheckRollup=red), 3), "gone: merged")
+    check("close-closed", close(dict(base, state="CLOSED", statusCheckRollup=red), 3), "gone: closed")
+    check("close-unreadable", close(None), "unknown")
 
     a = RUN[RUN.index("\nafter_step() {"):]
     a = a[a.index("    review)"):]

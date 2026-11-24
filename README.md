@@ -101,7 +101,9 @@ is actually better at — planning, writing and reviewing code.
   gates.
 - **Context managed for you.** A review round stays in the same session while
   its prompt cache is warm and moves to a fresh one when that is cheaper;
-  noisy work goes to sub-agents; the review does not chase every finding.
+  noisy work goes to sub-agents; the review does not chase every finding —
+  each is marked important, a nit or an older bug and weighed so, and one
+  polish round with `/simplify` cleans the code once nothing is left open.
   What each feature, step and review pass cost is counted.
 
 The token know-how that used to live in one person's head, as six habits —

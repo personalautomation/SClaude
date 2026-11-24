@@ -972,8 +972,10 @@ Post nothing to GitHub and change no file: sclaude posts your findings from your
 
 When the skill is done, answer with nothing else. First the new findings, one per section:
 
-### <path>:<line> — <the finding in one line>
+### <path>:<line> — [<severity>] <the finding in one line>
 <the failure scenario: concrete inputs or state, and the wrong result>
+
+<severity> is the mark the skill gave the finding — \`important\`, \`pre-existing\` or \`nit\` — and \`important\` when it gave none. Keep its mark: it is posted with the finding and tells whoever fixes it how much it weighs. Report every finding, whatever its mark.
 
 A concern about the whole pull request goes on the file and line it is most about: a finding is a thread, and a thread needs a place.
 

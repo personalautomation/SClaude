@@ -128,6 +128,8 @@ review_skippable() {
     return 1
   fi
   [[ "$(state_get "$state" reopened 2>/dev/null || true)" == "review" ]] && return 1
+  # The polish round is owed (review_polish_owe): nothing open is its point.
+  review_polish_is_due "$wt" && return 1
   [[ "$(watch_verdict "$slug")" == "returned" ]] && return 1
   [[ -z "$(watch_notes "$slug")" ]] || return 1
   return 0
@@ -361,13 +363,13 @@ PY
 # orchestrator rather than by a person: unasked with [g] ticked, on the
 # person's yes without it (review_close_gate).
 #
-#   review_reopen <wt> <slug> <pr> <repo> <waited>
+#   review_reopen <wt> <slug> <pr> <repo> <ran_out>
 #
 # By whose work is left, the way review.md tells a session to decide for
 # itself:
 #
-#   * the automatic review has not finished — there is nothing to fix yet, and
-#     no session is opened for it;
+#   * the automatic review has not finished (<ran_out>, the gate's wait gave
+#     up on it) — there is nothing to fix yet, and no session is opened for it;
 #   * threads open since before the session began, or a red check — that
 #     session's own work, and it knows why it changed what it did: it is
 #     resumed, and told what is still open;
@@ -375,9 +377,9 @@ PY
 #     while review_keep says its context is light and cached, to a fresh one
 #     otherwise.
 review_reopen() {
-  local wt="$1" slug="$2" pr="$3" repo="$4" waited="$5"
+  local wt="$1" slug="$2" pr="$3" repo="$4" ran_out="$5"
   local state="$wt/.sclaude/local/feature/state.json" since split older newer session held pct why
-  if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
+  if [[ -n "$ran_out" ]]; then
     info "  Nothing to fix until it has finished. Come back with: $SELF $slug"
     return 0
   fi

@@ -19,7 +19,8 @@
 #   * the journal counts a block's runs apart: its first read, its rounds,
 #     its cache — the pull request's last head stays the one to read from;
 #   * while blocks are read the review runs here, whatever the setting;
-#   * blocks_next closes a block, begins step 4's record afresh, keeps the
+#   * blocks_next closes a block, begins step 4's record afresh (a polish
+#     round owed goes with the round's fields; one taken is the feature's), keeps the
 #     old one under the block, and after the seams goes no further;
 #   * a block past the size is split by behaviour before it is read whole:
 #     the parts hold every file and criterion once, take its place named
@@ -291,7 +292,8 @@ try:
           src.index('blocks_stale "$wt" "$head"') < src.index('SCLAUDE_REVIEW_READ="${first:+first}"'), True)
     with open(state, "w") as fh:
         json.dump({"pr": 7, "blocks": {"total": 3, "current": 1, "pr": 7, "label_before": "no"},
-                   "steps": {"review": {"runs": [{"session": "r1"}], "rounds": 4, "enough": "pass"}}}, fh)
+                   "steps": {"review": {"runs": [{"session": "r1"}], "rounds": 4, "enough": "pass",
+                                        "polish": "due"}}, "polished": True}, fh)
     check("read-here-while-in-blocks", sh('project_review_mode "%s"' % wt).strip(), "local")
     # Ending the search mid-way, closing the review closes the block, and the
     # question says so rather than "close step 4".
@@ -307,6 +309,7 @@ try:
     check("next-block-opens", ("ACTIVE" in out, "NEXT" in out, st["blocks"]["current"]), (True, True, 2))
     check("next-block-step-afresh", (st["steps"]["review"], st["blocks"]["1"]["steps"]["review"]["rounds"]),
           ({"runs": [{"session": "r1"}]}, 4))
+    check("next-block-keeps-polished", st.get("polished"), True)
     check("next-block-closed-head", review_blocks.load(cut)["closed"].get("1"), git(wt, "rev-parse", "HEAD"))
     sh('blocks_next "%s" t' % wt)
     out = sh('blocks_next "%s" t || echo LAST' % wt)

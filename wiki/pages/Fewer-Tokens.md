@@ -37,7 +37,9 @@ flow; the rest is shared as team practice.
   moves to a fresh one when that is cheaper.
 - Noisy work goes to sub-agents.
 - The review does not chase every finding: *"Chasing every finding leads to
-  over-engineering."* (Anthropic, Claude Code best practices)
+  over-engineering."* (Anthropic, Claude Code best practices) Each
+  finding is marked important, a nit or an older bug, and weighed so; one
+  polish round with `/simplify` cleans the code at the end.
 - Big features are built in [parts](Big-Features-in-Parts), each in a small
   context.
 - What each feature, step and review pass cost is counted, and the cache hit

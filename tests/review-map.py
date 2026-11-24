@@ -667,4 +667,10 @@ check("a place's hover links the same finding's fixes in other files",
 check("the page draws thin lines over every fill",
       "...thins" in page and "data-body" in page)
 
+# A minor finding's mark is its first line, not its title.
+import review_map  # noqa: E402
+check("a minor finding is titled by its text, not its mark",
+      review_map.headline("<!-- sclaude:minor nit -->\n\nUnused variable x in foo()") == "Unused variable x in foo()"
+      and review_map.headline("<!-- sclaude:minor nit -->\n\n**Bold title**\n\nbody") == "Bold title")
+
 sys.exit(1 if failures else 0)

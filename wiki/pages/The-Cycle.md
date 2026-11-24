@@ -53,7 +53,7 @@ AI review goes wrong in four ways, and SClaude has an answer for each:
 | failure | what SClaude does |
 |---|---|
 | **finds nothing** | the review must actually run on the latest commit; a green check that reviewed nothing is shown as such |
-| **endless rounds** | a person's decision is recorded as "left as it is" and not raised again; a fix that would undo an earlier fix goes to the person |
+| **endless rounds** | a person's decision is recorded as "left as it is" and not raised again; a fix that would undo an earlier fix goes to the person; each finding is marked important, a nit or an older bug and weighed so, and one polish round with `/simplify` cleans the code once nothing is left open |
 | **burns tokens** | a small context with only the open threads; fixes go to sub-agents; the session stays only while its cache is warm |
 | **stalls on a person** | the agent fixes and replies; you see only the few findings it disagrees with, as an explicit yes or no |
 

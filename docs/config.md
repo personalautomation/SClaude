@@ -61,6 +61,7 @@ the default.
 | `prodRegression` | `full`, `smoke`, `none` | `full` |
 | `demo` | `on`, `off` | `on` |
 | `demoVoice` | `on`, `off` | `on` |
+| `simplify` | `on`, `off` | `on` |
 | `partAccept` | `whole`, `each` | `whole` |
 | `sleep_mode` | `auto`, `on`, `off` | `auto` |
 | `metricsTeam` | `real`, `demo` | `real` |
@@ -153,6 +154,17 @@ Whether the feature is shown as video (the `/sdemo` skill).
   before the last epilogue with `qa: auto` (or `auto-own` on your own issue).
 - `off` — no demo videos anywhere in the cycle; the report and the criteria are
   the check.
+
+### simplify
+
+Whether Claude Code's `/simplify` cleans the feature's code: reuse, simpler
+code, efficiency. The review in step 4 looks for bugs, not for this.
+
+- `on` — step 2 runs `/simplify` before its Accept question; a feature built in
+  parts runs it in each part's session, over that part. Step 4 runs it once
+  more, over the whole pull request, in a polish round once the review has
+  nothing left open.
+- `off` — no `/simplify`, and no polish round.
 
 ### demoVoice
 

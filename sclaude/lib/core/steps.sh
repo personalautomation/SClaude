@@ -877,6 +877,10 @@ step_rewind_to() {
   # [g] is the person's for the whole review; its rounds count afresh.
   state_set "$state" steps.review.go_on_rounds null 2>/dev/null || true
   state_set "$state" steps.review.go_on_ceiling null 2>/dev/null || true
+  # A polish round owed was about the review it closed; the review the
+  # feature comes back to owes it at its own end, unless one was taken
+  # (`polished`, the feature's, which stays).
+  state_set "$state" steps.review.polish null 2>/dev/null || true
   declare -F review_said_drop >/dev/null && review_said_drop
 
   state_set "$state" step "$target"

@@ -504,6 +504,20 @@ breaks the other silently — grep before you edit:
   `review_pane_keys` in `local_review.sh` prints the report by;
   `tests/local-review.py` runs it.
 
+- `MINOR_MARK` in `sclaude/lib/review/pr_context.py` (`<!-- sclaude:minor
+  nit -->`, `… pre-existing -->`) opens a minor finding: `post` in
+  `local_review.py` writes it from the severity the local review's heading
+  carries (`SEVERITY`, asked by `local_review_prompt`), the prompt of
+  `sclaude/templates/claude-code-review.yml` has the review write it, `minor_of`
+  reads it back (`brief` counts them), `sclaude/prompts/review.md` names both
+  lines for the fix session to weigh a finding by, and `docs/setup.md` spells
+  the marks out for products. `tests/review-contract.py`,
+  `tests/local-review.py` and `tests/parts.py` check each side. Reworded on one
+  side alone, every finding weighs as important again.
+
+  <!-- Added by Claude on 2026-11-24 at the user's request: /code-review marks
+  findings by severity since Claude Code 2.1.328. -->
+
 - `LOCAL_SIGNATURE` in `sclaude/lib/review/pr_context.py` ends every finding and
   reply a review run on this machine posts (`local_review.py`), and is how
   `review_state` tells them from what the person wrote under the same
@@ -657,9 +671,12 @@ breaks the other silently — grep before you edit:
   machine neither takes the public main nor sends to it unasked. -->
 
 - The project settings `ship` (`ask`, `auto`, `off`), `previewRegression` and
-  `prodRegression` (`full`, `smoke`, `none`) and `demo` (`on`, `off`, read by
+  `prodRegression` (`full`, `smoke`, `none`), `demo` (`on`, `off`, read by
   `project_demo_mode`, which `<if:demo>` in `sclaude/prompts/code.md` and
-  `demo_refresh` in `demo.sh` follow) are listed in `CHOICES` in
+  `demo_refresh` in `demo.sh` follow) and `simplify` (`on`, `off`, read by
+  `project_simplify_mode` for `<if:simplify>` in `code.md` and for
+  `review_polish_due`, the polish round's `<if:polish>` in `review.md`) are
+  listed in `CHOICES` in
   `sclaude/lib/core/config_menu.py`, explained in `sclaude/config.example.json`,
   explained for users in `docs/config.md` (every key of the config: a key
   the example, its README or a `project_get` names, and every value in

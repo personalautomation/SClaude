@@ -74,6 +74,8 @@ The orchestrator runs this step with restrictions: `gh pr create`, merge, deploy
 
 <include:report>
 
+<if:simplify>**Before the demo and the report, clean the code: run the `simplify` skill, `/simplify`,** over <if:in-parts>this part's change — the scope `git diff <part-base>...HEAD`</if:in-parts><if:not-in-parts>the feature's whole change — the scope `git diff <base>...HEAD`</if:not-in-parts> and what is not committed yet. Keep what it changes only where behaviour stays as it is: what the plan and its criteria promise, what the tests pin, every guard and check. Then run the checks the change calls for and commit. After fixing my remarks, run it again before asking again, over what changed since — only when the code changed. The review in step 4 looks for bugs and leaves the cleaning to this, so what is left here reaches the review as it is.
+</if:simplify>
 <if:demo>**Before the report, show me the work: run the `sdemo` skill, `/sdemo`.** It records the feature's main functionality — signed in as the users each scenario needs, clicking through, with captions on what to look at, on a desktop and on a phone — and sends the page's link with the videos to the feature's Telegram topic and to a comment of its own on the issue. Put that link first in the report, so I can watch before I answer. After fixing my remarks, record again before asking again — but only when the code changed since the last demo: `python3 ~/.claude/skills/sdemo/demo.py stale` exits 0 with `stale:` when it did, and 1 with `fresh:` when the demo still shows the code as it is; a demo costs minutes and a model's work. Then first `/sdemo delta` — a short recording of only what changed for me since the last demo, so I need not watch the whole one again; none when nothing changed for a user — and then `/sdemo`, the whole feature again. Put both links first in the report. If no demo can be made — nobody in the feature's database to sign in as, the player failing twice on the same step — say why in one line and ask all the same: the demo is a way to check the work, not a condition for accepting it.
 </if:demo>
 
@@ -96,7 +98,8 @@ Leave the question out when something needs my answer before the work can be cal
 The report, before the question — in your own words, but cover all of it:
 
 <if:demo>- the demo's link (above), or why there is none;
-</if:demo>- the work in this session is done — what's ready, and what's left open;
+</if:demo><if:simplify>- what `/simplify` changed, in a line or two, or that it changed nothing;
+</if:simplify>- the work in this session is done — what's ready, and what's left open;
 - **each acceptance criterion by identifier, and where it stands**: done and verified how, done but unverified, or not done and why. Go through the list rather than summarising it — a criterion you don't mention reads as one you forgot, and this is the last moment it's cheap to fix. If there were no criteria, say that instead;
 <if:asks-accept>- that on `Accept` `sclaude` closes this session itself and goes on<if:in-parts> to the next part</if:in-parts>; without the question, that I should now close Claude with `/exit`.
 </if:asks-accept><if:in-parts>- the fresh-eyes rounds, a line each;

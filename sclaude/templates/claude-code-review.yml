@@ -672,9 +672,10 @@ jobs:
           # nine findings, in seven minutes. `high` reviews for recall rather
           # than for the fewest false positives; the run is now at `medium`,
           # the same eight angles for precision and at most eight findings
-          # (see REVIEW_EFFORT). Its `--comment` posts through
+          # (see REVIEW_EFFORT). The main session posts what it found through
           # `mcp__github_inline_comment__create_inline_comment`, which the
-          # whitelist below already allows.
+          # whitelist below already allows (see "A range target posts
+          # nothing").
           #
           # **A review after a push reads only the fixes.** One pass never
           # finds everything — on that pull request, five whole-PR passes found 10, 9, 8, 6
@@ -711,7 +712,8 @@ jobs:
           # **A dispatched run has no inline-comment tool.** The action starts
           # the `github_inline_comment` server only for a pull-request event;
           # on `workflow_dispatch` the session's `mcp_servers` is empty, and the
-          # command falls back to one ordinary comment. Findings there are not
+          # command fell back to one ordinary comment (the main session, which
+          # posts every finding now, does the same). Findings there are not
           # threads, so the findings check — which counts threads — read the ten
           # findings of that dispatch as none, and turned green. The review now
           # reports how many findings it could not post as threads, and that
@@ -727,9 +729,17 @@ jobs:
           # way — the findings check went red on `unthreaded` with nothing on
           # the pull request to answer, and each fixing session had to dig the
           # findings out of the run log. The main session has the inline-comment
-          # tool itself on a pull-request event, so it now posts whatever the
-          # command left unposted; on a dispatched run, which has no such tool,
-          # it puts them all in one ordinary comment instead.
+          # tool itself on a pull-request event, so it posts the findings; on a
+          # dispatched run, which has no such tool, it puts them all in one
+          # ordinary comment instead.
+          #
+          # **The main session posts every finding.** Since Claude Code
+          # 2.1.328 the command marks each finding Important, Pre-existing or
+          # Nit, and the fixing session weighs a finding by it. The command's
+          # own `--comment` posts without that mark, so it is no longer
+          # passed: the main session posts each finding, the minor ones
+          # opened by `<!-- sclaude:minor nit -->` or `… pre-existing -->`
+          # (**Coupled**: MINOR_MARK in sclaude's pr_context.py reads them).
           #
           # The paragraph about not ending a turn to wait stays: it is what
           # stood between this file and the fourth green-but-unreviewed cause,
@@ -764,7 +774,7 @@ jobs:
                say that this is why. Invoke the `code-review` skill with the
                Skill tool, with these arguments on one line:
 
-                   ${{ env.REVIEW_EFFORT }} --comment ${{ env.PR_NUMBER }} <scope>
+                   ${{ env.REVIEW_EFFORT }} ${{ env.PR_NUMBER }} <scope>
 
                where `<scope>` is plain words saying: review `git diff
                <base_sha>..<head_sha>` (or, when `base_sha` is null, the whole
@@ -785,19 +795,22 @@ jobs:
                the real values. The skill reads everything after its flags as
                its target, so that line is the only thing it is told.
 
-               Wait for it inside this turn. When it is done, check whether
-               it posted what it found. With a commit range as its target it
-               ignores `--comment` and says so ("Nothing was posted"), and it
-               may post only some findings for other reasons. Post every
-               finding it reported but did not post yourself, as an inline
+               Wait for it inside this turn. It posts nothing itself: when it
+               is done, post every finding it reported yourself, as an inline
                comment with `mcp__github_inline_comment__create_inline_comment`
                at its file and line on `head_sha`, the body being its summary
-               and failure scenario. One that cannot be placed on a line of
-               the diff goes, with any others like it, into one ordinary
-               comment via `gh pr comment`. If you have no
+               and failure scenario. The skill marks each finding Important,
+               Pre-existing or Nit; a Nit or a Pre-existing one is a minor
+               finding, which the fixing session weighs as such, so its
+               body's first line is exactly
+               `<!-- sclaude:minor nit -->` or
+               `<!-- sclaude:minor pre-existing -->`, then a blank line, then
+               the summary. One unmarked is Important. One that cannot be
+               placed on a line of the diff goes, with any others like it,
+               into one ordinary comment via `gh pr comment`. If you have no
                `mcp__github_inline_comment__create_inline_comment` tool at all
-               (a dispatched run has none), every finding it did not post goes
-               into that one ordinary comment instead.
+               (a dispatched run has none), every finding goes into that one
+               ordinary comment instead.
 
                Do not post yourself a finding that repeats one in `declined`
                (the same point, however worded or wherever placed), unless the

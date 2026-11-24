@@ -99,10 +99,13 @@ class World:
             fh.write("x\n")
         # A config, so the regression has something to say about this project —
         # without one the gate reports "no regression declared" and the step
-        # would close for a reason this bench is not about.
+        # would close for a reason this bench is not about. No polish round
+        # either: the gh stub answers no pull request the gate can read
+        # (`unknown`), on which step 4 owes one, and its session would stand
+        # between the gate and the transitions this bench is about.
         with open(_cfg(os.path.join(self.repo, ".sclaude/config.json")), "w") as fh:
             json.dump({"commands": {"noop": "true"},
-                       "regression": {"local": ["noop"]}}, fh)
+                       "regression": {"local": ["noop"]}, "simplify": "off"}, fh)
         git("add", "-A", cwd=self.repo)
         git("commit", "-qm", "first", cwd=self.repo)
 

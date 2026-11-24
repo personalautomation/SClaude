@@ -159,6 +159,22 @@ try:
         check("code-prompt-demo-%s" % bool(demo),
               ("/sdemo" in text, "the demo's link" in text, "the work in this session is done" in text),
               (want, want, True))
+    for cfg, want in (({}, "on"), ({"simplify": "off"}, "off"), ({"simplify": "no"}, "on")):
+        with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
+            json.dump(cfg, fh)
+        out, _, _ = run_bash('REPO=%s; project_simplify_mode' % modes, tmp)
+        check("simplify-mode-%s" % cfg.get("simplify", "absent"), out.strip(), want)
+    for simplify, want in (("1", True), ("", False)):
+        text = subprocess.run([sys.executable, os.path.join(LIB, "cycle", "render_prompt.py"),
+                               os.path.join(LIB, "..", "prompts", "code.md"),
+                               os.path.join(LIB, "..", "prompts")],
+                              capture_output=True, text=True,
+                              env=dict(os.environ, SCLAUDE_V_SIMPLIFY=simplify, SCLAUDE_V_FEATURE="x", SCLAUDE_V_NOT_IN_PARTS="1",
+                                       SCLAUDE_V_BASE="main")).stdout
+        check("code-prompt-simplify-%s" % bool(simplify),
+              ("/simplify" in text, "git diff main...HEAD" in text,
+               "what `/simplify` changed" in text, "the work in this session is done" in text),
+              (want, want, want, True))
     for cfg, want in (({}, "ask"), ({"ship": "auto"}, "auto"), ({"ship": "off"}, "off"), ({"ship": "yes"}, "ask")):
         with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
             json.dump(cfg, fh)

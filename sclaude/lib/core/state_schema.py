@@ -60,6 +60,8 @@ FIELDS = [
     ("steps.review.go_on_ceiling", (FEATURE,), "the rounds [g] may run before asking again"),
     ("steps.review.friction_held", (FEATURE,), "the friction review held for the person ([g]), by its key"),
     ("steps.review.left_open", (FEATURE,), "review threads left open at the close"),
+    ("steps.review.polish", (FEATURE,), "step 4's polish round (/simplify): `due` while its session is owed or open (review_polish_owe), cleared by the gate after it (review_polish_taken), by a rewind and by a block's close like the round's other fields"),
+    ("polished", (FEATURE,), "true once step 4's polish round was taken (review_polish_taken): once a feature, never cleared"),
     ("steps.review.local_told", (FEATURE,), "the head the local review's result was last told for"),
     ("steps.review.round_head", (FEATURE,), "the head a review round began on"),
     ("steps.review.round_open", (FEATURE,), "a review round is under way"),

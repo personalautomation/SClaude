@@ -119,6 +119,15 @@ rounds run; `[s]` (⏭ in the feature's topic) makes the next pass the last that
 looks for new findings, and `[g]` lets the rounds go on without asking
 ([A feature, start to finish](sclaude-guide.md#a-feature-start-to-finish)).
 
+**`GitHub did not answer about PR #N: step 4 closes on what the review last showed.`**
+— GitHub was unreachable as step 4 was closing. A network fault does not hold
+the step, so it closed without a final look. If the review was still running,
+check the pull request on GitHub; nothing else needs doing.
+
+**`Nothing is left open on PR #N: a polish round`** — the review found nothing
+more, and one session cleans the whole change with `/simplify` before step 4
+closes. Turn it off with `simplify: off` ([simplify](config.md#simplify)).
+
 **`Yours to resolve on GitHub — you decided to leave these as they are:`** —
 threads you chose to leave still count as open until resolved. Open each link,
 press *Resolve conversation*, then answer `y`.

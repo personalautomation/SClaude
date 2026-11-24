@@ -1055,7 +1055,7 @@ after_step() {
         extend_acceptance "$wt" reworded
         reword_acceptance "$wt"
       fi
-      if blocks_active "$wt" && (( $(blocks_now "$wt") < $(blocks_total "$wt") )); then
+      if blocks_before_last "$wt"; then
         info "  The review of $(blocks_label "$wt") of PR #${pr:-?} closed."
       elif [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."

@@ -115,6 +115,12 @@ hands them to the review session, and reads replies that begin with two marks:
 finding the review could not post as a thread may go into one ordinary comment
 by the login `claude`.
 
+**Minor findings are marked.** A nit, or a bug that was there before the
+change, is posted like any finding but opens with the line
+"<!-- sclaude:minor nit -->" or "<!-- sclaude:minor pre-existing -->". It is
+open work like any other; the mark tells step 4's session how much it weighs.
+A workflow that marks nothing has every finding treated as important.
+
 **The job log.** Keep the action's full output in the log (`show_full_output:
 true`). sclaude reads it to tell why a review did not run: Claude's usage limit
 and when it resets, Actions minutes or billing, a runner that could not reach

@@ -96,6 +96,13 @@ CHOICES["demo"] = [
     ("off", "no demo videos: the report and the criteria are the check"),
 ]
 
+CHOICES["simplify"] = [
+    ("on", "/simplify cleans the code in step 2 before its question (each "
+           "part's too), and once more over the whole pull request in a "
+           "polish round when step 4's review has nothing left open"),
+    ("off", "no /simplify, and no polish round"),
+]
+
 CHOICES["demoVoice"] = [
     ("on", "a recorded demo is spoken: each step's line and each scenario's "
            "card, in English, by a model on this machine's CPU (~350 MB, once)"),

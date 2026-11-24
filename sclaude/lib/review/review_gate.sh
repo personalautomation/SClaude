@@ -121,8 +121,10 @@ review_entry_place() {
 #
 #   review_close_gate <wt> <slug> <pr> [entry|quiet]
 #
-# Its answer, as `pr_context.py --close` gives it: `ok`, `pending` or
-# `open: <why>`. Anything unreadable is `ok`.
+# Its answer, as `pr_context.py --close` gives it: `ok`, `pending`,
+# `open: <why>`, `yours: <n>`, `gone: merged|closed` or `unknown`
+# (close_state). Neither of the last two holds the step: it closes saying
+# why, not as a clean review.
 #
 # With `entry` or `quiet`, the same gate opens step 4, before any session.
 # `quiet` writes none of the gate's ways to the history: run_step gives it
@@ -142,7 +144,7 @@ review_entry_place() {
 # session run_step opens.
 review_close_gate() {
   local wt="$1" slug="$2" pr="$3" entry="${4:-}" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
-  local gate_reported=0 question=--close skippable=1 edges=1 unfinished=0
+  local gate_reported=0 question=--close skippable=1 edges=1 unfinished=0 ran_out=""
   if [[ -n "$entry" ]]; then
     question=--state
     [[ "$entry" == quiet ]] && edges=0
@@ -153,12 +155,16 @@ review_close_gate() {
     review_skippable "$wt" "$slug" || skippable=0
   fi
   REVIEW_ENTRY_WORD="" REVIEW_ENTRY_COUNT=""
+  # The polish round's session, if this gate follows one, is over.
+  [[ -n "$entry" ]] || review_polish_taken "$wt"
   # Where the way back to a session starts: the gate, or the local review
   # when the gate's own pass found something.
   local back_from=review_close
   # Who let the step close, for the history's way out of the gate, written
   # as the step closes (after_step); the way back is written here.
   REVIEW_CLOSE_BY=sclaude REVIEW_CLOSE_HOW="nothing open on the PR" REVIEW_CLOSE_NOTE=""
+  # The person let a head go unreviewed: no polish round on it (review_polish_due).
+  REVIEW_UNREVIEWED=""
   # No pull request to ask: the way out lets the step close, the way in
   # opens the session, as it did before the gate was asked there.
   local unread=0; [[ -n "$entry" ]] && unread=1
@@ -245,8 +251,11 @@ review_close_gate() {
     # does not hold it: the session goes on from the next head, and the next
     # run reads only the commits after this one — what this delta skipped
     # would be read by nobody.
-    if [[ "$local_due" -eq 0 && "$word" != pending && "$word" != unfinished && "$word" != unknown \
-          && "$word" != unreviewed && "$word" != *"not pushed"* && "$word" != *"still names"* ]] \
+    local word_read=1
+    case "$word" in
+      pending|unfinished|unknown|unreviewed|gone:*|*"not pushed"*|*"still names"*) word_read=0 ;;
+    esac
+    if [[ "$local_due" -eq 0 && "$word_read" -eq 1 ]] \
         && [[ "$followed_head" != "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]] \
         && [[ "$(project_review_mode "$wt")" == github && -z "$(review_enough "$wt")" ]]; then
       followed_head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
@@ -330,7 +339,9 @@ review_close_gate() {
     # On the way in the local pass comes first, whatever is still running:
     # what it finds is the session's; a wait is only for a close.
     if [[ "$word" != "pending" || ( -n "$entry" && "$local_due" -eq 1 ) ]]; then
-      if [[ "$local_due" -eq 1 ]] && [[ -n "$entry" || "$word" == "ok" || "$word" == yours:* \
+      # `unknown` as `ok`: GitHub not answering is no reason to skip the pass,
+      # which says so itself when it cannot post.
+      if [[ "$local_due" -eq 1 ]] && [[ -n "$entry" || "$word" == "ok" || "$word" == unknown || "$word" == yours:* \
             || "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
         local_due=0
         local count
@@ -449,7 +460,8 @@ review_close_gate() {
             return 1
           fi
           is_yes "$answer" && REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" \
-            REVIEW_CLOSE_NOTE="the head unreviewed: the review on this machine did not complete"
+            REVIEW_CLOSE_NOTE="the head unreviewed: the review on this machine did not complete" \
+            REVIEW_UNREVIEWED=1
           if ! is_yes "$answer"; then
             info "  Reviewing it again; Ctrl-C leaves, and the next \`$SELF\` starts it again."
             local_due=1
@@ -483,7 +495,7 @@ review_close_gate() {
       break
     fi
     if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
-      word="open: the automatic review of PR #$pr has not finished"
+      word="open: the automatic review of PR #$pr has not finished" ran_out=1
       break
     fi
     if [[ "$announced" -eq 0 ]]; then
@@ -572,6 +584,28 @@ review_close_gate() {
     review_close_gate "$wt" "$slug" "$pr"
     return $?
   fi
+  # Nothing left open: a polish round is owed before the step closes,
+  # /simplify over the whole pull request (review_polish_due). It is open
+  # work like any, and goes back to a session the way below — held the same
+  # when the person left the last session, counted against [g]'s ceiling.
+  # GitHub not answering keeps it owed: one failed look would otherwise lose
+  # it for good, no later gate asking again.
+  local polish=0
+  if [[ "$word" == ok || "$word" == unknown ]] && review_polish_due "$wt"; then
+    review_polish_owe "$wt"
+    polish=1
+    word="open: a polish round is owed — /simplify over the whole change"
+  fi
+  # A pull request merged or closed, or one GitHub did not answer about:
+  # nothing holds the step, and it closes saying so, not as a clean review.
+  case "$word" in
+    gone:*)
+      REVIEW_CLOSE_HOW="the PR is ${word#gone: }"
+      info "  PR #$pr is ${word#gone: }: step 4 closes, nothing more to read on it." ;;
+    unknown)
+      REVIEW_CLOSE_HOW="the PR could not be read"
+      warn "  GitHub did not answer about PR #$pr: step 4 closes on what the review last showed." ;;
+  esac
   [[ "$word" == open:* ]] || review_close_report "$wt" "$slug" "$gate_reported" "$announced"
   [[ "$word" == open:* ]] || return 0
 
@@ -590,8 +624,9 @@ review_close_gate() {
   # And where the last round left it, counted from the fix session's last
   # look: what the review confirmed fixed, what the session had seen and
   # did not fix, what the review found since (brief in pr_context.py).
-  local standing
-  standing="$(python3 "$LIB/review/pr_context.py" --brief "$wt" "$pr" "$repo" \
+  # Not for the polish round: nothing is open, and its line says so.
+  local standing=""
+  [[ "$polish" -eq 1 ]] || standing="$(python3 "$LIB/review/pr_context.py" --brief "$wt" "$pr" "$repo" \
                 "$(review_last_look "$wt")" 2>/dev/null || true)"
   if [[ "$word" =~ ^open:\ ([0-9]+\ review\ thread\(s\)\ open|the\ review\ on\ this\ machine\ leaves\ [0-9]+\ finding\(s\)\ open)$ ]]; then
     # Printed by this gate's own pass just now; else asked again, and said
@@ -606,6 +641,14 @@ review_close_gate() {
     ask_feed say "Step 4 is not done — ${word#open: }."
     ask_note "Step 4 is not done — ${word#open: }."
     [[ -n "$standing" ]] && { ask_feed say "$standing"; ask_note "  $standing"; }
+  elif [[ "$polish" -eq 1 ]]; then
+    # No failure: nothing is open. info keeps it for [g]'s ceiling question
+    # too (ask_note), which would otherwise not say what "it" is.
+    local told="Nothing is left open on PR #$pr: a polish round — /simplify over the whole change."
+    echo ""
+    info "  $told"
+    # To the phone too: info's indented line stays in the terminal's feed.
+    ask_feed say "$told"
   else
     # The round's table, owed by a session's end that left it to a pass this
     # gate did not run.
@@ -625,8 +668,8 @@ review_close_gate() {
     review_go_on_round "$wt" && go_on=1 || go_on=2
   fi
   # Said before the next session: the rounds stopping converging is what
-  # [s] is for.
-  review_stuck_say "$wt"
+  # [s] is for — not before the polish round, which finds nothing to stop.
+  [[ "$polish" -eq 1 ]] || review_stuck_say "$wt"
   # Except after the person left the session (/exit, Ctrl-C) with [g] off:
   # that is their word to stop, and going back unasked reopened the same
   # conversation within seconds when it had committed nothing new.
@@ -647,9 +690,15 @@ review_close_gate() {
   if is_yes "$answer"; then
     review_back_edge "$wt" "$back_from" "$back_by" "$back_how" note="${word#open: }"
     # A session sclaude closed: review_reopen picks the session, a fresh one
-    # for a new round, as it does unasked.
-    if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
-      review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
+    # for a new round, as it does unasked. Not the polish round's: its
+    # session is a fresh one already (review_polish_owe), and review_reopen
+    # would read GitHub again and may say the rounds are stuck, which the
+    # polish is not.
+    if [[ -n "${SESSION_AUTO_CLOSED:-}" && "$polish" -eq 0 ]]; then
+      # Whether the wait gave up on the review, not the seconds it took: a
+      # look after the last poll can find the review done, its findings for a
+      # session.
+      review_reopen "$wt" "$slug" "$pr" "$repo" "$ran_out"
       return 1
     fi
     run_step "$wt" "$slug" review
@@ -662,7 +711,72 @@ review_close_gate() {
     return 1
   fi
   REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="closed anyway: ${word#open: }"
+  # A polish round declined is not one taken: a later gate (a regression's
+  # fix pushed) would otherwise count it so (review_polish_taken), and a
+  # later step 4 owes it again.
+  [[ "$polish" -eq 0 ]] || state_set "$wt/.sclaude/local/feature/state.json" steps.review.polish null
   return 0
+}
+
+# Step 4's polish round, two marks of two scopes. `steps.review.polish` is
+# `due` while its session is owed or open — review_skippable keeps the way in
+# from skipping it, and render_prompt reads it as <if:polish> — a mark of the
+# round, gone with the round's other fields (step_rewind_to, blocks_next).
+# `polished`, the feature's, says the round was taken, from the first gate
+# after its session (review_polish_taken), so that the rounds after it are
+# ordinary ones: once a feature, nothing clears it.
+#
+# Owed when the gate's answer leaves nothing open on a head the review read
+# (`ok`, or `unknown`; never `gone`, a pull request merged or closed) — not
+# under `review: off`, not on a head the person let go unreviewed — with
+# `simplify` on, not once the person ended the search (they stopped the
+# rounds to stop paying for them), and not while blocks before the last are
+# read: /simplify reads the whole pull request, which the blocks after are
+# still to review. 1 when none is owed.
+#
+#   review_polish_due <wt>
+review_polish_due() {
+  local wt="$1"
+  # The cheapest first: once taken, nothing else is asked.
+  [[ "$(state_get "$wt/.sclaude/local/feature/state.json" polished 2>/dev/null || true)" == true ]] && return 1
+  [[ -z "${REVIEW_UNREVIEWED:-}" ]] || return 1
+  [[ "$(project_simplify_mode "$wt")" == on && "$(project_review_mode "$wt")" != off ]] || return 1
+  [[ -z "$(review_enough "$wt")" ]] || return 1
+  declare -F blocks_before_last >/dev/null && blocks_before_last "$wt" && return 1
+  return 0
+}
+
+# Whether the polish round is owed now (`due`): its session's prompt says so
+# (<if:polish>, render_prompt) and the way in does not skip it
+# (review_skippable).
+#
+#   review_polish_is_due <wt>
+review_polish_is_due() {
+  [[ "$(state_get "$1/.sclaude/local/feature/state.json" steps.review.polish 2>/dev/null || true)" == due ]]
+}
+
+# The polish round owed (`due`), for a fresh session — the conversation
+# before it was about findings, and its prompt is the round's own. The gate
+# sends it back the way it sends any open work; its push takes the ordinary
+# review pass, and the gate after it closes the step — or, the review finding
+# something in it, sends that the ordinary way.
+#
+#   review_polish_owe <wt>
+review_polish_owe() {
+  local state="$1/.sclaude/local/feature/state.json"
+  state_set "$state" steps.review.polish due
+  state_set "$state" steps.review.session null
+}
+
+# The gate after the polish round's session: the round is taken, whatever
+# its session did — left with /exit too, the person's word on it.
+#
+#   review_polish_taken <wt>
+review_polish_taken() {
+  local state="$1/.sclaude/local/feature/state.json"
+  review_polish_is_due "$1" || return 0
+  state_set "$state" polished true
+  state_set "$state" steps.review.polish null
 }
 
 # Step 4 closes with the findings the review in Actions posted after the
@@ -909,14 +1023,11 @@ cmd_checks() {
 #
 #   review_close_words <wt>
 review_close_words() {
-  local bk bt
-  if declare -F blocks_active >/dev/null && blocks_active "$1"; then
-    bk="$(blocks_now "$1")"; bt="$(blocks_total "$1")"
-    if [[ "$bk" =~ ^[0-9]+$ && "$bt" =~ ^[0-9]+$ ]] && (( bk < bt )); then
-      local now next; now="$(blocks_label "$1" "$bk" "$bt")"; next="$(blocks_label "$1" $((bk + 1)) "$bt")"
-      printf 'Close %s now and go on to %s\nClose %s\n' "$now" "$next" "$now"
-      return 0
-    fi
+  if declare -F blocks_before_last >/dev/null && blocks_before_last "$1"; then
+    local bk bt now next; bk="$(blocks_now "$1")"; bt="$(blocks_total "$1")"
+    now="$(blocks_label "$1" "$bk" "$bt")"; next="$(blocks_label "$1" $((bk + 1)) "$bt")"
+    printf 'Close %s now and go on to %s\nClose %s\n' "$now" "$next" "$now"
+    return 0
   fi
   printf 'Close step 4 now\nClose step 4\n'
 }

@@ -65,17 +65,22 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import fits, pr_file, pr_folder, write_pr_file  # noqa: E402
-from pr_context import (LOCAL_SIGNATURE, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
+from pr_context import (LOCAL_SIGNATURE, MINOR_KINDS, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
                         QUOTA_LIMIT, decline_of, gh, headline, quota_reset,
-                        review_threads, signed_locally, split_yours, thread_line, yours)
+                        minor_mark, review_threads, signed_locally, split_yours, thread_line, yours)
 
 JOURNAL = ".sclaude/local/feature/review-rounds.jsonl"
 
 
-# A finding's heading as the prompt asks for it, `### <path>:<line> — <title>`,
-# and the ways a model drifts from it: the path in backticks, a range of
-# lines, a hyphen or en dash for the em dash.
+# A finding's heading as the prompt asks for it, `### <path>:<line> —
+# [<severity>] <title>`, and the ways a model drifts from it: the path in
+# backticks, a range of lines, a hyphen or en dash for the em dash, the
+# severity left out (important) or in another case.
 HEADING = re.compile(r"^###\s+`?(.+?):(\d+)(?:[-–]\d+)?`?\s+[—–-]\s+(.*)$")
+# The severity `/code-review` gives a finding, as the prompt asks it at the
+# head of the title; nit and pre-existing are posted minor (MINOR_MARK in
+# pr_context.py), open work all the same, weighed by the fix session.
+SEVERITY = re.compile(r"^\[\s*(important|nit|pre[-_ ]existing)\s*\]\s*", re.I)
 RESOLVED = re.compile(r"^\s*RESOLVED:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
 COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
 # The files a reviewer read in full (sreview asks for it): ends the finding
@@ -271,8 +276,14 @@ def parse(answer):
     for line in answer.splitlines():
         m = HEADING.match(line)
         if m:
+            title = m.group(3).strip()
+            tag = SEVERITY.match(title)
+            severity = "important"
+            if tag:
+                severity = re.sub(r"[-_ ]", "-", tag.group(1).lower())
+                title = title[tag.end():].strip()
             current = {"path": m.group(1), "line": int(m.group(2)),
-                       "title": m.group(3).strip(), "body": []}
+                       "title": title, "severity": severity, "body": []}
             found.append(current)
             continue
         r = RESOLVED.match(line)
@@ -298,7 +309,14 @@ def parse(answer):
 def post(cwd, pr, repo, head, f):
     """One finding as a thread on its line, else on its file, else in the
     conversation: "thread", "conversation", or None when GitHub took none."""
-    body = "**%s**\n\n%s\n\n%s · %s</sub>" % (f["title"], f["body"], LOCAL_SIGNATURE, head[:7])
+    # A minor finding's marker goes first, above the outside-the-diff line.
+    minor = f.get("severity") if f.get("severity") in MINOR_KINDS else ""
+
+    def marked(text):
+        return "%s\n\n%s" % (minor_mark(minor), text) if minor else text
+
+    core = "**%s**\n\n%s\n\n%s · %s</sub>" % (f["title"], f["body"], LOCAL_SIGNATURE, head[:7])
+    body = marked(core)
     base = ["api", "repos/%s/pulls/%s/comments" % (repo, pr), "-f", "body=%s" % body,
             "-f", "commit_id=%s" % head, "-f", "path=%s" % f["path"]]
     out, refused = gh_try(base + ["-F", "line=%d" % f["line"], "-f", "side=RIGHT"], cwd)
@@ -309,7 +327,7 @@ def post(cwd, pr, repo, head, f):
     # GitHub takes a line only inside the diff's hunks, and a finding often
     # points at unchanged code beside them. On the file the thread has no
     # line of its own, so the body names it.
-    body = (OUTSIDE_DIFF + "\n\n%s") % (f["line"], body)
+    body = marked((OUTSIDE_DIFF + "\n\n%s") % (f["line"], core))
     base[base.index("-f") + 1] = "body=%s" % body
     out, refused = gh_try(base + ["-f", "subject_type=file"], cwd)
     if out is not None:
@@ -320,9 +338,9 @@ def post(cwd, pr, repo, head, f):
     # In the conversation it has no thread to resolve, so it is not signed as
     # the review's own: there it is a comment to answer, what people said,
     # and step 4 does not close past it.
-    text = ("`%s:%d` (not in this pull request's diff) — **%s**\n\n%s\n\n"
+    text = ("`%s:%d` (not in this pull request's diff) — %s**%s**\n\n%s\n\n"
             "_From the review run on this machine, on %s._"
-            % (f["path"], f["line"], f["title"], f["body"], head[:7]))
+            % (f["path"], f["line"], "(%s) " % minor if minor else "", f["title"], f["body"], head[:7]))
     if gh(["pr", "comment", str(pr), "--body", text], cwd) is not None:
         return "conversation"
     return None

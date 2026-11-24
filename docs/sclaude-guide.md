@@ -146,7 +146,8 @@ as an issue of their own and takes them off the issue's list.
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.
 Claude checks its work in Chrome at the feature's address. Before it asks, it
-records a demo of the feature, on a desktop and on a phone
+cleans the code with Claude Code's `/simplify` — a part's session, its part —
+(`simplify: off` leaves that out) and records a demo of the feature, on a desktop and on a phone
 ([skills/sdemo](tools.md#skillssdemo)) — after your remarks that changed the code, a
 short delta of only what changed for a user, then the whole demo again — and
 gives the link first in its report; the link
@@ -169,8 +170,13 @@ a session fixes what it found, one round at a time. After every round —
 including the rounds a session takes up by itself — sclaude prints the review
 report in its terminal and sends it to the feature's topic: per round, what
 was found and how much of it sat on earlier fixes, and what the fix took and
-cost. The step closes when the review has nothing left open, the preview is
-deployed and its tests pass.
+cost. The review marks each finding important, a nit, or a bug older than the
+change, and the session weighs a finding by that mark: a minor one is the
+readiest to leave with a reason, and an older bug too big for this change is
+filed as an issue of its own. Once nothing is left open, one **polish round**
+runs before the step closes: `/simplify` over the whole pull request (with
+`simplify: on`). Its push is reviewed like any. The step closes when the review has
+nothing left open, the preview is deployed and its tests pass.
 A pull request too big for one review to read well — past 5,000 changed lines,
 generated files left out — is read in **review blocks**. As step 4 starts, a
 session cuts it once: each block is a group of the plan's criteria with the
@@ -357,7 +363,7 @@ began, whatever their kind:
 | 1. plan | opus / high | `plan` | Discussion; the only file it may write is the plan | a row |
 | 2. code | opus / medium | `auto` | Implementation, checking in Chrome, commits | a row |
 | 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill | a row |
-| 4. review | opus / medium | `auto` | Fixing review findings, one round at a time; a QA hand-back or a production rollback reopens it | a row per session, with its rounds |
+| 4. review | opus / medium | `auto` | Fixing review findings, one round at a time, then one polish round (`/simplify`); a QA hand-back or a production rollback reopens it | a row per session, with its rounds |
 | fix after a regression | as step 2 for the local tests, as step 4 for the preview's and production's | `auto` | Makes red tests green; after a rollback it is told what failed on production | a row per session, with how it ended |
 | 5. sync | sonnet / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed | a row per session |
 | 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |

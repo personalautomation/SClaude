@@ -11,7 +11,7 @@ product may hand to sclaude.
 | plan | a plan you approved, with criteria |
 | code | your yes **and** the product's tests passing |
 | pr | a pull request that exists on GitHub |
-| review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. No session at all when the review found nothing. The preview and its tests come after the step: a red preview puts the feature back on it |
+| review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. Each finding is marked important, a nit, or a bug older than the change, and the fixing session weighs it by that mark. Once nothing is left open, one polish round runs `/simplify` over the whole change before the step closes. No session at all when the review found nothing and there is nothing to polish. The preview and its tests come after the step: a red preview puts the feature back on it |
 | fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you. A session that finds the cause outside the branch changes nothing and leaves a note; the tests then run once more by themselves (a flaky test goes green), and a second such note stops the cycle with it for you. A note is kept in the feature's `regression.notes` once it is answered, for whatever it says would have to change |
 | sync | sclaude's own check after the session: no merge left under way, nothing uncommitted, the branch merging cleanly with main, and pushed. Otherwise the session is offered again. Then the preview, its tests and QA run on what it pushed |
 | epilogue | the session actually ran; one that never started is offered again from the menu |
@@ -247,6 +247,10 @@ before its question, and it is recorded again when the code changed since —
 before QA, or before the last epilogue with `qa: auto` (or `auto-own` on your
 own issue)) and `off` (no demo videos anywhere in the cycle; the report and the
 criteria are the check).
+`simplify` takes `on` (the default: Claude Code's `/simplify` cleans the
+code in step 2 before its question, each part's session over its part, and
+once more over the whole pull request in step 4's polish round) and `off` (no
+`/simplify`, and no polish round).
 `demoVoice` takes `on` (the default: the demo's videos are spoken, in English,
 by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo))
 and `off` (silent videos, the captions alone).

@@ -483,6 +483,32 @@ try:
     check("partial-cached-count", out.strip(), str(open_before + 2))
     prompts()
 
+    # The severity /code-review gives a finding rides in its heading; a nit
+    # or a pre-existing bug is posted with the minor mark, open work all the
+    # same.
+    found, _, _ = local_review.parse(
+        "### a.ts:1 — [important] real\nx\n### b.ts:2 — [Nit] small\ny\n"
+        "### c.ts:3 — [pre_existing] old\nz\n### d.ts:4 — untagged\nw\nFINDINGS: 4\n")
+    check("severity-read", [(f["severity"], f["title"]) for f in found],
+          [("important", "real"), ("nit", "small"), ("pre-existing", "old"), ("important", "untagged")])
+    write(os.path.join(repo, "a.txt"), "e5\n")
+    git("commit", "-qam", "more5", cwd=repo)
+    git("push", "-q", cwd=repo)
+    open_before = sum(1 for t in threads() if not t["isResolved"])
+    out, _, rc = review("### a.txt:1 — [nit] a nit\nx\n\n### fileonly:9 — [pre-existing] older\ny\n\nFINDINGS: 2\n")
+    check("minor-rc", rc, 0)
+    check("minor-counted-open", out.strip(), str(open_before + 2))
+    minor_threads = threads()[-2:]
+    check("minor-marked", [pr_context.minor_of(t["comments"][0]["body"]) for t in minor_threads],
+          ["nit", "pre-existing"])
+    check("minor-headline", pr_context.headline(minor_threads[1]["comments"][0]["body"]), "**older**")
+    check("minor-file-level-line", pr_context.outside_diff(minor_threads[1]["comments"][0]["body"]), 9)
+    # They stay a review's own, for a later run to resolve.
+    check("minor-checkable", all(pr_context.signed_locally(t["comments"][0]["body"]) for t in minor_threads), True)
+    prompts()
+    # The answer the stub falls back on, as the steps after this expect it.
+    write(os.path.join(tmp, "answer"), "FINDINGS: 0\n" + local_review.DONE + "\n")
+
     # The journal dates a run by its start, as the workflow's runs are dated.
     with open(journal) as fh:
         last = json.loads(fh.read().splitlines()[-1])

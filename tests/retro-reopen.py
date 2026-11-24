@@ -45,7 +45,7 @@ def check(name, got, want):
 def run_bash(script, cwd, bin_dir):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; OFF=""; REPO=%s\n' % cwd
-    for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/branches", "improve/retro"):
+    for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/branches", "tree/sync", "improve/retro"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('info() { :; }; warn() { :; }\n'
              'issue_sync() { echo SYNC; }\n'

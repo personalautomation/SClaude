@@ -92,6 +92,13 @@ when the review runs again and runs it then, asking nothing.
 of main was left half done. Finish it with `sclaude sync <name>` or back it out
 with `git -C <tree> merge --abort`.
 
+**`A rebase (or a git am) is under way in the tree; the step has not been started.`** — a
+rebase was left half done: one stopped on a conflict, or broken off. Finish it,
+or back it out with `git -C <tree> rebase --abort` (`git -C <tree> am --abort`
+for an am). sclaude backs out the
+rebases it starts itself and puts the branch back; when it cannot, it says
+**`… could not be put back at <head>: look at git status in <tree>`** instead.
+
 **`the main checkout could not be fast-forwarded to origin/main`** at
 `sclaude new` — an edit or a commit of its own in the main checkout. Clear it,
 then run the `git merge --ff-only origin/main` the message shows.

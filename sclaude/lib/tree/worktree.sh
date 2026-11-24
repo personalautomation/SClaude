@@ -1296,7 +1296,7 @@ sync_branch() {
   # step: its files may carry conflict markers. First of all: before the
   # count of what main has, which a merge that took it all would put at none,
   # and before the check on uncommitted work its staged files would pass for.
-  if merge_under_way "$wt"; then
+  if merge_under_way "$wt" || rebase_under_way "$wt"; then
     sync_branch_held "$wt" "$slug"
     return 1
   fi
@@ -1399,6 +1399,13 @@ sync_branch() {
 #   sync_branch_held <wt> <slug>
 sync_branch_held() {
   warn ""
+  if rebase_under_way "$1"; then
+    # A rebase left under way: its staged files would pass for uncommitted
+    # work, and the step would open on a branch that is not checked out.
+    warn "  A rebase (or a git am) is under way in the tree; the step has not been started."
+    warn "  Finish it, or back it out: git -C $1 rebase --abort   (git -C $1 am --abort for an am)"
+    return 0
+  fi
   warn "  A merge is under way in the tree; the step has not been started."
   warn "  Finish it with: sclaude sync ${2:-<feature>}   or back it out: git -C $1 merge --abort"
 }
@@ -1436,10 +1443,11 @@ sync_unpublished() {
   [[ -z "$remote" ]] || return 0
   behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0
   [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]] || return 0
+  local orig; orig="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   if git -C "$wt" rebase -q origin/main >/dev/null 2>&1; then
     info "  branch: not pushed yet, so put on top of origin/main ($behind commit(s) behind it)"
-  else
-    git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+  elif ! rebase_back "$wt" "$branch" "$orig"; then
+    warn "  branch: putting it on top of origin/main stopped, and $branch could not be put back at ${orig:0:8}: look at git status in $wt"
   fi
   return 0
 }

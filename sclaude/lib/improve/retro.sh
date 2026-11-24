@@ -494,13 +494,17 @@ retro_move_past() {
   if [[ -n "$gone" ]] && ! git -C "$wt" push -q --no-verify origin --delete "$branch" >/dev/null 2>&1; then
     return 0
   fi
+  local orig; orig="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   if git -C "$wt" rebase -q --onto origin/main "$head" >/dev/null 2>&1; then
     # Step 3 is told by this, not by guessing from the history (retro_pr_range).
     state_set "$wt/.sclaude/local/feature/state.json" retro.moved "$(git -C "$wt" rev-parse origin/main)" 2>/dev/null || true
     info "  branch: its $n commit(s) past the merged pull request now stand on origin/main"
   else
-    git -C "$wt" rebase --abort >/dev/null 2>&1 || true
-    info "  branch: its commits past the merged pull request do not move onto origin/main cleanly; main is merged in before step 3"
+    if rebase_back "$wt" "$branch" "$orig"; then
+      info "  branch: its commits past the merged pull request do not move onto origin/main cleanly; main is merged in before step 3"
+    else
+      warn "  branch: moving its commits onto origin/main stopped, and $branch could not be put back at ${orig:0:8}: look at git status in $wt before step 3"
+    fi
   fi
   return 0
 }

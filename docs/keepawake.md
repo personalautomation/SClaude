@@ -372,8 +372,9 @@ how many findings it leaves open), and so is a plan a session changed, by how
 much: "Plan changed · +3 −1 lines" — the lines that changed are printed in the terminal.
 A step 4 session is a fix session: it fixes what the review found. Its line
 says what it is handed — "Step 4/7 review: fix session 1 resumed · findings:
-2 not fixed yet, 4 new · red: tests" — and the "Step 4 is not done" warning
-where the last round left the review: "findings: 3 fixed, 1 declined, 2 not
+2 not fixed yet, 4 new · red: tests" — and the "Step 4 is not done" line,
+without a sound since the next session opens by itself, where the last round
+left the review: "findings: 3 fixed, 1 declined, 2 not
 fixed yet, 4 new, 1 on lines since changed · 1 left to you · red: tests"
 (`brief` in `pr_context.py`). Both count from the fix session's last look at
 the pull request, its transcript's last entry: fixed and declined are the

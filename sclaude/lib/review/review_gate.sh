@@ -601,9 +601,11 @@ review_close_gate() {
     # And kept for a question that may follow ([g]'s ceiling, then "Close
     # step 4 anyway?"): the phone shows a question with the lines before it
     # (ask_note), and this is what that question is about.
-    ask_feed warn "Step 4 is not done — ${word#open: }."
+    # Without a sound: the next session opens by itself, and a question that
+    # may follow rings on its own, with these lines in its context.
+    ask_feed say "Step 4 is not done — ${word#open: }."
     ask_note "Step 4 is not done — ${word#open: }."
-    [[ -n "$standing" ]] && { ask_feed warn "  $standing"; ask_note "  $standing"; }
+    [[ -n "$standing" ]] && { ask_feed say "$standing"; ask_note "  $standing"; }
   else
     # The round's table, owed by a session's end that left it to a pass this
     # gate did not run.

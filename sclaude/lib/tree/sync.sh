@@ -59,6 +59,37 @@ merge_under_way() {
   [[ -n "$(git -C "$1" rev-parse -q --verify MERGE_HEAD 2>/dev/null)" ]]
 }
 
+# Whether a rebase is under way in the tree: one stopped on a conflict, or
+# broken off, that nobody finished or backed out.
+rebase_under_way() {
+  local d
+  for d in rebase-merge rebase-apply; do
+    [[ -d "$(git -C "$1" rev-parse --path-format=absolute --git-path "$d" 2>/dev/null)" ]] && return 0
+  done
+  return 1
+}
+
+# A rebase that did not go through, backed out: the branch put back where it
+# stood. `rebase --abort` can fail (a lock another git process holds, a run
+# broken off mid-way); then, while the rebase is still under way, the branch
+# is reset to its old head first and the rebase dropped only once that worked
+# — dropped first, a failed reset would leave a detached, conflicted tree with
+# nothing to say a rebase was under way. A rebase that never started (git
+# refused it: uncommitted work) has nothing to undo, and the tree is left as
+# it is. Fails when the branch is not back, for the caller to say so rather
+# than to report the move as backed out.
+#
+#   rebase_back <wt> <branch> <old head>
+rebase_back() {
+  local wt="$1" branch="$2" orig="$3"
+  if rebase_under_way "$wt" && ! git -C "$wt" rebase --abort >/dev/null 2>&1; then
+    git -C "$wt" checkout -q -f -B "$branch" "$orig" >/dev/null 2>&1 \
+      && git -C "$wt" rebase --quit >/dev/null 2>&1
+  fi
+  [[ "$(git -C "$wt" symbolic-ref -q HEAD 2>/dev/null)" == "refs/heads/$branch" \
+     && "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" == "$orig" ]] && ! rebase_under_way "$wt"
+}
+
 # Whether the tree holds no uncommitted change to a tracked file.
 tree_clean() {
   [[ -z "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" ]]

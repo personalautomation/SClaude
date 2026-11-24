@@ -156,6 +156,9 @@ TRAILER = re.compile(r"^[A-Za-z][\w-]*: \S")
 # What sreview names its own rounds by: they fix the change, they are not it.
 ROUND = re.compile(r"^fix(\([^)]*\))?: review iteration\b")
 
+# A commit that only follows the change in the docs: not a change of its own.
+DOCS = re.compile(r"^docs(\([^)]*\))?!?:")
+
 
 def squash_message(workshop, base):
     shas = git(workshop, "rev-list", "--reverse", "%s..HEAD" % base).split()
@@ -164,14 +167,19 @@ def squash_message(workshop, base):
         return ""
     if len(messages) == 1:
         return git(workshop, "log", "-1", "--format=%B", shas[0]).strip() + "\n"
-    lead = next((m for m in messages if not ROUND.match(m[0])), messages[0])
+    lead = next((m for m in messages if not ROUND.match(m[0]) and not DOCS.match(m[0])),
+                next((m for m in messages if not ROUND.match(m[0])), messages[0]))
     others = [m[0] for m in messages if m is not lead]
     trailers = []
     for m in messages:
         for line in m[2]:
             if line not in trailers:
                 trailers.append(line)
-    parts = [lead[0]]
+    # The subject names how many more changes the squash carries, besides
+    # sreview's rounds and docs: one change's subject alone over twenty
+    # commits read as if that were all that went out.
+    more = sum(1 for m in messages if m is not lead and not ROUND.match(m[0]) and not DOCS.match(m[0]))
+    parts = [lead[0] + (", and %d more change%s" % (more, "" if more == 1 else "s") if more else "")]
     if lead[1]:
         parts.append(lead[1])
     parts.append("Also in this change:\n" + "\n".join("- %s" % s for s in others))

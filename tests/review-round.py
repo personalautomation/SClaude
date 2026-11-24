@@ -1195,7 +1195,7 @@ echo "watcher=[$SESSION_WATCHER]"
           and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in RUN
           and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report_unshown "$wt" "$slug"' in RUN, True)
     check("not-done-says-where-it-stands",
-          'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
+          'warn "  $standing"' in gate and 'ask_feed say "$standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
     check("resumed-review-says-what-it-is-handed",
           '${brief:+ · $brief}' in RUN

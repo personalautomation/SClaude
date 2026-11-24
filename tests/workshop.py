@@ -215,6 +215,25 @@ export SCLAUDE_SESSION=%(session)s
     check("published-squashed", log.splitlines()[0], "feat(sclaude): the tool says more")
     body = git(origin, "log", "-1", "--format=%B", "main")
     check("squash-keeps-the-rest", "review iteration 1" in body and "Co-Authored-By: X <x@x>" in body, True)
+    # Several changes squashed: the subject says how many more there are,
+    # sreview's rounds and docs aside.
+    many = os.path.join(tmp, "many")
+    git(tmp, "init", "-q", many)
+    git(many, "commit", "-q", "--allow-empty", "-m", "base")
+    many_base = git(many, "rev-parse", "HEAD")
+    for subject in ("feat(a): one", "fix(b): two", "fix: review iteration 1 — round", "docs: words", "fix(c): three"):
+        git(many, "commit", "-q", "--allow-empty", "-m", subject)
+    check("squash-subject-counts-the-other-changes",
+          ws_py("squash-message", many, many_base).stdout.splitlines()[0], "feat(a): one, and 2 more changes")
+    # A docs commit first does not lead: the change it describes does.
+    docs_first = os.path.join(tmp, "docs-first")
+    git(tmp, "init", "-q", docs_first)
+    git(docs_first, "commit", "-q", "--allow-empty", "-m", "base")
+    df_base = git(docs_first, "rev-parse", "HEAD")
+    for subject in ("docs: explain X", "feat(a): one", "fix(b): two"):
+        git(docs_first, "commit", "-q", "--allow-empty", "-m", subject)
+    check("squash-subject-not-led-by-docs",
+          ws_py("squash-message", docs_first, df_base).stdout.splitlines()[0], "feat(a): one, and 1 more change")
     check("live-fast-forwarded", git(live, "rev-parse", "HEAD"), git(origin, "rev-parse", "main"))
     # A checkout with commits of its own is told how to follow, not left vague.
     git(live, "commit", "-q", "--allow-empty", "-m", "by hand, unpushed")

@@ -361,6 +361,10 @@ preview_apply_migrations() {
   # no terminal (person_at_terminal in ui.sh).
   if ( if person_at_terminal; then exec < /dev/tty
        elif [[ -n "${SCLAUDE_FROM_PHONE:-}" ]]; then exec < /dev/null; fi
+       # npx asks before it installs a package the product does not pin;
+       # with nobody at the terminal the step would wait on it for good. The
+       # CLI's own questions still reach the terminal.
+       export npm_config_yes=true
        cd "$wt" && eval "$cmd" ); then
     say "${GREEN}✓ Preview database: the branch's migrations applied.${OFF}"
     return 0

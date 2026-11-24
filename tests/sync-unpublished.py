@@ -82,7 +82,7 @@ def world(tmp, branch_file, main_file, pushed=False, pr=None):
 def run(repo, wt):
     script = ('set -uo pipefail\ninfo() { echo "INFO $*"; }\nwarn() { echo "WARN $*"; }\n'
               'LIB="%s"; REPO="%s"\n'
-              'for m in core/state core/project core/scratch improve/deferred tree/worktree; do source "$LIB/$m.sh"; done\n'
+              'for m in core/state core/project core/scratch improve/deferred tree/sync tree/worktree; do source "$LIB/$m.sh"; done\n'
               'sync_unpublished "%s"; echo "rc=$?"' % (LIB, repo, wt))
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=ENV, timeout=60).stdout
@@ -123,6 +123,43 @@ def main():
             check("%s: returns 0" % name, out.strip().endswith("rc=0"), True)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+    # A rebase whose --abort cannot finish (its state broken): the branch is
+    # put back at its old head all the same, and no rebase is left under way.
+    tmp = tempfile.mkdtemp(prefix="sclaude-unpub-")
+    try:
+        repo, wt = world(tmp, "feature.txt", "schema.txt")
+        before = git(wt, "rev-parse", "HEAD")
+        gitdir = git(wt, "rev-parse", "--absolute-git-dir")
+        git(wt, "checkout", "-q", "--detach", "HEAD~1")
+        os.makedirs(os.path.join(gitdir, "rebase-merge"))
+        script = ('set -uo pipefail\nLIB="%s"\nsource "$LIB/tree/sync.sh"\n'
+                  'rebase_back "%s" feat/x "%s"; echo "rc=$?"' % (LIB, wt, before))
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                             env=ENV, timeout=60).stdout
+        check("a rebase that cannot be aborted: the branch is put back",
+              (out.strip().endswith("rc=0"), git(wt, "rev-parse", "HEAD"),
+               git(wt, "symbolic-ref", "-q", "HEAD"),
+               os.path.exists(os.path.join(gitdir, "rebase-merge"))),
+              (True, before, "refs/heads/feat/x", False))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # A rebase git refused before it began (uncommitted work): nothing to
+    # undo, and the work is left as it is.
+    tmp = tempfile.mkdtemp(prefix="sclaude-unpub-")
+    try:
+        repo, wt = world(tmp, "feature.txt", "schema.txt")
+        before = git(wt, "rev-parse", "HEAD")
+        with open(os.path.join(wt, "feature.txt"), "a") as fh:
+            fh.write("an edit of my own\n")
+        script = ('set -uo pipefail\nLIB="%s"\nsource "$LIB/tree/sync.sh"\n'
+                  'rebase_back "%s" feat/x "%s"; echo "rc=$?"' % (LIB, wt, before))
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                             env=ENV, timeout=60, cwd=tmp).stdout
+        with open(os.path.join(wt, "feature.txt")) as fh:
+            kept = "an edit of my own" in fh.read()
+        check("a rebase that never started leaves uncommitted work alone", (out.strip().endswith("rc=0"), kept), (True, True))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
     print("%d/%d passed" % (total - len(failures), total))

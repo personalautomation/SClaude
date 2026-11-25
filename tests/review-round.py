@@ -1186,6 +1186,23 @@ echo "watcher=[$SESSION_WATCHER]"
     # REVIEW_KEPT_SAID is for one call: taken before the first way out.
     check("kept-said-taken-before-any-return",
           entry.index('REVIEW_KEPT_SAID=""') < entry.index("&& return"), True)
+    # The banner and the address under it go unsaid for a kept round alone:
+    # a return after the preview or QA, or a fresh session, says them again.
+    guard = '\n  if [[ -z "$kept_said" ]]; then\n'
+    blocks = []
+    at = entry.find(guard)
+    while at >= 0:
+        end = entry.index("\n  fi\n", at)
+        blocks.append(entry[at:end])
+        at = entry.find(guard, end)
+    said = ('echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"',
+            'echo "   ${BOLD}Sign in as any user: $users${OFF}"',
+            'echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"',
+            'info "   Where it stands: $map"',
+            'info "   $model / $effort / $mode · $wt"')
+    check("header-unsaid-for-a-kept-round-only",
+          ([any(line in b for b in blocks) for line in said], "STEP_HEADER_SAID" in entry),
+          ([True] * len(said), False))
     # The way in is step 4's gate (review_close_gate ... entry), whose pass
     # reports what it found unless that head was reported where it ran.
     check("entry-pass-reported",
@@ -1195,7 +1212,7 @@ echo "watcher=[$SESSION_WATCHER]"
           and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report "$wt" "$slug"' in RUN
           and '[[ "$fresh_pass" -eq 1 ]] && REVIEW_REPORT_QUIET=1 review_report_unshown "$wt" "$slug"' in RUN, True)
     check("not-done-says-where-it-stands",
-          'warn "  $standing"' in gate and 'ask_feed say "$standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
+          'warn "  $standing"' in gate and 'ask_feed say "Step 4 is not done — ${standing:-${word#open: }.}"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
     check("resumed-review-says-what-it-is-handed",
           '${brief:+ · $brief}' in RUN

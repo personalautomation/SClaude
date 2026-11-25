@@ -196,17 +196,18 @@ run_step() {
     state_set "$state" regression.local.orchestrator_fixes 0
   fi
 
-  echo ""
-  echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
+  # The banner and the lines under it, except for the review's next round in
+  # the same session (kept_said): they came twenty times over one step 4,
+  # each right under the round's own report, with nothing in them changed.
+  # Any other way into a step — a fresh session, a return after the preview
+  # or QA — is announced, with where to look at it.
+  if [[ -z "$kept_said" ]]; then
+    echo ""
+    echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
+  fi
   # A new step: what the last one printed explains none of its questions, and
   # it went to the phone with the first of them (ask_forget).
   ask_forget
-  # The lines under the banner once a step in this process: a session taken
-  # up again for the next round of the same step said them all again, every
-  # round, with nothing in them changed.
-  local again=""
-  [[ "${STEP_HEADER_SAID:-}" == "$slug:$step" ]] && again=1
-  STEP_HEADER_SAID="$slug:$step"
   # The topic hears of the step's session once it is opened, below, and of the
   # step itself when it closes: entering it here is often a return to one that
   # goes on. The indented lines under the banner stay here (notices.py).
@@ -217,7 +218,7 @@ run_step() {
   # (users_page in bin/sclaude-proxy): the address alone was said again by
   # the dev server's line below, and landed on a sign-in form.
   local users map
-  if [[ -z "$again" ]]; then
+  if [[ -z "$kept_said" ]]; then
     if users="$(dev_users_address "$wt")"; then
       echo "   ${BOLD}Sign in as any user: $users${OFF}"
     else

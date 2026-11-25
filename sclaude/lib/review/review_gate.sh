@@ -618,9 +618,9 @@ review_close_gate() {
   # it as it hears every report. Anything else that holds
   # the step — a red check, a review still running — is not in the table,
   # and is said.
-  # The feature's topic still hears both lines, as before: the report's
-  # message there carries the newest session's row only, and this is where
-  # the review stands from the fix session's last look (docs/keepawake.md).
+  # The report's message on the feature's topic carries the newest session's
+  # row only; this says where the review stands from the fix session's last
+  # look (docs/keepawake.md).
   # And where the last round left it, counted from the fix session's last
   # look: what the review confirmed fixed, what the session had seen and
   # did not fix, what the review found since (brief in pr_context.py).
@@ -638,9 +638,11 @@ review_close_gate() {
     # (ask_note), and this is what that question is about.
     # Without a sound: the next session opens by itself, and a question that
     # may follow rings on its own, with these lines in its context.
-    ask_feed say "Step 4 is not done — ${word#open: }."
+    # On the topic, the standing in place of the count when there is one:
+    # the review's own line ("finished · N open") gave the count just before.
+    ask_feed say "Step 4 is not done — ${standing:-${word#open: }.}"
     ask_note "Step 4 is not done — ${word#open: }."
-    [[ -n "$standing" ]] && { ask_feed say "$standing"; ask_note "  $standing"; }
+    [[ -n "$standing" ]] && ask_note "  $standing"
   elif [[ "$polish" -eq 1 ]]; then
     # No failure: nothing is open. info keeps it for [g]'s ceiling question
     # too (ask_note), which would otherwise not say what "it" is.

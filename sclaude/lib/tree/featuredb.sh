@@ -372,6 +372,14 @@ ensure_db() {
   base="$(db_base "$wt")" || { rm -f "$envf"; warn "  database: no free block of ports — sharing the main local database"; return 0; }
   db_workdir "$wt" "$base" || { rm -f "$envf"; warn "  database: could not lay out $dir"; return 0; }
   cli="$(db_cli "$wt")"
+  # Every step below runs it: missing, each failed in its own words, none of
+  # which named the cause, and one advised a rebuild that could not help.
+  local missing
+  if missing="$(command_missing "$cli")"; then
+    rm -f "$envf"
+    warn "  database: \`$missing\` is not on this process's PATH — the feature's own database was neither started nor migrated; sharing the main local database"
+    return 0
+  fi
 
   local started=""
   if ! (cd "$wt" && $cli status --workdir "$dir" -o env) >/dev/null 2>&1; then

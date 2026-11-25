@@ -95,7 +95,8 @@ request, as sclaude keeps them.
   and add its output to the reviewer's scope verbatim. After it answers, save
   the answer and post it:
   `python3 $I/sclaude/lib/review/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
-  — it posts new threads and resolves the ones the reviewer marked `RESOLVED`.
+  — it posts new threads, resolves the ones the reviewer marked `RESOLVED`
+  and replies on the ones it marked `OPEN`.
   The journal is `.sclaude/local/feature/review-rounds.jsonl` when that
   directory exists (so sclaude counts these rounds), else `$S/branches/<branch>.rounds.jsonl`.
   `record` posts on the head the pull request carries: while HEAD is ahead of
@@ -158,7 +159,8 @@ and `important` when it gave none. In PR mode a `nit` or `pre-existing` one is
 posted as a minor finding, marked so for whoever weighs it.
 
 then `RESOLVED: <id> — <how>` for each earlier open finding the code no longer
-has (PR mode), then `COVERED: <the files of the scope it read in full>`, then
+has and `OPEN: <id> — <what is still missing>` for one fixed only in part (PR
+mode), then `COVERED: <the files of the scope it read in full>`, then
 `FINDINGS: <n>`, and last the line `REVIEW: complete` —
 written only once the `code-review` skill and every agent it started have
 finished. Tell it so: it answers once, at the end, never with an interim list.

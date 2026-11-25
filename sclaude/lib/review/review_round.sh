@@ -400,7 +400,9 @@ review_reopen() {
         # "same session, resumed" (PANE_RESUME_WHY, pane.sh): a line of its
         # own before it said the same thing twice. In place, there is no
         # such line, and this one says it.
-        PANE_RESUME_WHY="context ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%), $why"
+        # The share alone there: the rest — under the limit, the cache likely
+        # alive — is the rule every resume meets, said again every round.
+        PANE_RESUME_WHY="context ${pct}%"
         pane_available 2>/dev/null \
           || info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
         REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line

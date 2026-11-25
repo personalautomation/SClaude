@@ -357,6 +357,34 @@ try:
     check("unfixed-stays-open", (out.strip(), rc), ("1", 0))
     prompts()
 
+    # Fixed in part: the run says what is missing, as a reply on the thread
+    # left open — a new comment for the fix session — and the next run is
+    # handed it beside the thread, told to leave OPEN out while it holds.
+    write(os.path.join(repo, "a.txt"), "d2\n")
+    git("commit", "-qam", "partial", cwd=repo)
+    git("push", "-q", cwd=repo)
+    out, _, rc = review("OPEN: r101 — c is still unchecked\n\nFINDINGS: 0\n")
+    check("partial-stays-open", (out.strip(), rc), ("1", 0))
+    last = threads()[0]["comments"][-1]["body"]
+    check_true("partial-replies-still-open",
+               last.startswith(pr_context.STILL_OPEN_PREFIX + "c is still unchecked")
+               and pr_context.signed_locally(last) and not threads()[0]["isResolved"])
+    check("still-open-decides-nothing", pr_context.decline_of(threads()[0]["comments"][1:]), None)
+    replies = len(threads()[0]["comments"])
+    prompts()
+    write(os.path.join(repo, "a.txt"), "d3\n")
+    git("commit", "-qam", "partial2", cwd=repo)
+    git("push", "-q", cwd=repo)
+    # A new gap after a push is said, though the last reply is still the
+    # review's: the run judges what still holds, the code adds no rule.
+    out, _, rc = review("OPEN: r101 — now d is unchecked\n\nFINDINGS: 0\n")
+    check_true("still-open-handed-to-the-next-run",
+               "(said already: c is still unchecked — leave OPEN out while that still holds)"
+               in prompts())
+    check_true("new-gap-said", len(threads()[0]["comments"]) == replies + 1
+               and threads()[0]["comments"][-1]["body"].startswith(
+                   pr_context.STILL_OPEN_PREFIX + "now d is unchecked"))
+
     # A finding GitHub will not take on its line goes on its file.
     write(os.path.join(repo, "a.txt"), "e\n")
     git("commit", "-qam", "more", cwd=repo)
@@ -404,16 +432,41 @@ try:
     sys.path.insert(0, LIB)
     import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import local_review
-    found, _, count = local_review.parse(
+    found, _, count, _ = local_review.parse(
         "### `src/a.ts:12` — backticks\nx\n### src/b.ts:3-9 — a range\ny\n"
         "### src/c.ts:7 - a hyphen\nz\nFINDINGS: 3\n")
     check("headings-drift", [(f["path"], f["line"]) for f in found],
           [("src/a.ts", 12), ("src/b.ts", 3), ("src/c.ts", 7)])
     # The files a reviewer read in full (sreview's COVERED line) end the
     # finding above them and go into none.
-    found, _, count = local_review.parse(
+    found, _, count, _ = local_review.parse(
         "### src/a.ts:12 — one\nthe scenario\nCOVERED: src/a.ts, src/b.ts\nFINDINGS: 1\n")
     check("covered-not-in-a-finding", (found[0]["body"], count), ("the scenario", 1))
+    # An OPEN line ends the finding above it too, and goes to its own list.
+    found, _, _, still = local_review.parse(
+        "### src/a.ts:12 — one\nthe scenario\nOPEN: r5 — the cache is still cold\nFINDINGS: 1\n")
+    check("open-not-in-a-finding", (found[0]["body"], still),
+          ("the scenario", {"r5": "the cache is still cold"}))
+    # The prompts ask for it, where the answer's lines are spelled out.
+    with open(os.path.join(LIB, "review", "local_review.sh")) as fh:
+        lrs = fh.read()
+    check("prompts-ask-for-open", lrs.count("\\`OPEN: <id> — <what is still missing, in a sentence>\\`"), 2)
+    # The reply read back: its reason alone, the latest one; shown as the
+    # review's words, not the person's whose account posts it; and kept out
+    # of what the map takes for a fix and the map and report for a citation.
+    reply = pr_context.STILL_OPEN_PREFIX + "the cache is cold, see r42\n\n" + pr_context.LOCAL_SIGNATURE + " · abc1234</sub>"
+    check("still-open-said", pr_context.still_open_said(["**finding**", reply, "a person"]),
+          "the cache is cold, see r42")
+    check("still-open-speaker", (pr_context.speaker("me", reply), pr_context.speaker("me", "mine")),
+          ("local review", "me"))
+    with open(os.path.join(LIB, "review", "review_map.py")) as fh:
+        rmap = fh.read()
+    with open(os.path.join(LIB, "review", "review_report.py")) as fh:
+        rrep = fh.read()
+    check_true("map-and-report-skip-still-open",
+               "if not pr_context.still_open_reply(c.get(\"body\"))]" in rmap
+               and "if not still_open_reply(c.get(\"body\"))]" in rrep
+               and "else pr_context.still_open_said(" in rmap)
     write(os.path.join(repo, "a.txt"), "e3\n")
     git("commit", "-qam", "more3", cwd=repo)
     git("push", "-q", cwd=repo)
@@ -486,7 +539,7 @@ try:
     # The severity /code-review gives a finding rides in its heading; a nit
     # or a pre-existing bug is posted with the minor mark, open work all the
     # same.
-    found, _, _ = local_review.parse(
+    found, _, _, _ = local_review.parse(
         "### a.ts:1 — [important] real\nx\n### b.ts:2 — [Nit] small\ny\n"
         "### c.ts:3 — [pre_existing] old\nz\n### d.ts:4 — untagged\nw\nFINDINGS: 4\n")
     check("severity-read", [(f["severity"], f["title"]) for f in found],

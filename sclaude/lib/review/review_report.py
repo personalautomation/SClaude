@@ -62,7 +62,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import (SKIP_SECONDS, decline_of, gh_json, is_claude_review,  # noqa: E402
-                        moved_for, review_mode, thread_line, yours)
+                        moved_for, review_mode, still_open_reply, thread_line, yours)
 from local_review import rows as journal_rows  # noqa: E402
 import claude_usage  # noqa: E402
 
@@ -297,7 +297,10 @@ def threads(cwd, pr, repo):
             if not comments:
                 continue
             first = comments[0]
-            replies = [c.get("body") or "" for c in comments[1:]]
+            # The review's "Still open:" reply cites nothing: it says what a
+            # fix left out, and may name another thread while it does.
+            replies = [c.get("body") or "" for c in comments[1:]
+                       if not still_open_reply(c.get("body"))]
             if t.get("isResolved"):
                 fate = "no fix" if declined(comments[1:]) else "fixed"
             else:

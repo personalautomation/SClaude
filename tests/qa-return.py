@@ -30,6 +30,8 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
+sys.path.insert(0, os.path.join(ROOT, "tests", "lib"))
+import benchlib  # noqa: E402
 
 failures = []
 
@@ -331,6 +333,29 @@ try:
 
     # --- the line does not name an empty step --------------------------------
     check_true("return-line-guarded", '[[ "$step" == "review" ]]' in take_back)
+
+    # --- the watch ends with the merge -----------------------------------------
+    #
+    # Left armed past the merge, the timer read sclaude's own reopening of the
+    # issue (the board puts a reopened issue in Backlog) as QA handing the
+    # feature back, and its close at production as an acceptance still waiting
+    # for the merge. remind_prod stops the watch once QA accepted and the merge
+    # is in, before the hold that reopens the issue — and only then: merged
+    # before QA answered, a hand-back is still QA's to send.
+    prod = "\n".join(code_lines(benchlib.function("remind_prod")))
+    stop = prod.find('[[ "${merged:-}" == "MERGED" ]] && qa_accepted_now "$wt" && watch_stop "$slug"')
+    check_true("merge-stops-the-watch", stop >= 0)
+    check_true("watch-stopped-before-the-reopening",
+               0 <= stop < prod.find('issue_hold_open "$issue"'))
+
+    # --- the production question carries its own block, not the pass --------
+    #
+    # The phone showed the question after everything the pass printed — the
+    # regression's every part, the merge again — with the one line it asks
+    # about at the end. The context is forgotten where production begins.
+    forget = prod.find("  ask_forget\n  deploy_unchanged \"$wt\" prod")
+    check_true("prod-question-context-starts-at-production",
+               0 <= forget < prod.find('prod_riders_say "$riders"'))
 
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

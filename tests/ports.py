@@ -296,6 +296,32 @@ def main():
                 if server.poll() is None:
                     server.kill()
                 server.wait()
+
+        # The PATH left for sclaude-proxy's lazy starts is kept only when the
+        # product's dev command is on it. A start without it wrote its PATH
+        # over a good one; every lazy start read that back, failed on the
+        # missing command and wrote it again.
+        with open(os.path.join(root, "repo", ".sclaude", "config.json"), "w") as fh:
+            json.dump({"commands": {"dev": "sclaude-bench-dev"}}, fh)
+        stub = os.path.join(root, "dev-stub")
+        os.makedirs(stub)
+        with open(os.path.join(stub, "sclaude-bench-dev"), "w") as fh:
+            fh.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(stub, "sclaude-bench-dev"), 0o755)
+        saved = os.path.join(registry, ".path")
+        p = tree(root, "p", "13-saved-path")
+        lazy = ('source "%s/core/project.sh"\nforce_env() { return 0; }\n'
+                'DEV_START_WAIT=0 ensure_dev "%s"' % (LIB, p))
+        with open(saved, "w") as fh:
+            fh.write("GOOD\n")
+        bash(root, lazy)
+        with open(saved) as fh:
+            check("a PATH without the dev command leaves the saved one", fh.read(), "GOOD\n")
+        with_stub = stub + os.pathsep + os.environ["PATH"]
+        bash(root, lazy, {"PATH": with_stub})
+        with open(saved) as fh:
+            check("a PATH with the dev command is saved", fh.read(), with_stub + "\n")
+        bash(root, 'stop_dev "%s"' % p)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

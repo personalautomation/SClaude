@@ -65,6 +65,25 @@ project_config_with() {
   echo "$file"
 }
 
+# The first word of a command line of the product's, printed (return 0) when
+# no program of that name is on the PATH: a start without npx or npm failed
+# later as "pending migrations did not apply" and was told to rebuild a
+# database that was fine. Only a plain line is judged — shell syntax, a
+# leading assignment or a program named by a path are left to the caller,
+# which runs the line from the feature's tree.
+#
+#   command_missing "<command line>"
+command_missing() {
+  local word
+  [[ "$1" == *[\"\'\`\$\(\)\{\}\;\|\&\<\>\\]* ]] && return 1
+  read -r word _ <<< "$1"
+  [[ -n "$word" && ! "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= && "$word" != */* ]] || return 1
+  # A program on the PATH, as the bash the caller starts finds it: not a
+  # function or an alias of this shell, which that bash does not have.
+  type -P "$word" >/dev/null 2>&1 && return 1
+  printf '%s' "$word"
+}
+
 # A value from the config by dotted path, or nothing.
 #
 # The same shape as state_get, and for the same reason: reading JSON with grep

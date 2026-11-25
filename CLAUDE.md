@@ -525,8 +525,16 @@ breaks the other silently — grep before you edit:
   `review_state` tells them from what the person wrote under the same
   account; `tests/review-skip.py` and `tests/local-review.py` check both
   sides. `sclaude/prompts/review.md` spells it out for the night check of a
-  minor thread, which takes only a bot's finding or one ending with it;
-  `tests/review-report.py` checks the prompt names it. `review-rounds.jsonl`, the review's one journal wherever it
+  minor thread, which takes only a thread whose every comment is a bot's
+  or ends with it; `tests/review-report.py` checks the prompt names it.
+  `STILL_OPEN_PREFIX` beside it begins the local review's reply on a thread
+  fixed in part (`OPEN:` in its answer, `STILL` in `local_review.py`); the
+  prompts that ask for it are `local_review_prompt` and
+  `local_review_verify_prompt` in `local_review.sh` and `prompt` in
+  `local_review.py`, `sclaude/prompts/review.md` names it for the fix session
+  and the night check, and `review_map.py` and `review_report.py` keep it out
+  of fixes and cited threads; `tests/local-review.py` checks the parse, the
+  reply and the prompts. `review-rounds.jsonl`, the review's one journal wherever it
   ran, is named by `review_journal` in `local_review.sh`, `JOURNAL` in
   `local_review.py` (whose `github_runs` adds the workflow's runs, `source:
   github`), `LOCAL_JOURNAL` in `process_history.py` and `review_pass_rows` in

@@ -19,6 +19,7 @@
 import json
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -435,6 +436,28 @@ try:
           project_init.guess_board(board_repo), {"columns": {"progress": "Doing"}})
     project_init.gh_json = lambda args: None
     check("board-guess-silent-without-gh", project_init.guess_board(board_repo), {})
+
+    # command_missing: the first word of a plain command line (no assignment,
+    # path or shell syntax: those are the caller's to run as they are),
+    # said when this process cannot find it — the npx or npm a start ran
+    # without, which surfaced only as a migration and a server that failed.
+    for line, want_out, want_rc in (
+            ("no-such-program-anywhere run dev", "no-such-program-anywhere", 0),
+            ("A=1 B=two no-such-program-anywhere --x", "", 1),
+            ("bash -c true", "", 1),
+            ("E2E_WORKERS=2 bash -c true", "", 1),
+            ("", "", 1),
+            # bash's to read, not ours: a quoted value, a group, a second command
+            ('OPTS="--a --no-such-program-anywhere" no-such-program-anywhere', "", 1),
+            ("(cd web && no-such-program-anywhere run dev)", "", 1),
+            ("true; no-such-program-anywhere", "", 1),
+            # a path is the tree's, where the caller runs it
+            ("./scripts/no-such-program-anywhere", "", 1),
+            # its own PATH, where its program is looked up
+            ("PATH=/nowhere no-such-program-anywhere", "", 1),
+            ("PATH+=:bin no-such-program-anywhere", "", 1)):
+        out, _, rc = run_bash("command_missing %s" % shlex.quote(line), tmp)
+        check("command-missing-%r" % line, (out, rc), (want_out, want_rc))
 
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

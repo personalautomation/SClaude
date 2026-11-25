@@ -112,6 +112,8 @@ posted by a Bot account, on its file and line. sclaude counts the open threads,
 hands them to the review session, and reads replies that begin with two marks:
 "Resolved automatically: " (the review closed the thread as fixed) and
 "Left as it is" from anyone but a Bot (the author declined the finding). A
+review run on this machine may also reply "Still open: " on a thread it finds
+fixed only in part; that reply decides nothing. A
 finding the review could not post as a thread may go into one ordinary comment
 by the login `claude`.
 

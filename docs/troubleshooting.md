@@ -180,6 +180,12 @@ feature's own stack did not start; the log in its tree says why. `sclaude dev
 ports* on Windows means a reserved port range: the message names the commands
 that free it.
 
+**`database: \`npx\` is not on this process's PATH`** (or **`the dev server did
+not start: \`npm\` is not on this process's PATH`**) — the process that started
+the feature cannot find the command the product's config runs, so nothing was
+started; the database and the code are fine. Run `sclaude dev <name>` from a
+shell where that command works.
+
 **`Which database should features on this machine work against?`** — asked once
 per machine. A production environment is never offered for a feature, and
 `SCLAUDE_ENV` naming one is ignored

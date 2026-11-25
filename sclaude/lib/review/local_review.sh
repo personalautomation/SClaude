@@ -943,7 +943,7 @@ The search for new findings on this pull request is over. Do not review the code
 
 $earlier
 
-Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Answer with nothing else: a \`RESOLVED: <id> — <how, in a sentence>\` line for each finding the code no longer has, and last a line of its own, \`FINDINGS: 0\`.
+Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Answer with nothing else: a \`RESOLVED: <id> — <how, in a sentence>\` line for each finding the code no longer has, an \`OPEN: <id> — <what is still missing, in a sentence>\` line for each fixed only in part (a fix that is a remedy the finding itself offered resolves it), and last a line of its own, \`FINDINGS: 0\`.
 TEXT
 }
 
@@ -979,7 +979,7 @@ When the skill is done, answer with nothing else. First the new findings, one pe
 
 A concern about the whole pull request goes on the file and line it is most about: a finding is a thread, and a thread needs a place.
 
-then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open finding the code no longer has, then a line of its own, \`FINDINGS: <n>\`, the number of new findings above — \`FINDINGS: 0\` when there are none — and last, only once the skill and every agent it started have finished, the line \`REVIEW: complete\`. An answer without it is taken as unfinished, and the head is not recorded as reviewed.
+then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open finding the code no longer has, and an \`OPEN: <id> — <what is still missing, in a sentence>\` line for each fixed only in part (a fix that is a remedy the finding itself offered resolves it), then a line of its own, \`FINDINGS: <n>\`, the number of new findings above — \`FINDINGS: 0\` when there are none — and last, only once the skill and every agent it started have finished, the line \`REVIEW: complete\`. An answer without it is taken as unfinished, and the head is not recorded as reviewed.
 TEXT
 }
 

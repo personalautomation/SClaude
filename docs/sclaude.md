@@ -1375,11 +1375,11 @@ Chrome resolves `*.localhost` by itself, but Node asks the system resolver,
 and a stock WSL Ubuntu answers ENOTFOUND. The suite then has to answer those
 names itself, in a test fixture.
 
-Every step starts by printing the address under the step's header — the
-first time that step runs in a sclaude process: a session taken up again
-for the next round of the same step leaves the lines under the banner
-out (`STEP_HEADER_SAID` in `run.sh`), as it does the database's line and
-Chrome's "already up" unless something was started. Where
+Every step starts by printing the address under the step's banner. The
+review's next round in the same conversation leaves the banner and the
+lines under it out (`REVIEW_KEPT_SAID`, read by `run_step`). The
+database's line and Chrome's "already up" are said once a process, on any
+round, unless something was started. Where
 the proxy's page can list the feature's users — through the proxy, with
 `devLogin` in the project's config and a local database of the feature's own
 (`dev_users_address`) — it is that page, each user a sign-in without a
@@ -1465,7 +1465,10 @@ kept. It never stops a feature while anything is working in its tree: a claude
 session, a regression, a shell. The start goes through `sclaude dev
 --no-browser` and the stop through `sclaude dev --stop`, so the proxy decides
 only when; the PATH they need — nvm's node among it, which systemd does not
-have — is the one sclaude last ran with, left in the registry. A start that
+have — is the one sclaude last ran with, left in the registry; with a plain
+dev command (one program, no shell syntax), only a PATH that command is found
+on is left there, so a start from a process without it keeps the last good
+one. A start that
 fails shows its log and waits for "Try again" rather than looping. The local
 regression brings the feature up itself before its parts run.
 
@@ -2118,6 +2121,15 @@ Nothing moves the column back. It returns to `In QA` the ordinary way, when the
 fix's own preview regression goes green — doing it "helpfully" here would be
 fighting the board with the person who just moved it.
 
+**The watch ends when QA's yes has been used.** Once QA accepted the preview
+and the pull request is merged, `remind_prod` stops it (`watch_stop`), before
+the issue is held open for the rest of the cycle. Left armed, the timer read
+sclaude's own moves as QA's: the issue reopened after the merge — which a
+board puts in its backlog — as a hand-back, "returned to development", and
+its close at production as an acceptance still waiting for the merge. A
+feature merged before QA answered keeps its watch: handing a merged feature
+back is still QA's to do.
+
 ## Step 4: review rounds
 
 **A regression's fix reaches the pull request before the review.** A fixing
@@ -2138,7 +2150,11 @@ green — step 4 opens no session at all and closes at once, saying which of
 the three it was.
 
 **A local pass's answer is taken only whole.** It is text — findings as
-`### <path>:<line> — <title>` sections, then `FINDINGS: <n>` and the line
+`### <path>:<line> — <title>` sections, a `RESOLVED: <id> — <how>` line for
+each open thread the code no longer has and an `OPEN: <id> — <what is still
+missing>` line for one fixed only in part — posted on that thread as a
+`Still open:` reply, and handed to the next pass beside the thread with the
+word to leave `OPEN` out while it still holds — then `FINDINGS: <n>` and the line
 `REVIEW: complete` (`DONE`), written once the code-review skill and every
 agent it started have finished; not `--json-schema` structured output, which
 the forked skill takes for itself, its findings never reaching the session.

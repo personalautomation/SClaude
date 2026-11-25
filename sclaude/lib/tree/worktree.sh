@@ -883,8 +883,13 @@ ensure_dev() {
 
   # The PATH this was started with, for sclaude-proxy: it starts a feature's
   # server itself when somebody opens a stopped one, and under systemd it has
-  # none of the shell's — no nvm, so no node, no npm, no npx.
-  [[ -z "$DEV_PORT_PINNED" ]] && printf '%s\n' "$PATH" > "$DEV_REGISTRY/.path" 2>/dev/null
+  # none of the shell's — no nvm, so no node, no npm, no npx. Not a PATH a
+  # plain dev command is missing from (command_missing; a line it does not
+  # judge saves as before): a start without npm wrote its PATH over a good
+  # one, every lazy start read that back and wrote it again, and each failed
+  # on `npm: command not found` until someone ran sclaude from a shell.
+  [[ -z "$DEV_PORT_PINNED" ]] && ! command_missing "$(dev_command "$wt")" >/dev/null \
+    && printf '%s\n' "$PATH" > "$DEV_REGISTRY/.path" 2>/dev/null
 
   # The feature's own database, before the server that reads it. A server
   # started against another database — the shared one, before this feature had
@@ -947,6 +952,13 @@ ensure_dev() {
   # the project's business; sclaude only says it.
   local url devcmd; url="$(dev_address "$wt")"
   devcmd="$(dev_command "$wt")"
+  # Said here, by name: started all the same, it left one line in the log
+  # (`npm: command not found`) and "the dev server did not start" here.
+  local missing
+  if missing="$(command_missing "$devcmd")"; then
+    warn "  the dev server did not start: \`$missing\` is not on this process's PATH"
+    return 0
+  fi
   log_new "$wt" dev.log dev
   ( cd "$wt" && dev_env_load "$wt" && dev_net_env && PORT="$port" SCLAUDE_DEV_URL="$url" \
       SCLAUDE_DEV_TREE="$wt" setsid --fork bash -c "$devcmd" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1

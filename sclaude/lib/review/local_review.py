@@ -66,8 +66,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import fits, pr_file, pr_folder, write_pr_file  # noqa: E402
 from pr_context import (LOCAL_SIGNATURE, MINOR_KINDS, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
-                        QUOTA_LIMIT, decline_of, gh, headline, quota_reset,
-                        minor_mark, review_threads, signed_locally, split_yours, thread_line, yours)
+                        STILL_OPEN_PREFIX, QUOTA_LIMIT, decline_of, gh, headline, quota_reset,
+                        minor_mark, review_threads, signed_locally, split_yours, still_open_said,
+                        thread_line, yours)
 
 JOURNAL = ".sclaude/local/feature/review-rounds.jsonl"
 
@@ -82,6 +83,10 @@ HEADING = re.compile(r"^###\s+`?(.+?):(\d+)(?:[-–]\d+)?`?\s+[—–-]\s+(.*)$"
 # pr_context.py), open work all the same, weighed by the fix session.
 SEVERITY = re.compile(r"^\[\s*(important|nit|pre[-_ ]existing)\s*\]\s*", re.I)
 RESOLVED = re.compile(r"^\s*RESOLVED:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
+# An open thread the run finds fixed in part: what the fix left out, posted as
+# a reply on it (still_open). Without it the run could only resolve the
+# thread or say nothing, and a partial fix sat open for rounds, unexplained.
+STILL = re.compile(r"^\s*OPEN:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
 COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
 # The files a reviewer read in full (sreview asks for it): ends the finding
 # above it, as FINDINGS does, and is no part of any.
@@ -187,12 +192,20 @@ def prompt(cwd, pr, repo, journal):
         out.append("Findings on this pull request that are still open — check each against "
                    "the code as it is now, and for every one the code no longer has (the fix "
                    "is in, or the code is gone) write a line `RESOLVED: <id> — <how, in a "
-                   "sentence>` in your answer; do not report any of them again as a new "
-                   "finding:")
+                   "sentence>` in your answer; for one fixed only in part, a line `OPEN: <id> "
+                   "— <what is still missing, in a sentence>`, unless the fix is a remedy "
+                   "the finding itself offered, which resolves it. Do not report any of them "
+                   "again as a new finding:")
         out.append("")
         for t in still:
             out.append("- %s · %s:%s — %s" % (t["rid"], t["path"], t["line"],
                                               headline(t["bodies"][0])))
+            said = still_open_said(t["bodies"][1:])
+            if said:
+                out.append("  (said already: %s — leave OPEN out while that still holds)" % said)
+            if t["decision"]:
+                out.append("  (declined by the author: %s — no OPEN for what that covers)"
+                           % t["decision"])
         out.append("")
     # Declined: resolved with the author's decision, or still open and kept
     # in review-yours for the person to resolve by hand — not handed to the
@@ -271,8 +284,9 @@ def prompt(cwd, pr, repo, journal):
 
 
 def parse(answer):
-    """(new findings, {rid: how}, count or None) from a run's answer."""
-    found, resolved, count, current = [], {}, None, None
+    """(new findings, {rid: how}, count or None, {rid: what is missing})
+    from a run's answer."""
+    found, resolved, count, current, still = [], {}, None, None, {}
     for line in answer.splitlines():
         m = HEADING.match(line)
         if m:
@@ -291,6 +305,12 @@ def parse(answer):
             resolved[r.group(1)] = r.group(2).strip()
             current = None
             continue
+        s = STILL.match(line)
+        if s:
+            if s.group(2).strip():
+                still[s.group(1)] = s.group(2).strip()
+            current = None
+            continue
         if COVERED.match(line):
             current = None
             continue
@@ -303,7 +323,7 @@ def parse(answer):
             current["body"].append(line)
     for f in found:
         f["body"] = "\n".join(f["body"]).strip()
-    return found, resolved, count
+    return found, resolved, count, still
 
 
 # A finding GitHub takes on no line and no file (the file is not in the
@@ -412,10 +432,23 @@ def resolve(cwd, t, how, head):
               cwd) is not None
 
 
+def still_open(cwd, t, why, head):
+    """The run's "what the fix left out" as a reply on the thread, left open:
+    a new comment for the fix session to finish or decline. Whether a reply
+    was posted. The run is told what was said already (prompt) and asked to
+    leave OPEN out while it still holds; the code adds no rule of its own,
+    which by the last comment or by a decision once kept a new gap after a
+    push, or a thread reopened after a decline, from being said at all."""
+    reply = "%s%s\n\n%s · %s</sub>" % (STILL_OPEN_PREFIX, why, LOCAL_SIGNATURE, head[:7])
+    return gh(["api", "graphql", "-f", "query=mutation($id:ID!,$b:String!){"
+               "addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$b})"
+               "{comment{url}}}", "-F", "id=%s" % t["id"], "-f", "b=%s" % reply], cwd) is not None
+
+
 def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mode=""):
     with open(answer_path, encoding="utf-8") as fh:
         text = fh.read()
-    found, resolved, count = parse(text)
+    found, resolved, count, still = parse(text)
     if count is None and QUOTA_LIMIT.search(text):
         sys.stderr.write("%s%d\n" % (LIMIT, quota_reset(text)))
         return 1
@@ -467,12 +500,15 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     for rid, how in resolved.items():
         if rid in by_rid and resolve(cwd, by_rid[rid], how, head):
             closed += 1
+    told = sum(1 for rid, why in still.items()
+               if rid in by_rid and rid not in resolved and still_open(cwd, by_rid[rid], why, head))
     # When the run started, as the workflow's runs are dated: the report puts
     # a thread in the last run started before it was posted.
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
-           "new": posted, "lost": len(lost), "resolved": closed, "pr": str(pr),
+           "new": posted, "lost": len(lost), "resolved": closed, "still_open": told,
+           "pr": str(pr),
            # Found as many as the cap: likely stopped with more unsaid, so this
            # head is not done — the next call reads the same range again.
            "more": int(cap) > 0 and count >= int(cap)}

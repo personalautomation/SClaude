@@ -436,11 +436,13 @@ async def gather_listing(host, note=""):
 # --- starting and stopping ---------------------------------------------------
 
 def run_env():
-    """The environment for `sclaude dev`: the PATH of the shell that last ran it.
+    """The environment for `sclaude dev`: the PATH saved in the registry.
 
     Under systemd this process has none of that shell's PATH — no nvm, so no
     node, npm or npx, and possibly no sclaude. sclaude leaves its own PATH in
-    the registry each time it starts a server (ensure_dev)."""
+    the registry each time it starts a server (ensure_dev) — for a plain dev
+    command, only a PATH that command is found on, so a start without it
+    cannot write over a good one that every lazy start would then read back."""
     env = dict(os.environ)
     for name in ("LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"):
         env.pop(name, None)
@@ -457,7 +459,7 @@ def run_env():
 def heal_path(path):
     """The saved PATH with each Node that is gone swapped for the one that is there.
 
-    The PATH is saved by whoever last ran `sclaude dev` from a shell, and names
+    The PATH is saved by `sclaude dev` (run_env says which), and names
     one Node by version: ~/.nvm/versions/node/v24.21.0/bin. wsl-update installs
     the next release and uninstalls the old one, so the saved directory stops
     existing the morning after — and with it npm. On 2026-10-20 every lazy start

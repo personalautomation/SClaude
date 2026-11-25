@@ -636,7 +636,15 @@ def threads_of(tree, nodes, rounds):
                     "resolved": bool(t.get("isResolved")), "left": bool(pr_context.decline_of(comments[1:])),
                     "title": headline(first.get("body")),
                     "minor": pr_context.minor_of(first.get("body")) if bot else None,
-                    "_replies": [c.get("body") or "" for c in comments[1:]]})
+                    # What the review last said a fix left out, for the hover:
+                    # only while the thread is open and not drawn declined.
+                    "stillOpen": "" if t.get("isResolved") or pr_context.decline_of(comments[1:])
+                    else pr_context.still_open_said([c.get("body") or "" for c in comments[1:]]),
+                    # Not the review's "Still open:" reply: its signature
+                    # names a head, which replied() would take for the fix,
+                    # and its words may name another thread (cites).
+                    "_replies": [c.get("body") or "" for c in comments[1:]
+                                 if not pr_context.still_open_reply(c.get("body"))]})
     return out
 
 

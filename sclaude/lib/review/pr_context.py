@@ -418,7 +418,7 @@ def render_new(cwd, pr, repo, since):
         author = ((c.get("user") or {}).get("login")) or "?"
         path = c.get("path") or "?"
         line = c.get("line") or c.get("original_line") or "?"
-        fresh.append(("**`%s:%s` — %s:**" % (path, line, author), body))
+        fresh.append(("**`%s:%s` — %s:**" % (path, line, speaker(author, body)), body))
 
     # Failing checks are a comment too, and on return they mean the same as a
     # new comment: the work is not finished. But unlike comments their state
@@ -644,6 +644,13 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 # and the prefix says nothing the arrow does not.
 HEADLINE_CHARS = 200
 RESOLVER_PREFIX = "Resolved automatically: "
+# The local review's reply on a thread it was handed open and finds fixed only
+# in part (local_review.py's still_open): what the fix left out. Without it the
+# reviewer could only stay silent, and a thread whose fix took the finding's
+# lesser remedy stayed open round after round with nobody told why. It decides
+# no fate (decline_of), and the review's map and report take no fix or cited
+# thread from it (review_map.py, review_report.py).
+STILL_OPEN_PREFIX = "Still open: "
 # The author's decline: a reply starting so, from anyone but a Bot, counts the
 # thread as declined. Which reply decides is FINDINGS_DECLINED's rule, in the
 # project's .github/workflows/claude-code-review.yml; review_report.py follows it.
@@ -727,6 +734,30 @@ def signed_locally(body):
     finding, signature and all, above their own words."""
     lines = [l.strip() for l in (body or "").splitlines() if l.strip()]
     return bool(lines) and lines[-1].startswith(LOCAL_SIGNATURE)
+
+
+def still_open_reply(body):
+    """Whether a comment is the local review's "Still open:" reply."""
+    return signed_locally(body) and (body or "").lstrip().startswith(STILL_OPEN_PREFIX)
+
+
+def still_open_said(bodies):
+    """What the last "Still open:" reply among a thread's comments said, or
+    "": the next review run is handed it (it sees otherwise only the
+    finding's headline), with the word to leave OPEN out while it still
+    holds, and the review's map shows it on an open thread."""
+    for body in reversed(bodies or []):
+        if still_open_reply(body):
+            text = body.lstrip()[len(STILL_OPEN_PREFIX):]
+            return text.split("\n\n" + LOCAL_SIGNATURE)[0].strip()
+    return ""
+
+
+def speaker(author, body):
+    """Who a comment is from, for a session reading the thread: the local
+    review posts under the person's account, and a reply of its own shown
+    under their login read as the person speaking."""
+    return "local review" if signed_locally(body) else author
 
 
 def headline(body):
@@ -1036,12 +1067,13 @@ def write_pr_file(folder, name, lines):
 def thread_text(t, proposed):
     """An open thread's whole text, for threads.md."""
     first, replies = t["comments"][0], t["comments"][1:]
-    lines = ["%s — %s%s" % (first["author"], t.get("url") or "",
+    lines = ["%s — %s%s" % (speaker(first["author"], first["body"]), t.get("url") or "",
                             " (outdated position)" if t["outdated"] else ""), "",
              first["body"], ""]
     for r in replies:
         if r["body"]:
-            lines += ["> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")), ""]
+            lines += ["> **reply — %s:** %s" % (speaker(r["author"], r["body"]),
+                                                 r["body"].replace("\n", "\n> ")), ""]
     if t.get("url") in proposed:
         lines += ["> **Left at night for the person to confirm** — a night session "
                   "proposed: %s. Ask them about it first, as review.md says for the "
@@ -1059,11 +1091,13 @@ def thread_layout(numbered, proposed, folder, what, spent=0):
         first, replies = t["comments"][0], t["comments"][1:]
         where = "`%s:%s`%s" % (t["path"], t["line"],
                                " (outdated position)" if t["outdated"] else "")
-        full += ["**%s — %s:** %s" % (where, first["author"], t.get("url") or ""), "",
+        full += ["**%s — %s:** %s" % (where, speaker(first["author"], first["body"]),
+                                       t.get("url") or ""), "",
                  first["body"], ""]
         for r in replies:
             if r["body"]:
-                full += ["> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")), ""]
+                full += ["> **reply — %s:** %s" % (speaker(r["author"], r["body"]),
+                                                    r["body"].replace("\n", "\n> ")), ""]
         if t.get("url") in proposed:
             full += ["> **Left at night for the person to confirm** — a night session "
                      "proposed: %s. Ask them about it first, as review.md says for the "

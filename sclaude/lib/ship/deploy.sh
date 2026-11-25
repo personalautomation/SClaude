@@ -568,6 +568,10 @@ remind_prod() {
     step_close_merged "$wt"
     issue_sync "$wt"
   fi
+  # QA's watch is spent once QA accepted and the merge is in: left armed, it
+  # read sclaude's own reopening below as a hand-back (docs/sclaude.md, "The
+  # watch ends when QA's yes has been used").
+  [[ "${merged:-}" == "MERGED" ]] && qa_accepted_now "$wt" && watch_stop "$slug"
   # Whatever closed it by now — QA's Done through the board's auto-close, or
   # the merge — came before production. See issue_hold_open (github.sh).
   # Not once the merge is in production: that close was the cycle's own end,
@@ -730,6 +734,11 @@ remind_prod() {
   # answer of "changed" would ship past what only the first one's branch
   # records and checks.
   local riders="" rider_issues="" prod_same=0 ship_rc=0
+  # The production question's context starts here, with what rides along and
+  # the Production block: what the phone showed above them — the regression's
+  # every part, the merge said again, the dev server up twice — buried the one
+  # line it asks about. What the question rests on is in that block's note.
+  ask_forget
   deploy_unchanged "$wt" prod && prod_same=1
   if [[ "$prod_same" -eq 0 && "$ship_mode" != off ]]; then
     rollback_remember_previous "$wt"

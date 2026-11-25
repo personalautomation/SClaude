@@ -120,6 +120,11 @@ const reviewMap = (() => {
     if (t.outcome !== 'reversal') return OUT[t.outcome][1] + (t.resolved && (by || t.outcome !== 'fixed') ? ', resolved' + by : '');
     return OUT[t.outcome][1] + (t.left ? ', left as it is' : '') + (t.resolved ? ', resolved' + by : t.left ? '' : ', still open');
   }
+  // What the review last said a fix of this thread left out ("Still open:"),
+  // as a line of its own, or nothing.
+  function stillOpenLine(t) {
+    return t.stillOpen ? '\nThe review: still open — ' + t.stillOpen : '';
+  }
   // Where a block stands now: read and closed, read now, still to come.
   function blockState(b) {
     if (!data) return '';
@@ -1477,7 +1482,7 @@ const reviewMap = (() => {
       shown.forEach((t, k) => {
         const y = ys[p.r] + TOP + k * STEP;
         svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + (t.missed != null ? ' missed' : '') + (t.conv ? ' conv' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
-          + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '" data-tip-mark="fill"><title>● — a review thread, its colour how it ended\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
+          + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '" data-tip-mark="fill"><title>● — a review thread, its colour how it ended\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t)) + h(stillOpenLine(t))
           + (t.by === 'person' ? '\nThe thick ring: your own thread' : '')
           + (t.conv ? '\nThe dashed ring: a finding in the conversation — its file is not in the diff, so no thread holds it' : '')
           + (t.missed != null ? '\nThe purple ring: on lines a fix wrote that ' + roundName(t.missed).toLowerCase() + ' read and passed — the check missed it' : '')
@@ -2462,7 +2467,8 @@ const reviewMap = (() => {
     const dot = (q) => '<svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="' + (q.t ? colour(q.outcome, 1) : 'none') + '" stroke="' + colour(q.outcome, 1) + '"/></svg> ';
     const out = [];
     out.push('<div class="t-f">' + h(n.path) + (n.line ? ':' + n.line : '') + '</div>');
-    if (n.t) out.push('<div class="t-r">' + threadLink(n.t, h(n.t.title || '') + ' ↗') + '</div><div class="t-r muted">' + (n.t.conv ? '💬 A finding in the conversation (its file is not in the diff, so no thread holds it), found by ' : n.t.by === 'person' ? '◆ Opened by the person, during ' : 'Found by ') + h(roundName(n.r).toLowerCase()) + ' · ' + h(howEnded(n.t)) + '</div>');
+    if (n.t) out.push('<div class="t-r">' + threadLink(n.t, h(n.t.title || '') + ' ↗') + '</div><div class="t-r muted">' + (n.t.conv ? '💬 A finding in the conversation (its file is not in the diff, so no thread holds it), found by ' : n.t.by === 'person' ? '◆ Opened by the person, during ' : 'Found by ') + h(roundName(n.r).toLowerCase()) + ' · ' + h(howEnded(n.t)) + '</div>'
+        + (n.t.stillOpen ? '<div class="t-r muted">' + h(stillOpenLine(n.t).trim()) + '</div>' : ''));
     else if (n.outcome === 'side' && ((data.rounds || [])[n.r] || {}).polish) out.push('<div class="t-r muted">✨ Changed by the polish round: /simplify over the whole pull request, once nothing was left open. The next pass reads it like any fix.</div>');
     else out.push('<div class="t-r muted">' + (n.outcome === 'asked' ? 'The person asked for it during the review (a feat or Requirement: commit).'
       : n.outcome === 'moved' ? 'Code moved here from another file: neither a fix nor new code.'

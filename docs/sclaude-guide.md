@@ -227,7 +227,7 @@ the session said. Wherever a demo plays in a feature's tree — step 2's
 in the product while recording — a check that failed, a fault it had to go
 round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
 session would leave as it is does not hold the step till morning. A minor one the
-review posted, with no reply under it yet — nothing at risk for users, data or security, nothing promised changed, no check
+review posted, with no reply under it yet but the review's own "still open" — nothing at risk for users, data or security, nothing promised changed, no check
 weakened, nothing left to mislead whoever maintains the code, and within those
 limits grammar in a comment, a duplicate or an unlikely case with small
 consequences — the session resolves itself, with a reply saying it was resolved at

@@ -138,7 +138,9 @@ most of them built into the flow, the rest shared as team practice:
   where a round read a file and found nothing, how often review went back
   over its own fixes, and what the person asked for along the way, apart.
   It shows where review still finds real bugs and where it has turned to
-  polishing comments, so the person knows when to stop it.
+  polishing comments, so the person knows when to stop it. Read by thread,
+  the same review is a family tree: which fix each new finding grew from,
+  and the places a problem kept coming back to, round after round.
 - **Metrics with no overhead.** Not a single field to fill in. DORA's four
   keys, the pull request's way, quality, flow, how autonomous Claude was and
   what it cost — collected as a by-product of a process that helps the

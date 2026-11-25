@@ -83,15 +83,20 @@ try:
         def fake(args, cwd=None):
             if args[:2] == ["pr", "view"]:
                 return {"headRefOid": w["head"], "statusCheckRollup": w["rollup"]}
-            path = args[1] if args[0] == "api" else ""
+            path = (args[1] if args[0] == "api" else "").split("?")[0]
             if "check-runs" in path:
                 return {"check_runs": w["findings"]}
-            if "/issues/" in path:
-                return w["comments"]
-            if path.endswith("/comments"):
-                return w["inline"]
-            if path.endswith("/reviews"):
-                return w["reviews"]
+            # A list is read whole only with --paginate --slurp, which
+            # answers with its pages; the first one holds a lone item, so
+            # one read past it is what tells a person spoke.
+            if "--paginate" not in args or "--slurp" not in args:
+                return None
+            for end, key in (("/issues/7/comments", "comments"),
+                             ("/pulls/7/comments", "inline"),
+                             ("/pulls/7/reviews", "reviews")):
+                if path.endswith(end):
+                    rows = w[key]
+                    return [rows[:1], rows[1:]] if len(rows) > 1 else [rows]
             return None
         pr_context.gh_json = fake
         return pr_context.review_state(repo, "7", "o/r")
@@ -118,6 +123,9 @@ try:
         "conclusion": "failure", "external_id": "reviewed"}])), "dirty")
     check("red-check", state(world(rollup=[dict(green[0], conclusion="FAILURE")]
                                    + green[1:])), "dirty")
+    check("person-comment-second-page",
+          state(world(comments=[{"user": bot, "body": "## Code review\n\nNo issues found."},
+                                {"user": person, "body": "why?"}])), "dirty")
     check("person-comment", state(world(comments=[{"user": person, "body": "why?"}])),
           "dirty")
     check("person-inline", state(world(inline=[{"user": person, "body": "nit"}])),

@@ -98,7 +98,12 @@ doctor_node() {
 doctor_github() {
   doctor_section "GitHub"
   command -v gh >/dev/null 2>&1 || { doctor_bad "no gh — nothing below can be checked"; return; }
-  local status scopes
+  local status scopes version
+  # 2.48 brought `gh api --slurp`, which reading a long list depends on.
+  version="$(gh --version 2>/dev/null | grep -o '[0-9][0-9.]*' | head -1)"
+  if [[ -n "$version" ]] && ! printf '2.48\n%s\n' "$version" | sort -VC; then
+    doctor_bad "gh $version is older than 2.48: a pull request is read as unreadable, a new issue gets no milestone" "upgrade gh"
+  fi
   if ! status="$(gh auth status 2>&1)"; then
     doctor_bad "gh is not logged in" "gh auth login"
     return

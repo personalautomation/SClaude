@@ -195,8 +195,49 @@ with tempfile.TemporaryDirectory() as wt:
         review_report.mark_near_fixes(on_fix, [{"head": reviewed}, {"head": git("rev-parse", "HEAD")}], g)
         check("near-fix-on-written-lines", [t["near_fix"] for t in on_fix], [True, False])
         check("fixed-lines-not-across-a-rewrite", review_report.fixed_lines(g, git("rev-parse", "main"), reviewed), {})
+        # The polish round's places: each hunk of the feature's own commits,
+        # a deletion too; a commit the person asked for (feat) is no place.
+        before = git("rev-parse", "HEAD")
+        with open(os.path.join(g, "a.txt")) as fh:
+            body = fh.read()
+        with open(os.path.join(g, "a.txt"), "w") as fh:
+            fh.write(body.replace("line 20\n", "").replace("line 35\n", "simpler 35\n"))
+        git("commit", "-qam", "refactor: simplify")
+        with open(os.path.join(g, "a.txt"), "a") as fh:
+            fh.write("asked\n")
+        git("commit", "-qam", "feat: what the person asked for")
+        check("own-places-count-deletions-not-asks", review_report.own_places(g, before, git("rev-parse", "HEAD")), 2)
+        check("own-places-none-across-a-rewrite", review_report.own_places(g, git("rev-parse", "main"), reviewed), None)
+        # Text that is not UTF-8 is read, not a stop of the report.
+        latin = git("rev-parse", "HEAD")
+        with open(os.path.join(g, "a.txt"), "ab") as fh:
+            fh.write(b"caf\xe9\n")
+        git("commit", "-qam", "fix: latin-1 text")
+        check("own-places-past-non-utf8", review_report.own_places(g, latin, git("rev-parse", "HEAD")), 1)
+        check("fixed-lines-past-non-utf8", bool(review_report.fixed_lines(g, latin, git("rev-parse", "HEAD"))), True)
     finally:
         shutil.rmtree(g, ignore_errors=True)
+    # The polish round: the last round that read the head recorded when the
+    # polish was owed (polish_head, review_polish_owe); none without it.
+    p = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(p, ".sclaude", "local", "feature"))
+        groups = [{"head": "a"}, {"head": "b"}, {"head": "b"}, {"head": "c"}]
+        check("polish-round-none-unrecorded", review_report.polish_round(p, groups), None)
+        with open(os.path.join(p, review_report.STATE), "w") as fh:
+            json.dump({"polish_head": "b"}, fh)
+        check("polish-round-none-when-dropped", review_report.polish_round(p, groups), None)
+        with open(os.path.join(p, review_report.STATE), "w") as fh:
+            json.dump({"polish_head": "b", "polished": True}, fh)
+        check("polish-round-by-its-head", review_report.polish_round(p, groups), 2)
+        with open(os.path.join(p, review_report.STATE), "w") as fh:
+            json.dump({"polish_head": "b", "step": "review", "steps": {"review": {"polish": "due"}}}, fh)
+        check("polish-round-while-under-way", review_report.polish_round(p, groups), 2)
+        with open(os.path.join(p, review_report.STATE), "w") as fh:
+            json.dump({"polish_head": "b", "step": "done", "steps": {"review": {"polish": "due"}}}, fh)
+        check("polish-round-none-due-left-past-step-4", review_report.polish_round(p, groups), None)
+    finally:
+        shutil.rmtree(p, ignore_errors=True)
     # A clean last pass is convergence, whatever the average of the last two.
     check("verdict-last-round-clean", review_report.verdict([9, 8, 0], None, 0, 0, 2).split(".")[0],
           "Converging: the last round found nothing")

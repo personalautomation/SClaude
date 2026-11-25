@@ -4,21 +4,26 @@
 // can be selected and copied (the user's word, 2026-11-17): it is placed once
 // for what is hovered, not dragged along with the pointer, and hidden a
 // moment after the pointer has left both; going over something else on the
-// way to it changes it only if the pointer stays there. One note is open at
-// a time. holdTip(el) gives a note element show(key, html, ev, hovered),
-// leave(), hide(), redraw(), detach() and busy; the review's map uses it too.
+// way to it changes it only if the pointer stays there. One hover note is
+// open at a time; a note clicked open (pin) stays beside it until closed.
+// holdTip(el) gives a note element show(key, html, ev, hovered), leave(),
+// hide(), redraw(), detach(), pin(key, html, ev, el), unpin(), moveTo(el)
+// and busy; the review's map uses it too.
 const TIPS = [];
 function holdTip(tip) {
   const GRACE = 400, SWITCH = 180;
-  let key = null, timer = 0, pend = 0, inside = false, drag = false;
+  let key = null, timer = 0, pend = 0, inside = false, drag = false, kept = false;
   tip.classList.add('hold-tip');
+  // A note clicked open (`pin`) stays: neither the pointer leaving it, nor
+  // another note, nor a redraw hides or detaches it — only unpin().
   const hide = () => {
+    if (kept) return;
     clearTimeout(timer); clearTimeout(pend);
     tip.hidden = true; key = null; inside = false;
   };
   const leave = () => {
     clearTimeout(pend);
-    if (tip.hidden || inside || drag) return;
+    if (tip.hidden || inside || drag || kept) return;
     clearTimeout(timer); timer = setTimeout(hide, GRACE);
   };
   tip.addEventListener('mouseenter', () => { inside = true; clearTimeout(timer); clearTimeout(pend); });
@@ -47,7 +52,9 @@ function holdTip(tip) {
     tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
   }
   function show(k, html, ev, el) {
-    if (inside || drag) return;
+    // A pinned note is not replaced by a hover: another key waits until it
+    // is closed (unpin()).
+    if (inside || drag || (kept && k !== key)) return;
     clearTimeout(timer);
     if (k === key && !tip.hidden) { clearTimeout(pend); return; }
     // Measured now, and again when it shows if still on the page: a redraw
@@ -66,8 +73,21 @@ function holdTip(tip) {
   function redraw(k, html) { if (!tip.hidden) { key = k; tip.innerHTML = html; } }
   // Kept open over a redraw that renumbered what it was about: no key, so
   // the next hover always draws afresh.
-  function detach() { key = null; }
-  const api = {show, leave, hide, redraw, detach, get key() { return tip.hidden ? null : key; },
+  function detach() { if (!kept) key = null; }
+  // Clicked open: shown for good, until unpin().
+  function pin(k, html, ev, el) {
+    kept = false; hide();
+    show(k, html, ev, el);
+    kept = !tip.hidden && key === k;
+  }
+  function unpin() { kept = false; hide(); }
+  // Placed again by what it is about, its text kept (the layout moved).
+  function moveTo(el) {
+    if (tip.hidden || !el || !el.isConnected) return;
+    const r = el.getBoundingClientRect();
+    place(r.x + r.width / 2, r.y + r.height / 2, r);
+  }
+  const api = {show, leave, hide, redraw, detach, pin, unpin, moveTo, get key() { return tip.hidden ? null : key; },
     get busy() { return !tip.hidden && (inside || drag); }};
   TIPS.push(api);
   return api;

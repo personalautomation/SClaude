@@ -5,6 +5,7 @@ how they ended, the person's answers from a transcript and the history, and
 the page that draws it (process_review.js) wired into the process map."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -463,6 +464,81 @@ with tempfile.TemporaryDirectory() as tmp2:
           [t for _, t in got] == ["r1", ""] and "fixedIn" not in th[0])
 
 
+def citing():
+    """A reply naming an earlier thread, as review.md asks ("as on r<id>"),
+    or by its link, links them; one naming itself or a thread not in the
+    pull request does not."""
+    import review_map  # noqa: E402
+    th = [{"rid": "r1234567", "_replies": []},
+          {"rid": "r2345678", "_replies": ["Left as it is: as on r1234567, the cap stays."]},
+          {"rid": "r3456789", "_replies": ["See https://github.com/o/r/pull/7#discussion_r2345678 and r9999999, r3456789"]}]
+    review_map.cites(th)
+    check("a reply citing an earlier thread links it, by `as on r<id>` or its link (%s)" % [t.get("cites") for t in th],
+          "cites" not in th[0] and th[1]["cites"] == ["r1234567"] and th[2]["cites"] == ["r2345678"])
+
+
+def conversing():
+    """A finding the review put in the conversation (local_review.py's post,
+    its file not in the diff) is read back as a thread on its file and line,
+    in the round that posted it; a later comment leaving it as it is and
+    naming its place declines it; anything else in the conversation is not
+    a finding."""
+    import review_map  # noqa: E402
+    from local_review import FROM_LOCAL, NOT_IN_DIFF  # noqa: E402
+    body = ("`lib/a.py:12` " + NOT_IN_DIFF + " — (nit) **The guard is gone**\n\nbody\n\n" + FROM_LOCAL) % "abc1234"
+    cs = [{"id": 1, "body": "a person's word", "created_at": "2026-01-01T10:00:00Z", "user": {"type": "User"}},
+          {"id": 2, "body": body, "html_url": "u2", "created_at": "2026-01-01T11:00:00Z", "user": {"type": "User"}},
+          {"id": 3, "body": body.replace("12", "30"), "html_url": "u3", "created_at": "2026-01-01T12:30:00Z", "user": {"type": "User"}},
+          {"id": 4, "body": "Left as it is: `lib/a.py:30` stays.", "created_at": "2026-01-01T13:00:00Z", "user": {"type": "User"}}]
+    rounds = [{"t": review_map.ts("2026-01-01T10:30:00Z")}, {"t": review_map.ts("2026-01-01T12:00:00Z")}]
+    got = review_map.conversation_findings(rounds, cs)
+    check("a finding in the conversation is a thread on its file and line, in its round, declined when left (%s)"
+          % [(t["rid"], t["r"], t["line"], t["outcome"]) for t in got],
+          [(t["rid"], t["r"], t["path"], t["line"], t["outcome"], t["title"], t["conv"]) for t in got]
+          == [("c2", 0, "lib/a.py", 12, "open", "The guard is gone", True), ("c3", 1, "lib/a.py", 30, "declined", "The guard is gone", True)])
+    # The review on GitHub, posting findings in an ordinary comment: the
+    # Claude app's comments, a row with no file; nobody else's.
+    app = [{"id": 5, "body": "Two more findings, outside the diff", "html_url": "u5", "created_at": "2026-01-01T12:10:00Z",
+            "user": {"type": "Bot", "login": "claude[bot]"}},
+           {"id": 6, "body": "deployed", "created_at": "2026-01-01T12:20:00Z", "user": {"type": "Bot", "login": "vercel[bot]"}}]
+    loose = review_map.loose_findings(rounds, cs + app)
+    check("the review's comments of findings not on a line are read by round, no one else's (%s)" % loose,
+          [(x["id"], x["r"]) for x in loose] == [(5, 1)])
+
+
+def polishing():
+    """The polish round is the last round that read the head sclaude
+    recorded when it owed the polish; none without the record, nor when the
+    polish was owed and dropped (neither taken nor under way)."""
+    import review_map  # noqa: E402
+    rounds = [{"head": "a"}, {"head": "b"}, {"head": "b"}, {"head": "c"}]
+    review_map.polish_round({}, rounds)
+    unmarked = [r.get("polish") for r in rounds]
+    review_map.polish_round({"polish_head": "b"}, rounds)
+    dropped = [r.get("polish") for r in rounds]
+    review_map.polish_round({"polish_head": "b", "step": "done", "steps": {"review": {"polish": "due"}}}, rounds)
+    dropped += [r.get("polish") for r in rounds]
+    review_map.polish_round({"polish_head": "b", "step": "review", "steps": {"review": {"polish": "due"}}}, rounds)
+    going = [r.get("polish") for r in rounds]
+    for r in rounds:
+        r.pop("polish", None)
+    review_map.polish_round({"polish_head": "b", "polished": True}, rounds)
+    check("the polish round is the last that read the recorded head, none unrecorded (%s)" % [r.get("polish") for r in rounds],
+          unmarked == [None] * 4 and dropped == [None] * 8 and going == [None, None, True, None]
+          and [r.get("polish") for r in rounds] == [None, None, True, None])
+    # The map's git reads take a commit's non-UTF-8 text.
+    g = tempfile.mkdtemp()
+    try:
+        subprocess.run(["git", "init", "-q", g], check=True)
+        with open(os.path.join(g, "a.txt"), "wb") as fh:
+            fh.write(b"caf\xe9\n")
+        subprocess.run(["git", "-C", g, "-c", "user.name=t", "-c", "user.email=t@t", "add", "."], check=True)
+        subprocess.run(["git", "-C", g, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "latin"], check=True)
+        check("the map reads a commit with non-UTF-8 text", "caf" in (review_map.git(g, "show", "HEAD") or ""))
+    finally:
+        shutil.rmtree(g, ignore_errors=True)
+
+
 def made(n, seen=None):
     return [{"stopped": False, "more": False, "seen": seen} for _ in range(n)]
 
@@ -672,5 +748,9 @@ import review_map  # noqa: E402
 check("a minor finding is titled by its text, not its mark",
       review_map.headline("<!-- sclaude:minor nit -->\n\nUnused variable x in foo()") == "Unused variable x in foo()"
       and review_map.headline("<!-- sclaude:minor nit -->\n\n**Bold title**\n\nbody") == "Bold title")
+
+citing()
+conversing()
+polishing()
 
 sys.exit(1 if failures else 0)

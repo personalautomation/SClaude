@@ -132,7 +132,7 @@ WAIT = "w"
 COLUMNS = (
     ("started", "%-11s", "find"), ("took", "%6s", "find"), ("cost", "%6s", "find"),
     ("found", "%5s", "find"), ("on fixes", "%8s", "find"), ("repeats", "%7s", "find"),
-    ("session", "%7s", "fix"), ("took", "%6s", "fix"), ("cost", "%6s", "fix"),
+    ("session", "%8s", "fix"), ("took", "%6s", "fix"), ("cost", "%6s", "fix"),
     ("declined", "%8s", "fix"), ("fixed", "%5s", "result"), ("waiting", "%7s", "result"),
 )
 FIXED_COL, WAITING_COL = 10, 11
@@ -350,15 +350,104 @@ def pr_created(cwd, pr):
 CLOCK_SKEW = datetime.timedelta(minutes=2)
 
 
-def reopened(cwd):
-    """Whether the feature went on after a merged pull request: when the
-    opening of the new one is unknown, its rounds are mixed with the old."""
+def feature_state(cwd):
+    """The feature's state, {} when it cannot be read or is not an object."""
     try:
         with open(os.path.join(cwd, STATE)) as fh:
             state = json.load(fh)
     except (OSError, ValueError):
-        return False
-    return state.get("reopened_pr") not in (None, "", "null")
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def reopened(cwd):
+    """Whether the feature went on after a merged pull request: when the
+    opening of the new one is unknown, its rounds are mixed with the old."""
+    return feature_state(cwd).get("reopened_pr") not in (None, "", "null")
+
+
+def polish_head(cwd):
+    """The head the clean pass read when the polish round was owed
+    (`polish_head`, written by review_polish_owe), or None — only once the
+    polish was taken (`polished`) or while it is under way (`due` with the
+    feature at step 4): a polish owed and then dropped (closed anyway, a
+    rewind, a block's close, a step closed past it) leaves the head behind
+    with no /simplify run."""
+    return polish_of(feature_state(cwd))
+
+
+def polish_of(state):
+    """polish_head from a feature's state, as polish_head reads it; the
+    review's map reads it by this too."""
+    # `due` is a polish under way only while step 4 is where the feature
+    # stands: a step closed past it (the pull request merged or closed) can
+    # leave `due` behind with no /simplify run.
+    due = ((state.get("steps") or {}).get("review") or {}).get("polish") == "due" and state.get("step") == "review"
+    return (state.get("polish_head") or None) if state.get("polished") or due else None
+
+
+# A commit the person asked for during the review — a `feat` commit
+# (Conventional Commits) or one carrying a `Requirement:` trailer — is the
+# development going on, no fix (review.md: a fix needs no Requirement
+# footer); the review's map tells its lines apart by the same test.
+ASKED_SUBJECT = re.compile(r"feat(\(|!|:)")
+
+
+def asked_commit(subject, requirement):
+    return bool(ASKED_SUBJECT.match(subject or "") or (requirement or "").strip())
+
+
+def own_places(cwd, base, head):
+    """How many places of the code the feature's own commits from base to
+    head changed, the person's asks left out (asked_commit): first-parent and
+    no merges, each hunk of each commit one place, a deletion as much as a
+    write. 0 for the same head; None when git cannot tell (a rewritten branch
+    too, as fixed_lines reads it)."""
+    if not base or not head:
+        return None
+    if base == head:
+        return 0
+    # Records open with a NUL, which no text diff holds (git shows such a
+    # file as binary).
+    log = own_log(cwd, base, head, "%x00%s%x02%(trailers:key=Requirement,valueonly,separator=;)")
+    if log is None:
+        return None
+    places = 0
+    for rec in log.split("\x00")[1:]:
+        first, _, rest = rec.partition("\n")
+        subject, _, req = first.partition("\x02")
+        if not asked_commit(subject, req):
+            # A hunk is a place; a binary file changed is one too.
+            places += sum(1 for line in rest.splitlines() if line.startswith("@@") or line.startswith("Binary files "))
+    return places
+
+
+def polish_index(head, runs):
+    """The last of the runs (the report's groups, the map's rounds) that read
+    <head>, or None: the round whose fixing was step 4's polish round. The
+    one rule the report (polish_round) and the map (review_map.py's
+    polish_round) name it by."""
+    found = [i for i, r in enumerate(runs) if head and r.get("head") == head]
+    return found[-1] if found else None
+
+
+def polish_round(cwd, groups):
+    """The report's polish round, by the head sclaude recorded when it owed
+    the polish (polish_head); None with no record."""
+    return polish_index(polish_head(cwd), groups)
+
+
+def polish_places(cwd, groups, i):
+    """How many places of the code the polish round changed, as own_places
+    counts them up to the next run's head (HEAD after the last)."""
+    nxt = groups[i + 1].get("head") if i + 1 < len(groups) else None
+    if not nxt:
+        try:
+            nxt = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True,
+                                 text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+    return own_places(cwd, groups[i].get("head"), nxt)
 
 
 def after(at, since):
@@ -563,6 +652,24 @@ def near(a, b):
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
 
 
+def own_log(cwd, base, head, fmt):
+    """`git log -p -U0` of the feature's own commits from base to head, each
+    opened by <fmt>: first-parent and no merges, so main merged in on the way
+    is no change of the feature's; text that is not UTF-8 replaced. None when
+    git cannot tell — a branch rebased or force-pushed between the two, where
+    base..head would be every commit of the feature again."""
+    try:
+        if subprocess.run(["git", "merge-base", "--is-ancestor", base, head], cwd=cwd,
+                          capture_output=True, timeout=30).returncode != 0:
+            return None
+        out = subprocess.run(["git", "log", "--first-parent", "--no-merges", "--format=" + fmt, "-p",
+                              "-U0", "%s..%s" % (base, head)],
+                             cwd=cwd, capture_output=True, text=True, errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
 def fixed_lines(cwd, base, head):
     """{path: [(first, last)]} — the lines the feature's own commits between
     two reviewed heads wrote: first-parent and no merges, so main merged in
@@ -571,21 +678,11 @@ def fixed_lines(cwd, base, head):
     absorbs that. {} when git cannot tell."""
     if not base or not head or base == head:
         return {}
-    try:
-        # Only a branch that moved forward: rebased or force-pushed between
-        # the two runs, base..head is every commit of the feature again.
-        if subprocess.run(["git", "merge-base", "--is-ancestor", base, head], cwd=cwd,
-                          capture_output=True, timeout=30).returncode != 0:
-            return {}
-        out = subprocess.run(["git", "log", "--first-parent", "--no-merges", "--format=", "-p",
-                              "-U0", "%s..%s" % (base, head)],
-                             cwd=cwd, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    if out.returncode != 0:
+    log = own_log(cwd, base, head, "")
+    if log is None:
         return {}
     lines, path = {}, None
-    for text in out.stdout.splitlines():
+    for text in log.splitlines():
         if text.startswith("+++ "):
             path = text[6:] if text.startswith("+++ b/") else None
         elif path and text.startswith("@@"):
@@ -627,11 +724,7 @@ def sessions(cwd, since=None):
     """The review sessions from the feature's state, oldest first: those that
     were still going when the pull request opened at <since> — the one that
     opened it included."""
-    try:
-        with open(os.path.join(cwd, STATE)) as fh:
-            state = json.load(fh)
-    except (OSError, ValueError):
-        return []
+    state = feature_state(cwd)
     runs = ((state.get("steps") or {}).get("review") or {}).get("runs") or []
     now = datetime.datetime.now(datetime.timezone.utc)
     out = []
@@ -924,6 +1017,9 @@ def main():
         for line in heading(blocks is not None):
             print(line)
         who = fixers(groups, people)
+        # The polish round's fixing is /simplify's: named so in the session
+        # column, and what it changed counted as fixed in its row.
+        polish = polish_round(cwd, groups)
         # The fixing cost of each run, summed over the sessions that answered
         # it (fixes_per_round); a session still going has not given the cost
         # of the launch running now, which goes on the run its start falls
@@ -991,6 +1087,10 @@ def main():
             # thread stands now.
             if session == WAIT or i in pending:
                 result = (WAIT,) * 3
+            elif i == polish:
+                session = "simplify"
+                places = polish_places(cwd, groups, i)
+                result = (0, places if places is not None else "", 0)
             # A run still going has not said what it found: what it posted so
             # far, or nothing yet, read as its count — zeros as "found
             # nothing". The total counts every thread there is.

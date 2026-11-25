@@ -813,13 +813,20 @@ PY
 )" || return 0
   [[ -n "$body" ]] || return 0
 
-  # Our own comment by its marker. gh has its own jq here, no external one is
-  # required.
-  id="$(gh api "repos/$repo/issues/$issue/comments" --paginate \
-        --jq "map(select(.body | startswith(\"<!-- sclaude:$(state_get "$state" feature) -->\"))) | .[0].id" \
-        2>/dev/null)" || id=""
+  # Our own comment by its marker, through gh's own jq. --paginate runs the
+  # filter on each page, so it streams ids and the first is taken (`.[0]`
+  # would answer once per page). A read that failed before finding ours
+  # leaves the summary to the next sync rather than posting a second.
+  local found
+  if ! found="$(gh api "repos/$repo/issues/$issue/comments?per_page=100" --paginate \
+        --jq ".[] | select((.body // \"\") | startswith(\"<!-- sclaude:$(state_get "$state" feature) -->\")) | .id" \
+        2>/dev/null)" && [[ -z "$found" ]]; then
+    warn "  could not read the comments of issue #$issue — the summary waits"
+    return 0
+  fi
+  id="${found%%$'\n'*}"
 
-  if [[ -n "$id" && "$id" != "null" ]]; then
+  if [[ -n "$id" ]]; then
     gh api --silent -X PATCH "repos/$repo/issues/comments/$id" \
       -f body="$body" >/dev/null 2>&1 \
       || warn "  could not update the summary on issue #$issue"

@@ -65,6 +65,14 @@ blocks is named by its block — "Block 3 · round 7 (131)" — with, in bracket
 its row in the terminal's review report, and every mark on the map says on
 hover what it means. Played back, the map grows round by round.
 
+The same review can be read by thread instead of by place: a tree growing
+from the pull request, a column a round, each thread a line from the fix it
+was found on to its own fix, a fix a circle as large as the lines it
+changed. A finding posted on the lines an earlier fix wrote is that fix's
+child, so the tree shows which fixes bred new problems and which were read
+again and left alone (✓). With chains on one row, a problem that kept
+coming back to one place of the code is one long straight row, marked ×N.
+
 It is a diagnosis, not a cure: it shows which parts of the code have had
 enough review and which are still worth it, and leaves the decision with
 the person.

@@ -464,8 +464,36 @@ put right after the ones it replaced — so a fix's place (`p0`/`p1`, the
 lines it removed and wrote) and a thread's (`p`) are the same place in every
 round, and an icicle grows from the lines it changed. A file whose fixes do
 not add up to its next version (a rename) is placed by line numbers instead.
-The panel draws by fix (files joined by thread or subagent) or by file (one
-icicle a file, never joined), a choice kept in the browser. Read in review blocks, the columns are grouped by block (the cut's
+The panel draws by fix (files joined by thread or subagent), by file (one
+icicle a file, never joined) or by thread, a choice kept in the browser. By
+thread (`drawTree` in process_review.js) draws the same JSON as descent: a
+node a thread, or a round's changes in one file that no thread asked for;
+a thread's parent is the owner of the fix its `of` names, such a change's
+the owners of its `from`, the one it rewrote most first. A fix is a pie at
+the head of its round's column, a thread the line from its parent's pie (or
+the PR's) to its own, the pies lying over it as knots — a tick on it only
+where a check missed; each branch takes a band of rows, the node in
+the middle of its children, so the ribbons turn in the gap before the next
+round and never cross. With chains on one row (`treeChains`, kept in the
+browser) a node's trunk — its only child, or the one with the largest
+`desc` — takes its row (`chain`), the others above and below, the earlier
+node's farther out, so lines still never cross; `rows` holds each row's
+first node, `placed` every node drawn. The row is labelled by its first
+node and titled by its last thread, with ×N threads and → the last other
+file the chain reached; same-row repeats and second parents arch over it. The polish round is `polish` on its round, the one
+that read `polish_head` (`polish_round` in review_map.py). Folded branches are kept in the browser
+per feature, each drawn as a summary pie a round. A line's thickness is the
+root of all its branch changed (`tot`, Leonardo's rule), its first fifth
+out of the circle it leaves cut along and darkened by its branch's findings'
+`severity` (review_map.py's `severities`: a mark's kind, else important in a
+round that marked any, else unmarked); the label's ✓ or ring counts its
+branch's ends resolved. Findings the local review put in the conversation
+(`conversation_findings`, by local_review.py's `NOT_IN_DIFF` and
+`FROM_LOCAL`) are threads with `conv`; the GitHub review's comments of
+findings (`loose`) are a row with no file. The view (`rvm`) and a note
+clicked open (`rvi`) are kept in the page's address (process_url.js). A thread's `cites` — the earlier threads its replies name, by
+review_report.py's `CITED` (`cites` in review_map.py) — are dotted arcs,
+repeats rather than parents. Read in review blocks, the columns are grouped by block (the cut's
 `blocks`, FEATURE_BLOCKS), each block's name over its files, a line between
 two, and the files the cut does not name last. On the page the
 development's diff up to the first round is the block on top (its height
@@ -2453,6 +2481,19 @@ run, or to the session's end (`fix_window`). The report once
 paired each fix with the run after it, so the findings of the pull request's
 first run stood alone in a row `before` and the session that fixed them came
 next, with a cost and no findings.
+
+**The polish round's row.** When the gate owes the polish round it records
+the head the clean pass read (`polish_head`, `review_polish_owe`); the
+round that read it — the last one, if several did — is the polish round's
+(`polish_round`, in review_report.py and review_map.py alike, read by
+`polish_of` only once the polish was taken or while it is under way; none
+for a feature from before the record, nor for a polish owed and dropped). Its row names its session `simplify`, and
+its `fixed` counts the places its commits changed up to the next run's head
+— each hunk, a deletion or a binary file too, the person's asks
+(`asked_commit`: a `feat` commit or a `Requirement:` trailer) left out
+(`own_places`) — a count of places, which the total of findings leaves out.
+The review's map draws that round as a line across the icicles and a
+tinted column of the tree.
 
 **A finding on the fixes is one on lines they wrote.** `on fixes` counts the
 threads of a run that sit within `NEAR_LINES` of an earlier round's fixed

@@ -316,7 +316,25 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   what they replaced — so a column stays the same code from top to bottom.
   Two ways to draw the icicles, chosen by the switch in the panel: **by
   fix** joins the files one fix touched, **by file** keeps one icicle a file
-  that splits where its changes part. Either way, a place's hover lists the
+  that splits where its changes part. A third, **by thread**, reads the
+  review as a tree growing left to right from the pull request, a column a
+  round: each thread is a line from the fix it was found on to its own fix,
+  coloured by how it ended, as thick as all that grew from it, and darker
+  at its start by the share of important findings in its branch; a fix is
+  a circle whose sectors are the lines added and removed (hatched by kind
+  of file, as on the icicles). A purple tick marks a check that missed, a
+  dotted arc a finding repeated, 💬 a finding posted in the conversation;
+  the review on GitHub's findings put in a comment are one row with no
+  file. Beside each row's label, ✓ when its branch is resolved, a filling
+  ring while it partly is. Click the number over a circle to fold what grew
+  from it into one row. Tick **chains on one row** in the tree's corner
+  and a branch goes on along its parent's row — an only child, or of several
+  the one with the most grown from it — so a problem that kept coming back
+  to one place of the code is one long straight row, titled by its last
+  thread with how many it holds (×4) and, after →, the last other file
+  it went on into; every thread and change of the row is in each circle's hover. Hover anything for it drawn large and read out,
+  click it to keep that note open — the link keeps it, and the view — and
+  a thread's title opens it on GitHub. In the icicle views, a place's hover lists the
   same finding's fixes in other files of that round — the same thread, or
   one subagent's work — each a link that scrolls the map there. From the code hang icicles: each place
   the review sent fixes to, a straight-sided band a round whose bottom is as

@@ -62,6 +62,7 @@ FIELDS = [
     ("steps.review.left_open", (FEATURE,), "review threads left open at the close"),
     ("steps.review.polish", (FEATURE,), "step 4's polish round (/simplify): `due` while its session is owed or open (review_polish_owe), cleared by the gate after it (review_polish_taken), by a rewind and by a block's close like the round's other fields"),
     ("polished", (FEATURE,), "true once step 4's polish round was taken (review_polish_taken): once a feature, never cleared"),
+    ("polish_head", (FEATURE,), "the head the clean pass read when the polish round was owed (review_polish_owe): the round whose fixing was /simplify, as the review's report and map name it (polish_round in review_report.py and review_map.py) — read only once `polished` or while `steps.review.polish` is `due` with the feature at step 4, so a polish owed and dropped leaves it unread"),
     ("steps.review.local_told", (FEATURE,), "the head the local review's result was last told for"),
     ("steps.review.round_head", (FEATURE,), "the head a review round began on"),
     ("steps.review.round_open", (FEATURE,), "a review round is under way"),

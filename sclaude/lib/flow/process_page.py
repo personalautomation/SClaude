@@ -60,7 +60,7 @@ REVIEW_SCRIPT = page_asset.read(__file__, "process_review.js")
 REVIEW_STYLE = page_asset.read(__file__, "process_review.css")
 REVIEW_PANEL = """<div id="rv" role="region" aria-label="The review map" hidden><div class="rv-top"><h3>📊 The review</h3>
 <span class="rv-sum muted">…</span>
-<span class="rv-mode" role="radiogroup" aria-label="Icicles"><label title="Join the files one fix touched: one thread, or one subagent's work"><input type="radio" name="rv-mode" value="fix"> by fix</label><label title="One icicle a file, splitting where its changes part, never joined to another"><input type="radio" name="rv-mode" value="file"> by file</label></span>
+<span class="rv-mode" role="radiogroup" aria-label="Icicles"><label title="Join the files one fix touched: one thread, or one subagent's work"><input type="radio" name="rv-mode" value="fix"> by fix</label><label title="One icicle a file, splitting where its changes part, never joined to another"><input type="radio" name="rv-mode" value="file"> by file</label><label title="A tree of threads, left to right: each thread a line from the fix whose lines it was posted on to its own fix, a circle"><input type="radio" name="rv-mode" value="tree"> by thread</label></span>
 <label title="The person's answers and threads"><input type="checkbox" class="rv-hands" checked> ✋</label>
 <button type="button" class="rv-centre" title="Bring the review step back to the middle">⌖</button>
 <button type="button" class="rv-full" aria-pressed="false" title="The review's map over the whole page; Esc or this button brings it back">⛶ full screen</button>

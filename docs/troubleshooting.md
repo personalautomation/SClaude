@@ -29,6 +29,11 @@ dim line under it is the fix: `vercel login`, `chmod 600` on an `.env` file
 others can read, `./install.sh` for a unit that is not running, an environment
 not chosen yet. Warnings do not fail doctor; only ✗ does.
 
+**doctor's *gh X is older than 2.48*** — that gh cannot read a long list from
+GitHub in one go, so every pull request reads as unreadable and its review
+step never closes, and a new issue is created without its milestone. Upgrade gh (its own install page, or your package manager's
+newer channel).
+
 ## Updates of sclaude
 
 **`instruments: N commit(s) behind main, not updated —`** followed by *has

@@ -16,7 +16,7 @@ further a product is from it, the more of sclaude it simply goes without.
 | Linux or WSL2 with systemd, or macOS with Homebrew | the commands are bash; the QA watch and the per-feature proxy are systemd user units, or launchd agents on macOS. On WSL, systemd has to be switched on (`systemd=true` in `/etc/wsl.conf`); `install.sh` says how if it is not. On macOS, see [below](#on-macos) |
 | git, python3 | everything sclaude does goes through them |
 | the `claude` CLI, with auto mode and Bash allowed | every step is a Claude Code session; without those settings steps 2–4 stop on permission prompts |
-| a GitHub repository and `gh`, logged in with the `project` scope | issues, pull requests, the board and QA's verdicts all live on GitHub |
+| a GitHub repository and `gh` 2.48 or newer, logged in with the `project` scope | issues, pull requests, the board and QA's verdicts all live on GitHub |
 
 **Recommended.** Each one turns on part of the cycle; without it that part is
 skipped, and sclaude says so where it would have acted:

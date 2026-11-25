@@ -2201,21 +2201,26 @@ leads to; a block lights the commands open there.</p>
 // can be selected and copied (the user's word, 2026-11-17): it is placed once
 // for what is hovered, not dragged along with the pointer, and hidden a
 // moment after the pointer has left both; going over something else on the
-// way to it changes it only if the pointer stays there. One note is open at
-// a time. holdTip(el) gives a note element show(key, html, ev, hovered),
-// leave(), hide(), redraw(), detach() and busy; the review's map uses it too.
+// way to it changes it only if the pointer stays there. One hover note is
+// open at a time; a note clicked open (pin) stays beside it until closed.
+// holdTip(el) gives a note element show(key, html, ev, hovered), leave(),
+// hide(), redraw(), detach(), pin(key, html, ev, el), unpin(), moveTo(el)
+// and busy; the review's map uses it too.
 const TIPS = [];
 function holdTip(tip) {
   const GRACE = 400, SWITCH = 180;
-  let key = null, timer = 0, pend = 0, inside = false, drag = false;
+  let key = null, timer = 0, pend = 0, inside = false, drag = false, kept = false;
   tip.classList.add('hold-tip');
+  // A note clicked open (`pin`) stays: neither the pointer leaving it, nor
+  // another note, nor a redraw hides or detaches it — only unpin().
   const hide = () => {
+    if (kept) return;
     clearTimeout(timer); clearTimeout(pend);
     tip.hidden = true; key = null; inside = false;
   };
   const leave = () => {
     clearTimeout(pend);
-    if (tip.hidden || inside || drag) return;
+    if (tip.hidden || inside || drag || kept) return;
     clearTimeout(timer); timer = setTimeout(hide, GRACE);
   };
   tip.addEventListener('mouseenter', () => { inside = true; clearTimeout(timer); clearTimeout(pend); });
@@ -2244,7 +2249,9 @@ function holdTip(tip) {
     tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
   }
   function show(k, html, ev, el) {
-    if (inside || drag) return;
+    // A pinned note is not replaced by a hover: another key waits until it
+    // is closed (unpin()).
+    if (inside || drag || (kept && k !== key)) return;
     clearTimeout(timer);
     if (k === key && !tip.hidden) { clearTimeout(pend); return; }
     // Measured now, and again when it shows if still on the page: a redraw
@@ -2263,8 +2270,21 @@ function holdTip(tip) {
   function redraw(k, html) { if (!tip.hidden) { key = k; tip.innerHTML = html; } }
   // Kept open over a redraw that renumbered what it was about: no key, so
   // the next hover always draws afresh.
-  function detach() { key = null; }
-  const api = {show, leave, hide, redraw, detach, get key() { return tip.hidden ? null : key; },
+  function detach() { if (!kept) key = null; }
+  // Clicked open: shown for good, until unpin().
+  function pin(k, html, ev, el) {
+    kept = false; hide();
+    show(k, html, ev, el);
+    kept = !tip.hidden && key === k;
+  }
+  function unpin() { kept = false; hide(); }
+  // Placed again by what it is about, its text kept (the layout moved).
+  function moveTo(el) {
+    if (tip.hidden || !el || !el.isConnected) return;
+    const r = el.getBoundingClientRect();
+    place(r.x + r.width / 2, r.y + r.height / 2, r);
+  }
+  const api = {show, leave, hide, redraw, detach, pin, unpin, moveTo, get key() { return tip.hidden ? null : key; },
     get busy() { return !tip.hidden && (inside || drag); }};
   TIPS.push(api);
   return api;
@@ -2520,7 +2540,8 @@ pin(pinned);
 // (`pin`), what is selected (`sel`, the elements' keys), and a play — which
 // map (`play`), which pass on a map of passes (`pass`), the place it is at
 // (`at`, its index in the play), its speed (`speed`), "this map only"
-// (`only`) and paused (`paused`); the review's map full screen (`rv`). In the hash: nothing of it goes to sclaude,
+// (`only`) and paused (`paused`); the review's map full screen (`rv`), its
+// view (`rvm`: fix, file, thread) and the note clicked open on it (`rvi`). In the hash: nothing of it goes to sclaude,
 // and a change does not load the page again. A hash naming a section alone
 // (the legend's links) is read as `s`.
 (() => {
@@ -2548,6 +2569,13 @@ pin(pinned);
     const dock = document.getElementById('dock');
     if (dock) p.set('pin', dock.hidden ? '0' : '1');
     if (window.reviewMap && window.reviewMap.full()) p.set('rv', 'full');
+    // The review map's view and note only while its panel is up: a page
+    // that never showed it keeps an address with no view in it.
+    if (window.reviewMap && (window.reviewMap.shown() || wanted.get('rvm'))) {
+      p.set('rvm', window.reviewMap.mode());
+      const info = window.reviewMap.info();
+      if (info) p.set('rvi', info);
+    }
     const sel = window.processMap ? window.processMap.selected() : [];
     if (sel.length) p.set('sel', sel.join(','));
     const play = window.player && window.player.state();
@@ -2578,6 +2606,7 @@ pin(pinned);
       const b = document.querySelector('.tabs button[data-tab="' + CSS.escape(wanted.get('tab')) + '"]');
       if (b) b.click();
     }
+    if (wanted.get('rvm') && window.reviewMap) window.reviewMap.mode(wanted.get('rvm'));
     if (wanted.has('pin')) {
       const dock = document.getElementById('dock');
       if (dock && dock.hidden === (wanted.get('pin') === '1')) {
@@ -2589,6 +2618,7 @@ pin(pinned);
     window.processUrlRestoring = false;
   }
   if (wanted.get('rv') === 'full' && window.reviewMap) window.reviewMap.full(true);
+  if (wanted.get('rvi') && window.reviewMap) window.reviewMap.info(wanted.get('rvi'));
   if (wanted.get('sel') && window.processMap) window.processMap.select(wanted.get('sel').split(','));
   if (wanted.get('play') && window.player) {
     window.player.want({map: wanted.get('play'), pass: wanted.get('pass'), at: +wanted.get('at') || 0,
@@ -2606,7 +2636,9 @@ pin(pinned);
   }
   // Written as it changes: a look twice a second costs nothing, and catches
   // every way the page changes without a hook in each.
-  let last = state();
+  // Compared with the address itself first, so that what the link left out
+  // (the review map's view, say) is written as soon as the page knows it.
+  let last = location.hash.slice(1);
   setInterval(() => {
     const now = state();
     if (now === last) return;

@@ -99,6 +99,23 @@ def gh_json(args, cwd=None):
     return data
 
 
+def gh_list(path, cwd=None, key=None):
+    """Every item of a REST list, all its pages, a hundred to a page; None
+    when GitHub cannot be read. `key` names the list inside each page for an
+    endpoint that answers with an object (check-runs' `check_runs`).
+    `--slurp` (gh 2.48, which `sclaude doctor` asks for): `--paginate` alone
+    prints a JSON value per page, which past the first does not parse."""
+    path += ("&" if "?" in path else "?") + "per_page=100"
+    pages = gh_json(["api", path, "--paginate", "--slurp"], cwd=cwd)
+    if not isinstance(pages, list):
+        return None
+    if key:
+        pages = [p.get(key) if isinstance(p, dict) else None for p in pages]
+    if not all(isinstance(p, list) for p in pages):
+        return None
+    return [item for page in pages for item in page]
+
+
 def pr_view(cwd, pr, fields):
     """`gh pr view <pr> --json <fields>`, the pull request as every verdict of
     the cycle reads it; None when GitHub cannot be read.
@@ -392,9 +409,8 @@ def render_new(cwd, pr, repo, since):
         author = ((c.get("author") or {}).get("login")) or "?"
         fresh.append(("**Discussion — %s:**" % author, body))
 
-    inline = gh_json(["api", "repos/%s/pulls/%s/comments" % (repo, pr),
-                      "--paginate"], cwd=cwd) if repo else None
-    for c in inline if isinstance(inline, list) else []:
+    inline = gh_list("repos/%s/pulls/%s/comments" % (repo, pr), cwd) if repo else None
+    for c in inline or []:
         stamp = parse_ts(c.get("created_at"))
         body = (c.get("body") or "").strip()
         if stamp is None or not body or stamp <= mark:
@@ -1567,9 +1583,9 @@ def review_state(cwd, pr, repo):
                 and not signed_locally(r.get("body"))]
 
     base = "repos/%s" % repo
-    comments = gh_json(["api", "%s/issues/%s/comments" % (base, pr), "--paginate"], cwd=cwd)
-    inline = gh_json(["api", "%s/pulls/%s/comments" % (base, pr), "--paginate"], cwd=cwd)
-    reviews = gh_json(["api", "%s/pulls/%s/reviews" % (base, pr), "--paginate"], cwd=cwd)
+    comments = gh_list("%s/issues/%s/comments" % (base, pr), cwd)
+    inline = gh_list("%s/pulls/%s/comments" % (base, pr), cwd)
+    reviews = gh_list("%s/pulls/%s/reviews" % (base, pr), cwd)
     if comments is None or inline is None or reviews is None:
         return "unknown"
     if human(comments) or human(inline):
@@ -1843,11 +1859,10 @@ def reviewed_before(cwd, pr, repo):
     oids = [c.get("oid") for c in (view.get("commits") or []) if c.get("oid")]
     review = findings = False
     for oid in reversed(oids[-CHECKS_HISTORY:]):
-        runs = gh_json(["api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, oid)],
-                       cwd=cwd)
+        runs = gh_list("repos/%s/commits/%s/check-runs" % (repo, oid), cwd, key="check_runs")
         if runs is None:
             return None
-        names = [r.get("name") or "" for r in runs.get("check_runs") or []]
+        names = [r.get("name") or "" for r in runs]
         review = review or any(names_review(n) for n in names)
         findings = findings or FINDINGS_CHECK in names
         if review and findings:

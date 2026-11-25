@@ -478,7 +478,9 @@ breaks the other silently — grep before you edit:
 
 - `as on r<id>`, the reply `sclaude/prompts/review.md` asks for when a
   declined thread repeats an earlier one, is read by `CITED` in
-  `sclaude/lib/review/review_report.py`; `tests/review-report.py` checks both sides.
+  `sclaude/lib/review/review_report.py`, which `cites` in `review_map.py`
+  uses too for the review map's repeat arcs; `tests/review-report.py`
+  checks both sides, `tests/review-map.py` the map's.
 
   <!-- The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later

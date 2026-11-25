@@ -350,10 +350,20 @@ issue_create() {
   # The milestone and the label are not critical: if they turn out to be
   # missing, the issue must still be created. So the milestone is looked up
   # separately and substituted only if it was found.
-  milestone="$(gh api "repos/$repo/milestones" --paginate --jq \
-    '[.[] | select(.state == "open")] | sort_by(.due_on // "9999") | .[0].title' \
-    2>/dev/null)" || milestone=""
-  [[ "$milestone" == "null" ]] && milestone=""
+  # Every page (--slurp, which gh refuses beside --jq), the earliest due
+  # picked in Python, so the title stays as GitHub spells it. A read that
+  # fails is no milestone.
+  milestone="$(gh api "repos/$repo/milestones?state=open&per_page=100" --paginate --slurp \
+    2>/dev/null | python3 2>/dev/null -c '
+import json, sys
+try:
+    pages = json.load(sys.stdin)
+except ValueError:
+    sys.exit()
+open_ = [m for page in pages if isinstance(page, list) for m in page
+         if isinstance(m, dict) and m.get("title")]
+open_.sort(key=lambda m: m.get("due_on") or "9999")
+print(open_[0]["title"] if open_ else "")')"
 
   local -a args=(
     --repo "$repo"

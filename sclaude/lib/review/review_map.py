@@ -23,6 +23,12 @@
 #     decline_of), the person's to decide (review-yours; one a night decided
 #     is theirs too, the map does not tell it apart) or noted as undoing a settled fix (review-reversals: a reversal
 #     for good, however it was resolved later);
+#   * the findings the review put in the conversation, their file not in the
+#     diff (local_review.py's post, read back by conversation_findings):
+#     threads with `conv`, on their file and line, fixed when a fix answers
+#     them, declined when a later comment leaves them as they are; and the
+#     ones the review on GitHub put in an ordinary comment, not on a line
+#     (`loose`, loose_findings), with no file;
 #   * the person: each AskUserQuestion answered in the tree's transcripts —
 #     how long it waited, whether the answer was the option marked
 #     "(Recommended)", and the thread its question linked to — and the
@@ -39,6 +45,8 @@
 #
 # SCLAUDE_REVIEW_MAP_THREADS names a JSON file of thread nodes to read
 # instead of asking GitHub (tests/review-map.py).
+# SCLAUDE_REVIEW_MAP_COMMENTS names one of the conversation's comments.
+import concurrent.futures
 import datetime
 import json
 import os
@@ -52,7 +60,7 @@ import claude_usage  # noqa: E402
 import cycle_steps  # noqa: E402
 import pr_context  # noqa: E402
 import review_report  # noqa: E402
-from local_review import JOURNAL  # noqa: E402
+from local_review import FROM_LOCAL, JOURNAL, NOT_IN_DIFF  # noqa: E402
 import process_config  # noqa: E402
 import review_blocks  # noqa: E402
 from review_blocks import FEATURE_BLOCKS  # noqa: E402
@@ -108,8 +116,9 @@ def ts(text):
 
 def git(tree, *args):
     try:
+        # A commit's non-UTF-8 text is replaced, never a stop of the map.
         out = subprocess.run(["git", "-C", tree] + list(args), capture_output=True,
-                             text=True, timeout=60, stdin=subprocess.DEVNULL)
+                             text=True, errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout if out.returncode == 0 else None
@@ -335,7 +344,7 @@ def asked_lines(tree, a, b):
     mine = set()
     for rec in log.split("\x01")[1:]:
         sha, subject, req = (rec.strip("\n").split("\x02") + ["", ""])[:3]
-        if re.match(r"feat(\(|!|:)", subject) or req.strip():
+        if review_report.asked_commit(subject, req):
             mine.add(sha)
     out = {}
     for sha in mine:
@@ -626,7 +635,74 @@ def threads_of(tree, nodes, rounds):
                     # outcome alone no longer says it.
                     "resolved": bool(t.get("isResolved")), "left": bool(pr_context.decline_of(comments[1:])),
                     "title": headline(first.get("body")),
+                    "minor": pr_context.minor_of(first.get("body")) if bot else None,
                     "_replies": [c.get("body") or "" for c in comments[1:]]})
+    return out
+
+
+# A finding the review put in the conversation, its file not in the diff
+# (local_review.py's post): its place and title, read back from its text.
+CONVERSATION = re.compile(r"^`([^`\n]+):(\d+)` " + re.escape(NOT_IN_DIFF) + r" — (?:\((" + "|".join(map(re.escape, pr_context.MINOR_KINDS)) + r")\) )?\*\*(.+?)\*\*")
+FROM_LOCAL_HEAD = FROM_LOCAL.split("%s")[0]
+
+
+def conversation_comments(tree, pr, repo):
+    """The pull request's conversation: its issue comments, oldest first.
+    SCLAUDE_REVIEW_MAP_COMMENTS names a JSON file of them instead (tests)."""
+    fake = os.environ.get("SCLAUDE_REVIEW_MAP_COMMENTS")
+    if fake:
+        return read_json(fake, [])
+    if os.environ.get("SCLAUDE_REVIEW_MAP_THREADS") or not pr or "/" not in repo:
+        return []
+    return pr_context.gh_list("repos/%s/issues/%s/comments" % (repo, pr), tree) or []
+
+
+def conversation_findings(rounds, comments):
+    """The review's findings posted in the conversation, as threads: on
+    their file and line, in the round that posted them, `conv` set. No
+    thread holds them, so none is resolved: one is declined when a later
+    comment leaves it as it is and names its place, links it or quotes its
+    title, fixed when a fix of its round answers it (set once the fixes are
+    placed), else open."""
+    out = []
+    for k, c in enumerate(comments):
+        body = (c.get("body") or "").strip()
+        m = CONVERSATION.match(body)
+        if not m or FROM_LOCAL_HEAD not in body:
+            continue
+        # A later comment is about it when it names its place (with or
+        # without the backticks), links it, or quotes its title.
+        named = re.compile(re.escape(m.group(1) + ":" + m.group(2)) + r"(?!\d)|" + re.escape(c.get("html_url") or "\0") + "|" + re.escape(m.group(4)))
+        later = [{"body": x.get("body") or "", "author": {"__typename": ((x.get("user") or {}).get("type")) or "User"}}
+                 for x in comments[k + 1:] if named.search(x.get("body") or "")]
+        left = bool(pr_context.decline_of(later))
+        at = c.get("created_at") or ""
+        out.append({"rid": "c%s" % c.get("id"), "url": c.get("html_url") or "", "t": ts(at),
+                    "path": m.group(1), "line": int(m.group(2)), "at": at, "r": round_at(rounds, ts(at)),
+                    "outcome": "declined" if left else "open", "by": "review", "resolvedBy": "",
+                    "resolved": False, "left": left, "title": m.group(4), "conv": True, "minor": m.group(3),
+                    "_replies": [x["body"] for x in later]})
+    return out
+
+
+def loose_findings(rounds, comments):
+    """The review's findings on GitHub that went into an ordinary comment of
+    the conversation, not on a line (the findings check's UNTHREADED_TITLE):
+    the Claude app's comments there, one entry each, by round, with their
+    opening words and link. Read as no file's: no fix is tied to them."""
+    out = []
+    for c in comments:
+        user = c.get("user") or {}
+        if user.get("type") != "Bot" or not (user.get("login") or "").startswith("claude"):
+            continue
+        body = (c.get("body") or "").strip()
+        # Its comments of findings say so ("One more finding…", "Three
+        # findings on lines…"); a summary or a progress note does not.
+        if "finding" not in body.lower():
+            continue
+        at = c.get("created_at") or ""
+        out.append({"id": c.get("id"), "url": c.get("html_url") or "", "at": at, "t": ts(at),
+                    "r": round_at(rounds, ts(at)), "text": body[:600]})
     return out
 
 
@@ -746,6 +822,48 @@ def settled(t):
     """A thread with an outcome that needs nobody: fixed, declined, or a
     reversal left as it is or resolved — the page's settled()."""
     return t["outcome"] in ("fixed", "declined") or (t["outcome"] == "reversal" and (t["left"] or t["resolved"]))
+
+
+def polish_round(state, rounds):
+    """Mark the round whose fixing was step 4's polish round (/simplify): the
+    last one that read the head sclaude recorded when it owed the polish
+    (`polish_head`, review_polish_owe) — as the review's report names it
+    (review_report.py's polish_round, polish_of: only once taken, or under
+    way at step 4); none with no record. Written as `polish` on that round."""
+    i = review_report.polish_index(review_report.polish_of(state), rounds)
+    if i is not None:
+        rounds[i]["polish"] = True
+
+
+def severities(threads):
+    """Each finding's severity, `severity` on its thread: `nit` or
+    `pre-existing` by its mark (MINOR_MARK); with no mark, `important` when
+    its round marked any of its findings — the review then marks only the
+    minor ones — else `unmarked`, a round from before the marks; the
+    person's own threads `person`."""
+    marking = {t["r"] for t in threads if t.get("minor")}
+    for t in threads:
+        if t.get("by") == "person":
+            t["severity"] = "person"
+        elif t.get("minor"):
+            t["severity"] = t["minor"]
+        else:
+            t["severity"] = "important" if t["r"] in marking else "unmarked"
+        t.pop("minor", None)
+
+
+def cites(threads):
+    """The earlier threads each thread's replies name — `as on r<id>`, the
+    reply review.md asks for when a declined finding repeats one, or a
+    thread's link — read by review_report.py's CITED, so the map and the
+    report count the same repeats. Only threads of this pull request, never
+    the thread itself; written as `cites` on each thread that has any."""
+    known = {t["rid"] for t in threads if t["rid"]}
+    for t in threads:
+        named = {"r" + m for b in t.get("_replies") or () for m in review_report.CITED.findall(b)}
+        named = sorted(named & known - {t["rid"]})
+        if named:
+            t["cites"] = named
 
 
 def lineage(rounds, fixes, threads):
@@ -1153,8 +1271,11 @@ def build(tree):
         return {"pr": pr, "rounds": [], "files": [], "hunks": [], "threads": [], "hands": []}
     head = (git(tree, "rev-parse", "HEAD") or "").strip()
     ends = [r["head"] for r in rounds[1:]] + [head or rounds[-1]["head"]]
-    nodes = thread_nodes(tree, pr, repo)
-    threads = threads_of(tree, nodes, rounds)
+    # The threads and the conversation are two independent asks of GitHub.
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        asked = pool.submit(thread_nodes, tree, pr, repo), pool.submit(conversation_comments, tree, pr, repo)
+        nodes, talk = asked[0].result(), asked[1].result()
+    threads = threads_of(tree, nodes, rounds) + conversation_findings(rounds, talk)
     fixes, carried = [], []
     for i, r in enumerate(rounds):
         r["end"] = ends[i]
@@ -1281,7 +1402,20 @@ def build(tree):
         # moved code: half moved, the other half may be the fix of that thread.
         if (frm or (to and out)) and not h.get("asked") and (h.get("via") == "" or (h.get("via") == "near" and share >= MOVE_ALL)):
             h["outcome"], h["thread"], h["via"] = "moved", "", "move"
+    # A finding in the conversation has no thread to resolve: a fix that
+    # answers it is what says it was fixed.
+    answered = {h["thread"] for h in fixes if h["thread"]}
+    done = {t["rid"] for t in threads if t.get("conv") and t["outcome"] == "open" and t["rid"] in answered}
+    for t in threads:
+        if t["rid"] in done:
+            t["outcome"] = "fixed"
+    for h in fixes:
+        if h["thread"] in done:
+            h["outcome"] = "fixed"
     lineage(rounds, fixes, threads)
+    cites(threads)
+    severities(threads)
+    polish_round(state, rounds)
     for h in fixes:
         h.pop("i", None)
     for t in threads:
@@ -1339,7 +1473,7 @@ def build(tree):
             "blockSize": int(size) if size.isdigit() else review_blocks.SIZE,
             "files": [dict({"path": p, "lines": rounds[0]["lines"].get(p, 0)},
                            **({"axis": axis[p]} if p in axis else {})) for p in paths],
-            "rounds": rounds, "hunks": fixes, "threads": threads, "hands": hands}
+            "rounds": rounds, "hunks": fixes, "threads": threads, "hands": hands, "loose": loose_findings(rounds, talk)}
 
 
 def main(argv):

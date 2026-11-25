@@ -112,8 +112,12 @@ try:
                 run = nth(findings, i)
                 return {"check_runs": [run] if run else []}
             if "/check-runs" in path:
+                # Read whole, as gh_list reads it: its pages.
+                if "--slurp" not in args:
+                    return None
                 names = history if before in path else []
-                return {"check_runs": [{"name": n} for n in names]}
+                return [{"check_runs": [{"name": n} for n in names[:1]]},
+                        {"check_runs": [{"name": n} for n in names[1:]]}]
             return None
 
         def sleep(seconds):

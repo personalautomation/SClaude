@@ -306,6 +306,14 @@ def parse(answer):
     return found, resolved, count
 
 
+# A finding GitHub takes on no line and no file (the file is not in the
+# diff) goes to the pull request's conversation in this shape; the review's
+# map reads it back by these (review_map.py's conversation_findings), so
+# that it is drawn, fixed and followed as a thread is.
+NOT_IN_DIFF = "(not in this pull request's diff)"
+FROM_LOCAL = "_From the review run on this machine, on %s._"
+
+
 def post(cwd, pr, repo, head, f):
     """One finding as a thread on its line, else on its file, else in the
     conversation: "thread", "conversation", or None when GitHub took none."""
@@ -338,9 +346,8 @@ def post(cwd, pr, repo, head, f):
     # In the conversation it has no thread to resolve, so it is not signed as
     # the review's own: there it is a comment to answer, what people said,
     # and step 4 does not close past it.
-    text = ("`%s:%d` (not in this pull request's diff) — %s**%s**\n\n%s\n\n"
-            "_From the review run on this machine, on %s._"
-            % (f["path"], f["line"], "(%s) " % minor if minor else "", f["title"], f["body"], head[:7]))
+    text = ("`%s:%d` " + NOT_IN_DIFF + " — %s**%s**\n\n%s\n\n" + FROM_LOCAL) \
+        % (f["path"], f["line"], "(%s) " % minor if minor else "", f["title"], f["body"], head[:7])
     if gh(["pr", "comment", str(pr), "--body", text], cwd) is not None:
         return "conversation"
     return None

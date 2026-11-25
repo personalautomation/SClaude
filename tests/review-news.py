@@ -35,7 +35,12 @@ def fake_gh(rollup=(), comments=(), inline=()):
         if args and args[0] == "pr":
             return {"statusCheckRollup": list(rollup),
                     "comments": list(comments)}
-        return list(inline)
+        # Pages, as --paginate --slurp prints them: the newest comment on
+        # the last page, which a read of the first page alone would miss.
+        if "--slurp" not in args:
+            return None
+        rows = list(inline)
+        return [rows[:1], rows[1:]]
     return gh_json
 
 
@@ -85,6 +90,11 @@ def main():
         got = pr_context.render_new(".", 89, "o/r", SINCE)
         check("newer-inline-shown", "and this" in got, True)
         check("newer-inline-names-file", "app/page.tsx:10" in got, True)
+        # The newer one on the second page, behind one the session saw.
+        pr_context.gh_json = fake_gh(GREEN, [], [inline_comment(OLD, "seen"),
+                                                 inline_comment(NEW, "page two")])
+        got = pr_context.render_new(".", 89, "o/r", SINCE)
+        check("newer-inline-on-second-page", ("page two" in got, "seen" in got), (True, False))
 
         # A mix: the old is filtered out and the new stays — in one answer.
         pr_context.gh_json = fake_gh(GREEN, [discussion(OLD, "the old one"),

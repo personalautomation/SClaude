@@ -4,7 +4,8 @@
 // (`pin`), what is selected (`sel`, the elements' keys), and a play — which
 // map (`play`), which pass on a map of passes (`pass`), the place it is at
 // (`at`, its index in the play), its speed (`speed`), "this map only"
-// (`only`) and paused (`paused`); the review's map full screen (`rv`). In the hash: nothing of it goes to sclaude,
+// (`only`) and paused (`paused`); the review's map full screen (`rv`), its
+// view (`rvm`: fix, file, thread) and the note clicked open on it (`rvi`). In the hash: nothing of it goes to sclaude,
 // and a change does not load the page again. A hash naming a section alone
 // (the legend's links) is read as `s`.
 (() => {
@@ -32,6 +33,13 @@
     const dock = document.getElementById('dock');
     if (dock) p.set('pin', dock.hidden ? '0' : '1');
     if (window.reviewMap && window.reviewMap.full()) p.set('rv', 'full');
+    // The review map's view and note only while its panel is up: a page
+    // that never showed it keeps an address with no view in it.
+    if (window.reviewMap && (window.reviewMap.shown() || wanted.get('rvm'))) {
+      p.set('rvm', window.reviewMap.mode());
+      const info = window.reviewMap.info();
+      if (info) p.set('rvi', info);
+    }
     const sel = window.processMap ? window.processMap.selected() : [];
     if (sel.length) p.set('sel', sel.join(','));
     const play = window.player && window.player.state();
@@ -62,6 +70,7 @@
       const b = document.querySelector('.tabs button[data-tab="' + CSS.escape(wanted.get('tab')) + '"]');
       if (b) b.click();
     }
+    if (wanted.get('rvm') && window.reviewMap) window.reviewMap.mode(wanted.get('rvm'));
     if (wanted.has('pin')) {
       const dock = document.getElementById('dock');
       if (dock && dock.hidden === (wanted.get('pin') === '1')) {
@@ -73,6 +82,7 @@
     window.processUrlRestoring = false;
   }
   if (wanted.get('rv') === 'full' && window.reviewMap) window.reviewMap.full(true);
+  if (wanted.get('rvi') && window.reviewMap) window.reviewMap.info(wanted.get('rvi'));
   if (wanted.get('sel') && window.processMap) window.processMap.select(wanted.get('sel').split(','));
   if (wanted.get('play') && window.player) {
     window.player.want({map: wanted.get('play'), pass: wanted.get('pass'), at: +wanted.get('at') || 0,
@@ -90,7 +100,9 @@
   }
   // Written as it changes: a look twice a second costs nothing, and catches
   // every way the page changes without a hook in each.
-  let last = state();
+  // Compared with the address itself first, so that what the link left out
+  // (the review map's view, say) is written as soon as the page knows it.
+  let last = location.hash.slice(1);
   setInterval(() => {
     const now = state();
     if (now === last) return;

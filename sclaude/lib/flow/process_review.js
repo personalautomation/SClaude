@@ -36,10 +36,11 @@ const reviewMap = (() => {
   const body = panel.querySelector('.rv-body');
   let data = null, fetched = 0, drawnKey = '', until = null, ctx = {live: false, sel: null, play: null}, shown = false, loading = null;
   let off = false, drawn = false, placesNow = [], doneOf = () => false, whyOf = () => '';
-  // How icicles are drawn: 'fix' joins the files one fix touched; 'file'
-  // keeps one icicle a file, splitting where its changes part.
+  // How the map is drawn: 'fix' joins the files one fix touched; 'file'
+  // keeps one icicle a file, splitting where its changes part; 'tree' reads
+  // the review as descent, the findings' family tree (drawTree).
   let mode = 'fix', maxed = false;
-  try { mode = localStorage.getItem('review-map-mode') === 'file' ? 'file' : 'fix'; } catch (e) {}
+  try { const m = localStorage.getItem('review-map-mode'); mode = m === 'file' || m === 'tree' ? m : 'fix'; } catch (e) {}
   try { off = localStorage.getItem('review-map-off') === '1'; } catch (e) {}
   // Review blocks folded to a sliver, by id: a click on a block's name.
   let folded = new Set();
@@ -72,6 +73,19 @@ const reviewMap = (() => {
     let l = dark() ? 0.56 + 0.1 * k : 0.64 - 0.1 * k;
     return 'oklch(' + l.toFixed(2) + ' ' + c + ' ' + hue + ')';
   }
+  // The tree's: added and removed lines; a fix session's sectors' names;
+  // a finding's severity — its order, its darkening over the line's own
+  // colour (important dark, a nit none, older code a little and hatched,
+  // unmarked a little and dotted, the person's lined) and its name.
+  const addColour = () => dark() ? 'oklch(0.70 0.14 148)' : 'oklch(0.64 0.15 148)';
+  const delColour = () => dark() ? 'oklch(0.68 0.16 25)' : 'oklch(0.62 0.17 25)';
+  const SESSION_NAME = {fixed: 'fixed threads', declined: 'declined threads', yours: 'left to you', reversal: 'would undo a fix', open: 'still open threads', side: 'no thread', moved: 'moved code', asked: 'asked for by the person'};
+  const SEV_ORDER = ['important', 'nit', 'pre-existing', 'person', 'unmarked'];
+  const SEV_FILL = {important: 'rgba(0,0,0,.42)', nit: 'rgba(0,0,0,0)', 'pre-existing': 'rgba(0,0,0,.14)', unmarked: 'rgba(0,0,0,.14)', person: 'rgba(0,0,0,.14)'};
+  const SEV_PAT = {'pre-existing': 'test', unmarked: 'comment', person: 'doc'};
+  const SEV_NAME = {important: 'important', nit: 'a nit', 'pre-existing': 'in older code', person: 'the person\'s', unmarked: 'unmarked'};
+  // A moment, as the notes say it.
+  const stamp = (t) => new Date(t * 1000).toLocaleString([], {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
   // The development's code, before the review or asked for during it.
   function devColour(alpha) {
     return 'oklch(' + (dark() ? 0.56 : 0.74) + ' 0.09 75 / ' + alpha + ')';
@@ -254,6 +268,8 @@ const reviewMap = (() => {
     if (show === shown) { if (show) draw(); return; }
     shown = show;
     panel.hidden = !show;
+    // A note pinned on the map goes with it.
+    if (!show) unpin();
     document.body.classList.toggle('rv-open', show);
     // Full screen is the person's choice: it goes with the panel and comes
     // back with it (the player leaving the review and returning), and the
@@ -306,7 +322,7 @@ const reviewMap = (() => {
     loading = fetch('/__sclaude/flow/review?f=' + encodeURIComponent(label), {cache: 'no-store'})
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((d) => { data = d; fetched = Date.now(); draw(); })
-      .catch((e) => { if (!data) body.innerHTML = '<p class="muted rv-wait">The review could not be read (' + h(e) + ')</p>'; })
+      .catch((e) => { console.error(e); if (!data) body.innerHTML = '<p class="muted rv-wait">The review could not be read (' + h(e) + ')</p>'; })
       .finally(() => { loading = null; });
   }
   setInterval(() => { if (shown && !document.hidden) load(); }, 60000);
@@ -354,22 +370,25 @@ const reviewMap = (() => {
     // Each poll and each player step asks again; the drawing is rebuilt only
     // when what it is drawn from changed, so the element under the pointer
     // and the scroll stay as they were.
-    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), body.clientWidth, body.clientHeight, dark(), [...folded].join(',')].join('|');
+    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), treeChains, body.clientWidth, body.clientHeight, dark(), [...folded].join(',')].join('|');
     if (key === drawnKey) return;
     drawnKey = key;
     // The places are numbered afresh: a tooltip kept by number would show
     // another's — unless the pointer is in it, reading or selecting: its
     // text is a snapshot and stays.
+    // A pinned note is kept by the holder; afterDraw keeps or closes it.
     if (hold.busy) hold.detach(); else hold.hide();
     const d = data;
-    if (d.error) { body.innerHTML = '<p class="muted rv-wait">' + h(d.error) + '</p>'; return; }
+    // Nothing of the map drawn: a pinned note's subject is gone too.
+    if (d.error) { body.innerHTML = '<p class="muted rv-wait">' + h(d.error) + '</p>'; requestAnimationFrame(afterDraw); return; }
     let rounds = d.rounds;
     if (until != null) rounds = rounds.filter((r) => r.t * 1000 <= until);
     // The cut the review stood under at the moment shown: the last one, or,
     // played back, the one before the split that came after that moment.
     const cutBlocks = ((until != null && (d.earlier || []).find((e) => e.until * 1000 > until)) || d).blocks || [];
     panel.querySelector('.rv-sum').innerHTML = d.rounds.length ? summary(d, rounds) : 'No review round yet';
-    if (!rounds.length) { body.innerHTML = '<p class="muted rv-wait">No review round ' + (d.rounds.length ? 'by this moment' : 'yet') + '.</p>'; return; }
+    if (!rounds.length) { body.innerHTML = '<p class="muted rv-wait">No review round ' + (d.rounds.length ? 'by this moment' : 'yet') + '.</p>'; requestAnimationFrame(afterDraw); return; }
+    if (mode === 'tree') { roundsShown = rounds; blocksNow = []; placesNow = []; drawTree(d, rounds); return; }
     let files = d.files.map((f) => f.path);
     const devf = (d.dev && d.dev.files) || {};
     // Lines of each file at each boundary between rounds: the round's head,
@@ -688,6 +707,19 @@ const reviewMap = (() => {
           + (r.new != null ? ' · ' + r.new + ' found' : '') + (r.cost ? ' · $' + r.cost.toFixed(2) : '') + '</text>' : '') + '</g>');
     });
     const rowsEnd = svg.length;
+    // The polish round: a line across the map, as a block's split has, over
+    // the row whose fixing was /simplify (review_map.py's polish_round) —
+    // drawn under a split's line of the same round, its label past the
+    // split's, and played back only once that round's pass is over.
+    const splitAt = new Set((d.earlier || []).map((e) => rounds.findIndex((r) => r.t >= e.until)));
+    rounds.forEach((r, i) => {
+      if (!r.polish || (until != null && (r.t + (r.seconds || 0)) * 1000 > until)) return;
+      // Beside a split's label, at the far end of the line instead.
+      const at = splitAt.has(i) ? '" x="' + (W - 8) + '" style="text-anchor:end' : '" x="' + (GUT + 4);
+      svg.push('<g class="rv-polishcut"><title>✨ — the polish round: this round found nothing, and its fixing was /simplify over the whole pull request; the review read what it changed next</title>'
+        + '<line x1="0" x2="' + W + '" y1="' + ys[i] + '" y2="' + ys[i] + '"/>'
+        + '<text' + at + '" y="' + (ys[i] - 3) + '">✨ simplify</text></g>');
+    });
     // Where a block was split: a line across the map at the first round
     // after it, naming the block and its parts; a click tells the story.
     (d.earlier || []).forEach((e, j) => {
@@ -1444,9 +1476,10 @@ const reviewMap = (() => {
       (pileAt[p.r] = pileAt[p.r] || []).push([x, Math.max(R + 0.5, more.length * 2.3 + 1)]);
       shown.forEach((t, k) => {
         const y = ys[p.r] + TOP + k * STEP;
-        svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + (t.missed != null ? ' missed' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
+        svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + (t.missed != null ? ' missed' : '') + (t.conv ? ' conv' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
           + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '" data-tip-mark="fill"><title>● — a review thread, its colour how it ended\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
           + (t.by === 'person' ? '\nThe thick ring: your own thread' : '')
+          + (t.conv ? '\nThe dashed ring: a finding in the conversation — its file is not in the diff, so no thread holds it' : '')
           + (t.missed != null ? '\nThe purple ring: on lines a fix wrote that ' + roundName(t.missed).toLowerCase() + ' read and passed — the check missed it' : '')
           + (p.all.length > 1 ? '\n' + p.all.length + ' threads here' : '') + '</title></circle></a>');
       });
@@ -1525,6 +1558,953 @@ const reviewMap = (() => {
     // Too many rounds to fit: open on the latest, and follow the player down.
     body.scrollTop = until != null || !drawn ? body.scrollHeight : keep[1];
     drawn = true;
+    requestAnimationFrame(afterDraw);
+  }
+  // --- by thread: the findings' family tree ----------------------------------
+  // The same review read as descent instead of place. Time runs left to
+  // right, a column a round: its pass finds threads (dots), its fixing
+  // answers them (a band from the dot to the knot where the fix landed).
+  // A thread found later on the lines a fix wrote is that fix's child
+  // (review_map.py's lineage: the thread's `of`, git blame, never
+  // nearness); a change no thread asked for hangs from the fixes whose
+  // lines it rewrote (`from`), its node hollow. What has no parent grows
+  // from the development's code, the trunk on the left.
+  //
+  //   row: one node, in depth-first order — a parent above its children,
+  //     roots by file and line, so a node keeps its row as rounds come;
+  //   dot's colour: how the thread ended (the icicles' hues, one size);
+  //   band: the fix — as thick as the root of the lines it changed,
+  //     added above (green) and removed below (red), the beige of the
+  //     development where the person asked for it, mauve where code moved;
+  //     hatched by the kind of file as the icicles are; dashed where the
+  //     fix is tied to its thread by nearness alone;
+  //   from a knot to a child: a curve as thick as the root of the lines of
+  //     the fix the child was posted on — the part of the fix that bred it;
+  //     purple where a round had read that fix and passed it (missed), red
+  //     where the child would undo it; a second parent dashed and thin;
+  //   after a knot with no child: ✓ in the column of the round that read
+  //     its files again and found nothing there, ⋯ while none has;
+  //   ✋ the person answered about that thread.
+  let treeNodes = [], treeSess = {}, treePR = null, treeGeo = null, treeHands = {}, treeMeasure = null, treeLoose = [];
+  // Branches folded in the tree, by node id, kept per feature: a click on
+  // a circle's count folds what grew from it, a click again (or on the
+  // summary) opens it.
+  const TREE_FOLDED = 'review-tree-folded:' + label;
+  let treeFolded = new Set();
+  // An id in or out of a set of folded ones, kept in the browser.
+  const toggleKept = (set, key, id) => {
+    if (set.has(id)) set.delete(id); else set.add(id);
+    try { localStorage.setItem(key, JSON.stringify([...set])); } catch (e) {}
+  };
+  try { treeFolded = new Set(JSON.parse(localStorage.getItem(TREE_FOLDED) || '[]')); } catch (e) {}
+  // Chains on one row (drawTree's rows): the box in the tree's corner, kept
+  // in the browser.
+  let treeChains = false;
+  try { treeChains = localStorage.getItem('review-tree-chains') === '1'; } catch (e) {}
+  function drawTree(d, rounds) {
+    const R = rounds.length;
+    // A new drawing: nothing of it is lit yet (afterDraw lights a pinned
+    // note's line again).
+    treeLit = null;
+    const files = d.files.map((f) => f.path);
+    const fileIdx = (p) => { const i = files.indexOf(p); return i < 0 ? files.length : i; };
+    const lines = (x) => (x ? x.add + x.del : 0);
+    const nodes = [], nodeOf = {}, owner = {};
+    const make = (n) => Object.assign(n, {i: nodes.length, hs: [], kids: [], cross: [], hands: [], cites: [], citedBy: []}) && nodes.push(n) && (nodeOf[n.id] = n);
+    // Played back, a thread posted after the moment shown is not there yet,
+    // as on the icicles. One with no id of its own (no discussion link)
+    // gets one by its link or place and time, so two never share a node and
+    // a fold or a link keeps to it from one poll to the next.
+    // Their fixes go with them, not to a change no thread asked for.
+    const notYet = new Set();
+    d.threads.forEach((t) => {
+      if (t.r == null || t.r >= R) return;
+      if (until != null && (t.t || 0) * 1000 > until) { if (t.rid) notYet.add(t.rid); return; }
+      make({id: 't:' + (t.rid || 'u:' + (t.url || t.path + ':' + t.line + ':' + t.at)), t, r: t.r, path: t.path, line: t.line || 0, outcome: t.outcome});
+    });
+    d.hunks.forEach((x, k) => {
+      if (x.r == null || x.r >= R || (x.thread && notYet.has(x.thread))) return;
+      let n = x.thread && nodeOf['t:' + x.thread];
+      if (!n) {
+        const kind = x.asked ? 'asked' : x.outcome === 'moved' ? 'moved' : 'side';
+        const id = 's:' + x.r + ':' + kind + ':' + x.path;
+        n = nodeOf[id] || (make({id, r: x.r, path: x.path, line: x.x, outcome: kind, side: true}), nodeOf[id]);
+      }
+      n.hs.push(Object.assign({k}, x));
+      owner[k] = n;
+    });
+    // Parents: a thread's is the node that owns the fix it sits on; a
+    // change with no thread hangs from the owners of what it rewrote, the
+    // one it rewrote most first, the others drawn as second parents.
+    nodes.forEach((n) => {
+      let ps = [];
+      if (n.t) {
+        const p = n.t.of != null && owner[n.t.of];
+        if (p && p !== n && p.r < n.r) ps = [{p, w: lines(d.hunks[n.t.of]), k: n.t.of}];
+      } else {
+        const by = new Map();
+        n.hs.forEach((x) => (x.from || []).forEach((k) => {
+          const p = owner[k];
+          if (p && p !== n && p.r < n.r) by.set(p, (by.get(p) || 0) + lines(d.hunks[k]));
+        }));
+        ps = [...by].sort((a, b) => b[1] - a[1]).map(([p, w]) => ({p, w}));
+      }
+      if (!ps.length) return;
+      n.parent = ps[0].p; n.pw = ps[0].w;
+      ps[0].p.kids.push(n);
+      n.cross = ps.slice(1);
+    });
+    // The person's answers: at the thread a question named, else in the
+    // header of the round it came in (a question about the whole change,
+    // an answer to sclaude) — every one shown somewhere.
+    treeHands = {};
+    (d.hands || []).forEach((x) => {
+      if (x.kind === 'thread' || (until != null && x.t * 1000 > until)) return;
+      const n = x.rid && nodeOf['t:' + x.rid];
+      if (n) { n.hands.push(x); return; }
+      if (x.r == null || x.r >= R) return;
+      (treeHands[x.r] = treeHands[x.r] || []).push(x);
+    });
+    // A reply naming an earlier thread ("as on r<id>", review_map.py's
+    // `cites`): a repeat, drawn as a dotted arc, not a parent.
+    nodes.forEach((n) => (n.t && n.t.cites || []).forEach((rid) => {
+      const c = nodeOf['t:' + rid];
+      if (c && c !== n) { n.cites.push(c); c.citedBy.push(n); }
+    }));
+    nodes.forEach((n) => {
+      n.add = n.hs.reduce((a, x) => a + x.add, 0);
+      n.del = n.hs.reduce((a, x) => a + x.del, 0);
+      n.files = [...new Set(n.hs.map((x) => x.path))];
+      n.guess = n.hs.length > 0 && n.hs.every((x) => x.via === 'near');
+      // Read again with nothing found: the first later round that opened
+      // every file of the fix (a GitHub run, whose files are not kept, taken
+      // as read). A child means it did find something.
+      n.readAt = null;
+      if (n.hs.length && !n.kids.length) {
+        for (let j = n.r + 1; j < R; j++) {
+          const seen = rounds[j].seen;
+          if (seen == null || n.files.every((f) => seen.includes(f) || (rounds[j].absent || []).includes(f))) { n.readAt = j; break; }
+        }
+      }
+    });
+    treeNodes = nodes;
+    // How far each branch is resolved, counted at its ends (nodes nothing
+    // grew from). An end's state: done (fixed, read again, nothing found), closed (no
+    // change needed: declined, a reversal settled, yours and resolved), or
+    // still to come — unread (fixed, not read again yet), open, yours (with
+    // the person), reversal (would undo a fix, not settled).
+    const endState = (n) => {
+      if (n.hs.length) return n.readAt != null ? 'done' : 'unread';
+      const t = n.t;
+      if (!t) return 'unread';
+      // Fixed with no change of its own here (its fix went to another
+      // file, a reply says): resolved by a change all the same.
+      if (t.outcome === 'fixed') return 'done';
+      if (t.outcome === 'declined' || (t.outcome === 'reversal' && (t.left || t.resolved)) || (t.outcome === 'yours' && t.resolved)) return 'closed';
+      return t.outcome === 'yours' ? 'yours' : t.outcome === 'reversal' ? 'reversal' : 'open';
+    };
+    const addUp = (list) => list.reduce((a, b) => { Object.keys(b).forEach((k) => { a[k] = (a[k] || 0) + b[k]; }); return a; }, {});
+    // One pass, children before their parent, for what each branch holds in
+    // all: how many nodes grew from it (desc); its own fix's lines and every
+    // descendant's (tot) — the weight its line carries, as a branch carries
+    // its twigs; its ends' states (ends, res); its findings by severity, its
+    // own thread's and every one below (sev).
+    const sums = (n) => {
+      n.kids.forEach(sums);
+      n.desc = n.kids.reduce((a, c) => a + 1 + c.desc, 0);
+      n.tot = n.add + n.del + n.kids.reduce((a, c) => a + c.tot, 0);
+      n.ends = n.kids.length ? addUp(n.kids.map((c) => c.ends)) : {[endState(n)]: 1};
+      n.res = {ends: Object.values(n.ends).reduce((a, v) => a + v, 0), done: n.ends.done || 0, closed: n.ends.closed || 0};
+      n.sev = addUp([n.t ? {[n.t.severity || 'unmarked']: 1} : {}].concat(n.kids.map((c) => c.sev)));
+    };
+    nodes.filter((n) => !n.parent).forEach(sums);
+    // Rows: each branch in a band of its own, as tall as it needs — a
+    // node's children above and below it, the node in the middle — so a
+    // branch that grows pushes the ones after it down and no edge crosses
+    // another branch.
+    // Chains on one row (the box in the corner): a branch goes on along its
+    // parent's row — an only child there, of several the one with the most
+    // grown from it, the trunk — and the others spread above and below. A
+    // circle ends in its column and the next starts in a later one, so the
+    // row holds them all; the farther up or down, the earlier the node
+    // whose children those are, so no line crosses another. A long straight
+    // row is one place of the code a problem kept coming back to.
+    const order = (a, b) => (a.r - b.r) || (fileIdx(a.path) - fileIdx(b.path)) || (a.line - b.line) || ((a.side ? 1 : 0) - (b.side ? 1 : 0));
+    const rows = [];
+    const visit = (n, g) => {
+      const chain = [];
+      for (let c = n; c; g++) {
+        c.gen = g;
+        c.folded = c.kids.length > 0 && treeFolded.has(c.id);
+        const ks = c.folded ? [] : c.kids.sort(order);
+        const trunk = treeChains && ks.length ? ks.reduce((a, b) => (b.desc > a.desc || (b.desc === a.desc && b.tot > a.tot) ? b : a)) : null;
+        const rest = ks.filter((k) => k !== trunk), up = Math.floor(rest.length / 2);
+        chain.push({c, g, above: rest.slice(0, up), below: rest.slice(up)});
+        c = trunk;
+      }
+      chain.forEach((q) => q.above.forEach((k) => visit(k, q.g + 1)));
+      const on = chain.map((q) => q.c);
+      on.forEach((c) => { c.row = rows.length; c.chain = on; });
+      rows.push(n);
+      chain.slice().reverse().forEach((q) => q.below.forEach((k) => visit(k, q.g + 1)));
+    };
+    nodes.filter((n) => !n.parent).sort((a, b) => (fileIdx(a.path) - fileIdx(b.path)) || (a.r - b.r) || (a.line - b.line)).forEach((n) => visit(n, 0));
+    // Every node drawn, a row's after its first.
+    const placed = rows.flatMap((n) => n.chain);
+    // A folded branch in sum: every node below, their fixes' lines, the
+    // last round they reach, and how their threads ended.
+    nodes.forEach((n) => {
+      if (!n.folded) return;
+      const all = below(n);
+      n.sum = {all, n: all.length, add: all.reduce((a, q) => a + q.add, 0), del: all.reduce((a, q) => a + q.del, 0),
+        r: Math.max(...all.map((q) => q.r)), out: {}, byR: {}};
+      all.forEach((q) => {
+        const k = q.t ? q.outcome : 'side';
+        n.sum.out[k] = (n.sum.out[k] || 0) + 1;
+        const b = n.sum.byR[q.r] = n.sum.byR[q.r] || {r: q.r, n: 0, add: 0, del: 0, out: {}, missed: 0, person: 0, polish: 0, hands: 0, guess: 0};
+        b.n++; b.add += q.add; b.del += q.del; b.out[k] = (b.out[k] || 0) + 1;
+        if (q.t && q.t.missed != null) b.missed++;
+        if (q.t && q.t.by === 'person') b.person++;
+        if (!q.t && q.outcome === 'side' && rounds[q.r].polish) b.polish++;
+        b.hands += q.hands.length;
+        if (q.guess) b.guess++;
+      });
+      // How the branch ends: its fixes nothing grew from, each read again
+      // with nothing found (✓, the last such round) or not read yet (⋯).
+      const ends = all.filter((q) => q.hs.length && !q.kids.length);
+      n.sum.read = ends.filter((q) => q.readAt != null);
+      n.sum.unread = ends.length - n.sum.read.length;
+      n.sum.readAt = n.sum.read.length ? Math.max(...n.sum.read.map((q) => q.readAt)) : null;
+    });
+
+    // Geometry.
+    // The labels as wide as the longest, the threads' titles about a
+    // third of the screen, and the rounds' columns share the rest — at
+    // least what each takes (its dots, pies and the turn to the next; a
+    // round with no fixing its dots), widened alike to fill the screen.
+    let lastFile = null;
+    rows.forEach((n) => {
+      const newFile = !n.parent && n.path !== lastFile;
+      if (!n.parent) lastFile = n.path;
+      n.label = (newFile || n.parent && n.path !== n.parent.path ? n.path.split('/').pop() : '') + ':' + (n.line || '');
+    });
+    const ROW = 24, HEAD = 58, DOT = 6, PRR = 16;
+    // The labels' column as wide as the longest label, measured, and the ✓
+    // of a finished row before it.
+    treeMeasure = treeMeasure || document.createElement('canvas').getContext('2d');
+    const fam = getComputedStyle(body).fontFamily;
+    treeMeasure.font = '10.5px ' + fam;
+    const LEFT = Math.ceil(Math.min(244, Math.max(56, 26 + Math.max(0, ...rows.map((n) => treeMeasure.measureText(n.label).width)))));
+    // A label longer than the column holds loses the start of its file's
+    // name, so its line and the ✓ before it stay on the page.
+    rows.forEach((n) => {
+      let cs = Array.from(n.label);
+      while (cs.length > 4 && treeMeasure.measureText(cs.join('')).width > LEFT - 26) cs = ['…'].concat(cs.slice(2));
+      n.label = cs.join('');
+    });
+    // The PR's labels, centred under and over it, stay clear of the rows' labels.
+    const PRX = LEFT + 28, PAD = 28 + PRR + 46;
+    // Room kept for the vertical scroll bar, which comes once the tree is
+    // taller than the panel: else the tree is wider by its width.
+    const avail = Math.max(body.clientWidth - 22, 720);
+    const RIGHT0 = Math.min(420, Math.max(220, avail * 0.3));
+    // The rounds share what is left: each at least what its header and
+    // circles want (130, 118 with no fixing), widened alike to fill it; too
+    // many rounds for that, they narrow alike down to 64 px — the header
+    // then keeps the round's number and its marks, the rest in its hover —
+    // and only past that does the tree scroll sideways.
+    // Each round's fixes, and how many lines they changed, gathered once.
+    const perRound = rounds.map(() => []);
+    d.hunks.forEach((x) => { if (x.r != null && x.r < R) perRound[x.r].push(x); });
+    const linesIn = perRound.map((xs) => xs.reduce((a, x) => a + x.add + x.del, 0));
+    const least = perRound.map((xs) => xs.length ? 130 : 118);
+    const room = avail - LEFT - PAD - RIGHT0 - 10, want = least.reduce((a, w) => a + w, 0);
+    const wid = want <= room ? least.map((w) => w * room / want) : rounds.map(() => Math.max(64, room / R));
+    const compact = wid.map((w) => w < 118);
+    const start = [];
+    let acc = LEFT + PAD;
+    wid.forEach((w, i) => { start[i] = acc; acc += w; });
+    const X = (r) => (r < R ? start[r] : acc) + 12;
+    const titleX = acc + 10;
+    const RIGHT = Math.max(RIGHT0, avail - titleX);
+    const W = Math.floor(titleX + RIGHT);
+    // The review's findings on GitHub put in an ordinary comment, not on a
+    // line: one row of their own at the foot, no file's.
+    const loose = (d.loose || []).filter((x) => x.r != null && x.r < R && (until == null || x.t * 1000 <= until));
+    treeLoose = loose;
+    const H = HEAD + Math.max(rows.length + (loose.length ? 1 : 0), 1) * ROW + 12;
+    const Y = (n) => HEAD + n.row * ROW + ROW / 2;
+    const f1 = (v) => v.toFixed(1);
+    // The root of the lines, scaled to this review's largest fix: the
+    // largest fix's pie fills its row, a one-line fix stays a dot; an edge
+    // out of a fix is as thick as the part of it that bred the child.
+    const most = Math.max(1, ...nodes.map((n) => n.add + n.del));
+    // A steeper scale than the root, so a one-line fix and a sixty-line one
+    // read apart: a circle from 3.5 to 20 px — wider than its row, so the
+    // rows stay tight and a large fix spills over its neighbours (drawn
+    // under the smaller ones) — an edge from 1 to 10.
+    const share = (v) => Math.pow(Math.min(v, most) / most, 0.7);
+    // In narrow columns the circles shrink with them, so a fix and the turn
+    // after it still fit.
+    const RMAX = Math.max(8, Math.min(20, (Math.min(...wid) - 34) / 2.2));
+    const rad = (v) => 3.5 + (RMAX - 3.5) * share(v);
+    // A line is as thick as the root of all it carries (n.tot), against the
+    // heaviest root: Leonardo's rule for trees — a branch's thickness
+    // squared is its twigs' squared, summed — so a line splits into its
+    // children's as a branch does. A thread that carries nothing is a
+    // hairline.
+    const TOT = Math.max(1, ...nodes.filter((n) => !n.parent).map((n) => n.tot));
+    const WMAX = 14 * Math.max(0.6, RMAX / 20);
+    const thick = (v) => v > 0 ? Math.max(1.2, WMAX * Math.sqrt(Math.min(v, TOT) / TOT)) : 1.2;
+    nodes.forEach((n) => { n.rad = n.hs.length ? rad(n.add + n.del) : 0; });
+    // A pie: sectors [{v, fill, k}] clockwise from twelve o'clock, each
+    // hatched by its kind of file as the icicles are.
+    const pie = (cx, cy, r, parts, cls) => {
+      const sum = parts.reduce((a, q) => a + q.v, 0) || 1;
+      // An opaque disc under the sectors: a paler pie (tied by nearness)
+      // still hides the lines that reach its centre.
+      const out = ['<circle class="rv-tback" cx="' + f1(cx) + '" cy="' + f1(cy) + '" r="' + f1(r) + '"/>'];
+      let a0 = -Math.PI / 2;
+      const pt = (a) => f1(cx + r * Math.cos(a)) + ' ' + f1(cy + r * Math.sin(a));
+      parts.forEach((q) => {
+        const a1 = a0 + 2 * Math.PI * q.v / sum;
+        const shape = parts.length === 1 ? '<circle cx="' + f1(cx) + '" cy="' + f1(cy) + '" r="' + f1(r) + '"'
+          : '<path d="M' + f1(cx) + ' ' + f1(cy) + 'L' + pt(a0) + 'A' + f1(r) + ' ' + f1(r) + ' 0 ' + (a1 - a0 > Math.PI ? 1 : 0) + ' 1 ' + pt(a1) + 'Z"';
+        out.push(shape + ' class="rv-tsec" fill="' + q.fill + '"/>');
+        if (q.k && q.k !== 'code') out.push(shape + ' class="rv-tsec" fill="url(#rv-tp-' + q.k + ')"/>');
+        a0 = a1;
+      });
+      return '<g class="' + cls + '">' + out.join('') + '</g>';
+    };
+    const ADD = addColour(), DEL = delColour();
+    const fillOf = (x, part) => x.asked ? devColour(part === 'add' ? 1 : 0.55)
+      : x.outcome === 'moved' && !x.thread ? colour('moved', part === 'add' ? 1 : 0) : part === 'add' ? ADD : DEL;
+    treeSess = {};
+    const sessionMost = Math.max(1, ...linesIn);
+    const noHands = panel.classList.contains('rv-nohands');
+    treeGeo = {pie, rad, thick, most, ADD, DEL, TOT};
+    const svg = [];
+    svg.push('<svg class="rv-svg rv-tree" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><defs>' + patterns('rv-tp') + '</defs>');
+    // Columns: a round each, its pass at the left edge, its fixing after.
+    rounds.forEach((r, i) => {
+      const x0 = X(i) - 12;
+      // The polish round's column in a tint of its own.
+      svg.push('<rect class="rv-col' + (i % 2 ? ' odd' : '') + (r.polish ? ' polish' : '') + '" x="' + f1(x0) + '" y="0" width="' + f1(wid[i]) + '" height="' + H + '"/>');
+      // The header: its whole story in its hover; on the column, each line
+      // as much of it as fits left of the session's circle — the longest
+      // of its shorter and shorter forms that the column holds.
+      // The session's circle sits by the second line only: the first runs
+      // over it, the third under it (clear of a ✋ at the right).
+      const mine = perRound[i], tot = linesIn[i];
+      const rr = tot ? (compact[i] ? 3 + 8 * Math.pow(tot / sessionMost, 0.7) : 4 + 10 * Math.pow(tot / sessionMost, 0.7)) : 0;
+      const cx = start[i] + wid[i] - (compact[i] ? 14 : 18);
+      const hs = noHands ? [] : treeHands[i] || [];
+      const roomOf = [wid[i] - 10, wid[i] - 12 - (rr ? 2 * rr + 8 : 0), wid[i] - 10 - (hs.length ? 22 : 0)];
+      const fit = (line, font, forms) => { treeMeasure.font = font; return forms.find((t) => treeMeasure.measureText(t).width <= roomOf[line]) || ''; };
+      const name = roundName(i), num = roundName(i, true), took = dur(r.seconds);
+      const l1 = fit(0, '700 11.5px ' + fam, [name + ' · ' + took, name, num]);
+      // Found as a count and a bug, which leaves the cost its room.
+      const found = r.new != null ? r.new + '🐛' : '', cost = r.cost ? '$' + r.cost.toFixed(2) : '';
+      const l2 = fit(1, '10.5px ' + fam, [[found, cost, r.stopped ? 'stopped' : ''].filter(Boolean).join(' · '), [found, cost].filter(Boolean).join(' · '),
+        [found, cost].filter(Boolean).join(' '), found + (r.stopped ? ' ⏹' : ''), found, r.new != null ? String(r.new) : (r.stopped ? '⏹' : '')]);
+      const l3 = r.polish ? fit(2, '10.5px ' + fam, ['✨ polish (/simplify)', '✨ polish', '✨']) : '';
+      const at = l1.indexOf(' · ');
+      svg.push('<g class="rv-thead" data-round="' + i + '"><rect class="rv-theadbg" x="' + f1(x0) + '" y="0" width="' + f1(wid[i]) + '" height="' + HEAD + '"/>'
+        + '<text class="rv-rt" x="' + f1(x0 + 6) + '" y="16">' + (at > 0 ? h(l1.slice(0, at)) + '<tspan class="rv-dur">' + h(l1.slice(at)) + '</tspan>' : h(l1)) + '</text>'
+        + (l2 ? '<text class="rv-rs" x="' + f1(x0 + 6) + '" y="30">' + h(l2) + '</text>' : '')
+        + (l3 ? '<text class="rv-rs" x="' + f1(x0 + 6) + '" y="44">' + h(l3) + '</text>' : '') + '</g>');
+      // The person's answers in this round no thread holds: a ✋ under the
+      // session's pie, how many beside it, ringed amber when any took the
+      // recommended answer.
+      if (hs.length) {
+        const hy = HEAD - 3, rec = hs.some((x) => x.rec);
+        svg.push('<g class="rv-thands" data-hands="' + i + '">' + (rec ? '<circle class="rv-thring" cx="' + f1(cx) + '" cy="' + f1(hy - 4) + '" r="8"/>' : '')
+          + '<text class="rv-thandh" x="' + f1(cx) + '" y="' + f1(hy) + '">✋</text>'
+          + (hs.length > 1 ? '<text class="rv-thn" x="' + f1(cx - 11) + '" y="' + f1(hy) + '">' + hs.length + '</text>' : '') + '</g>');
+      }
+      // The fix session as a whole: one pie, as large as the root of the
+      // lines it changed against the largest session, its sectors what
+      // they answered — each thread outcome, no thread, the person's asks,
+      // moved code.
+      if (mine.length) {
+        const by = {};
+        mine.forEach((x) => { const k = x.asked ? 'asked' : x.thread ? x.outcome : x.outcome === 'moved' ? 'moved' : 'side'; by[k] = (by[k] || 0) + x.add + x.del; });
+        const add = mine.reduce((a, x) => a + x.add, 0), del = mine.reduce((a, x) => a + x.del, 0);
+        // A sector's outcome is `out`: pie() reads a `k` as a kind of file.
+        const sectors = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({out: k, v, fill: colour(k, 1), name: SESSION_NAME[k] || k}));
+        treeSess[i] = {i, add, del, tot, polish: !!r.polish, rr, most: sessionMost, sectors};
+        svg.push('<g class="rv-tsess" data-sess="' + i + '">' + pie(cx, compact[i] ? 32 : 30, rr, sectors, 'rv-tpie') + '</g>');
+      }
+    });
+    // The root: the pull request, its pie the development's code (added,
+    // removed); a curve from it to every first finding and every change no
+    // earlier fix explains, turning in the gap before the first round.
+    const roots = rows.filter((n) => !n.parent);
+    const prY = roots.length ? (Y(roots[0]) + Y(roots[roots.length - 1])) / 2 : HEAD + ROW / 2;
+    // Drawn after the lines, which start at its centre.
+    let prSvg = '';
+    {
+      const dv = Object.values((d.dev && d.dev.files) || {}).reduce((a, v) => [a[0] + (v.add || 0), a[1] + (v.del || 0)], [0, 0]);
+      const parts = [{v: dv[0], fill: devColour(1)}, {v: dv[1], fill: devColour(0.45)}].filter((q) => q.v);
+      treePR = {pr: d.pr, add: dv[0], del: dv[1], files: Object.keys((d.dev && d.dev.files) || {}).length, roots: roots.length, parts};
+      prSvg = ('<g class="rv-tpr" data-pr="1">'
+        + (parts.length ? pie(PRX, prY, PRR, parts, 'rv-tpie') : '<circle cx="' + PRX + '" cy="' + f1(prY) + '" r="' + PRR + '" fill="' + devColour(1) + '"/>')
+        + '<text class="rv-tprt" x="' + PRX + '" y="' + f1(prY - PRR - 6) + '">PR #' + h(d.pr) + '</text>'
+        + '<text class="rv-tprs" x="' + PRX + '" y="' + f1(prY + PRR + 13) + '">' + pm(dv[0], dv[1]) + '</text></g>');
+    }
+    // Rows: where on the left, what on the right.
+    rows.forEach((n) => {
+      const y = Y(n);
+      if (n.row % 2) svg.push('<rect class="rv-trow" x="0" y="' + f1(y - ROW / 2) + '" width="' + W + '" height="' + ROW + '"/>');
+      svg.push('<text class="rv-tl' + (n.parent ? '' : ' root') + '" x="' + (LEFT - 6) + '" y="' + f1(y + 4) + '" data-n="' + n.i + '">' + h(n.label) + '</text>');
+      // Beside the label, how far its branch is resolved, so the column of
+      // labels reads as a list of what is done: a green ✓ when every end is
+      // resolved and one by a change, a grey ✓ when all needed none, else a
+      // ring filled green by the share of its ends resolved.
+      {
+        const q = n.res, ok = q.done + q.closed, lx = LEFT - 12 - treeMeasure.measureText(n.label).width;
+        if (ok === q.ends) svg.push('<text class="rv-tldone' + (q.done ? ' ok' : ' none') + '" x="' + f1(lx + 4) + '" y="' + f1(y + 4) + '" data-n="' + n.i + '">✓</text>');
+        // Nothing of it resolved yet: no mark, the row is simply in work.
+        else if (ok) {
+          const cx = lx - 1, rr = 4.5, a = 2 * Math.PI * ok / q.ends;
+          svg.push('<g class="rv-tlprog" data-n="' + n.i + '"><circle cx="' + f1(cx) + '" cy="' + f1(y) + '" r="' + rr + '" class="rv-tlring"/>'
+            + ('<path d="M' + f1(cx) + ' ' + f1(y) + 'L' + f1(cx) + ' ' + f1(y - rr) + 'A' + rr + ' ' + rr + ' 0 ' + (a > Math.PI ? 1 : 0) + ' 1 ' + f1(cx + rr * Math.sin(a)) + ' ' + f1(y - rr * Math.cos(a)) + 'Z" class="rv-tlfill"/>') + '</g>');
+        }
+      }
+      // A chain's row is titled by its last thread, with how many threads it
+      // holds (every node of it is in each circle's note) and the last other
+      // file it went on into (→); its label is its first node's.
+      const ths = n.chain.filter((c) => c.t), m = ths.length ? ths[ths.length - 1] : n;
+      const away = n.chain.filter((c) => c.path !== n.path).pop();
+      const said = m.t ? (m.t.conv ? '💬 ' : '') + (m.t.title || '') : m.outcome === 'asked' ? 'asked for by the person' : m.outcome === 'moved' ? 'code moved here' : 'no thread asked for this';
+      // The file by its name, with as many folders as tell it from the row's own.
+      // A file at the top whose whole path still ends the row's own starts with /.
+      let awayName = '';
+      if (away) {
+        const segs = away.path.split('/'), ends = (t) => n.path === t || n.path.endsWith('/' + t);
+        let k = 1;
+        while (k < segs.length && ends(segs.slice(-k).join('/'))) k++;
+        awayName = (k === segs.length && ends(away.path) ? '/' : '') + segs.slice(-k).join('/');
+      }
+      const pre = ths.length > 1 ? '×' + ths.length + ' ' : '', post = away ? ' · → ' + awayName : '';
+      // The title is cut first, so the count and the file stay; then the
+      // whole, should the file's name alone not fit. By code points, so a
+      // surrogate pair is never split.
+      const titleRoom = Math.floor((RIGHT - 16) / 6.4);
+      const cut = (t, k) => { const cs = Array.from(t); return cs.length > k ? cs.slice(0, k - 1).join('') + '…' : t; };
+      const what = cut(pre + cut(said, Math.max(12, titleRoom - pre.length - Array.from(post).length)) + post, titleRoom);
+      // A thread's title opens it on GitHub: nothing else is clicked here.
+      const title = '<text class="rv-tt' + (m.t ? '' : ' muted') + '" x="' + f1(titleX) + '" y="' + f1(y + 4) + '" data-n="' + m.i + '">'
+        + h(what) + '</text>';
+      svg.push(m.t && m.t.url ? '<a class="rv-tlink" href="' + h(m.t.url) + '" target="_blank" rel="noopener">' + title + '</a>' : title);
+    });
+    // Edges into each node from its parent's knot, then the node, its band
+    // and its knot, so a node is drawn over what reaches it.
+    // A fix sits right after the tick of the thread it answers: the gap
+    // between is no time, and the room after it is where its children's
+    // lines turn.
+    const knotX = (n) => X(n.r) + 12 + n.rad;
+    // Two places on one row (a chain): an arch over it, else the curve would
+    // run along the row's own line, hidden under it.
+    // A repeat arches higher than a second parent, so the two never coincide;
+    // both stay in the row's own band, drawn over its ribbons and circles
+    // (`arches`), which would hide them, and let the pointer through to the
+    // marks under them (the CSS).
+    const arches = [];
+    const over = (x0, x1, y, k) => 'M' + f1(x0) + ' ' + f1(y) + 'C' + f1(x0) + ' ' + f1(y - k * ROW) + ' ' + f1(x1) + ' ' + f1(y - k * ROW) + ' ' + f1(x1) + ' ' + f1(y);
+    const curve = (x0, y0, x1, y1) => {
+      const mx = x0 + Math.max(18, (x1 - x0) * 0.5);
+      return 'M' + f1(x0) + ' ' + f1(y0) + 'C' + f1(mx) + ' ' + f1(y0) + ' ' + f1(mx) + ' ' + f1(y1) + ' ' + f1(x1) + ' ' + f1(y1);
+    };
+    // One rule: a thread is a line, a fix is a circle. A thread's line
+    // starts at what it grew from — the fix whose lines it was posted on,
+    // or the PR for a first finding — turns to its row in the gap before
+    // the next round, runs level past a tick where its round found it, and
+    // ends in its own fix: coloured by how it ended, as thick as the lines
+    // that fix changed (its load), hairline when nothing was changed for
+    // it. A change no thread asked for hangs from its source by a thin grey
+    // dashed line: no thread, no colour.
+    // A line runs from the centre of the circle it grows from to the
+    // centre of its own, the circles drawn over it; where it leaves a
+    // smaller circle than its own weight it starts as thick as that circle
+    // allows and widens through the turn — a filled ribbon, so no line
+    // shows over a circle's edge.
+    const fromOf = (n) => n.parent ? [knotX(n.parent), Y(n.parent), Math.max(knotX(n.parent) + n.parent.rad + 16, X(n.parent.r + 1) - 18), n.parent.rad]
+      : [PRX, prY, X(0) - 18, PRR];
+    const lineEnd = (n) => n.hs.length ? knotX(n) : X(n.r) + 22;
+    // A ribbon's middle line, sampled: [x, y, width, normal x, normal y,
+    // length so far] — the turn as a curve, the level run every 8 px.
+    const ribbonPts = treeGeo.ribbonPts = (x0, y0, x1, y1, xEnd, w0, w1) => {
+      const c1 = x0 + (x1 - x0) * 0.55, c2 = x1 - (x1 - x0) * 0.55, pts = [], N = 24;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, m = 1 - t;
+        const x = m * m * m * x0 + 3 * m * m * t * c1 + 3 * m * t * t * c2 + t * t * t * x1;
+        const y = m * m * m * y0 + 3 * m * m * t * y0 + 3 * m * t * t * y1 + t * t * t * y1;
+        pts.push([x, y, w0 + (w1 - w0) * t * t * (3 - 2 * t)]);
+      }
+      for (let x = x1 + 8; x < xEnd; x += 8) pts.push([x, y1, w1]);
+      if (xEnd > x1) pts.push([xEnd, y1, w1]);
+      let len = 0;
+      return pts.map((q, i) => {
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        if (i) len += Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]);
+        return [q[0], q[1], q[2], -(b[1] - a[1]) / L, (b[0] - a[0]) / L, len];
+      });
+    };
+    const outline = (pts) => 'M' + pts.map((q) => f1(q[0] + q[3] * q[2] / 2) + ' ' + f1(q[1] + q[4] * q[2] / 2)).join('L')
+      + 'L' + pts.slice().reverse().map((q) => f1(q[0] - q[3] * q[2] / 2) + ' ' + f1(q[1] - q[4] * q[2] / 2)).join('L') + 'Z';
+    treeGeo.outline = outline;
+    const ribbon = treeGeo.ribbon = (x0, y0, x1, y1, xEnd, w0, w1) => outline(ribbonPts(x0, y0, x1, y1, xEnd, w0, w1));
+    // A stretch of a ribbon, from length a to b, cut along into bands by
+    // shares [{v, fill, k}], the first on the upper edge.
+    const atLen = (pts, s) => {
+      let i = 1;
+      while (i < pts.length - 1 && pts[i][5] < s) i++;
+      const p = pts[i - 1], q = pts[i], t = q[5] > p[5] ? Math.max(0, Math.min(1, (s - p[5]) / (q[5] - p[5]))) : 0;
+      return p.map((v, k) => v + (q[k] - v) * t);
+    };
+    const bands = (pts, a, b, parts, cls, dataAttr) => {
+      const sum = parts.reduce((x, q) => x + q.v, 0);
+      if (!sum || b - a < 1) return '';
+      const run = [atLen(pts, a)].concat(pts.filter((q) => q[5] > a && q[5] < b), [atLen(pts, b)]);
+      let f = 0;
+      return parts.filter((q) => q.v).map((q) => {
+        const f0 = f, f1_ = f + q.v / sum;
+        f = f1_;
+        const off = (r, fr) => [r[0] + r[3] * r[2] * (fr - 0.5), r[1] + r[4] * r[2] * (fr - 0.5)];
+        const d = 'M' + run.map((r) => off(r, f0).map(f1).join(' ')).join('L') + 'L' + run.slice().reverse().map((r) => off(r, f1_).map(f1).join(' ')).join('L') + 'Z';
+        return '<path class="' + cls + '"' + (dataAttr || '') + ' d="' + d + '" fill="' + q.fill + '"/>'
+          + (q.k ? '<path class="' + cls + '"' + (dataAttr || '') + ' d="' + d + '" fill="url(#rv-tp-' + q.k + ')"/>' : '');
+      }).join('');
+    };
+    // The start of a line, the fifth of it out of the circle it leaves, is
+    // its branch's findings' severity, counted, cut along by their shares.
+    const sevParts = (c) => SEV_ORDER.filter((k) => c[k]).map((k) => ({v: c[k], fill: SEV_FILL[k], k: SEV_PAT[k]}));
+    // The start: the fifth of the line's visible run out of the circle it
+    // leaves (the PR's for a first finding).
+    const sliced = treeGeo.sliced = (pts, visA, visB, sev, dataAttr) => {
+      const a = pts.find((q) => q[0] >= visA), lastIn = pts.filter((q) => q[0] <= visB).pop();
+      if (!a || !lastIn || !sev) return '';
+      const s0 = a[5], L = lastIn[5] - s0;
+      return L < 6 ? '' : bands(pts, s0, s0 + 0.2 * L, sevParts(sev), 'rv-tslice', dataAttr);
+    };
+    placed.slice().sort((a, b) => b.tot - a.tot).forEach((n) => {
+      const [x0, y0, x1, rFrom] = fromOf(n);
+      // The circles lie on the line like knots on a branch: it runs under
+      // them at its own weight, wider than a small one.
+      const w = n.w = thick(n.tot);
+      const pts = ribbonPts(x0, y0, x1, Y(n), lineEnd(n), w, w);
+      if (n.t) {
+        svg.push('<path class="rv-tline' + (n.guess ? ' guess' : '') + '" data-n="' + n.i + '" d="' + outline(pts) + '" style="fill:' + colour(n.outcome, 1) + '"/>');
+        svg.push(sliced(pts, x0 + rFrom, n.hs.length ? knotX(n) - n.rad : lineEnd(n), n.folded ? {[n.t.severity || 'unmarked']: 1} : n.sev, ' data-n="' + n.i + '"'));
+      } else {
+        // No thread: a grey ribbon, as heavy as what grew from the change.
+        svg.push('<path class="rv-tsideline" data-n="' + n.i + '" d="' + outline(pts) + '"/>');
+        if (!n.folded && n.kids.length && Object.keys(n.sev).length) svg.push(sliced(pts, x0 + rFrom, knotX(n) - n.rad, n.sev, ' data-n="' + n.i + '"'));
+      }
+      n.cross.filter((c) => c.p.row != null).forEach((c) => {
+        const x0 = knotX(c.p) + c.p.rad, x1 = X(n.r) - 6;
+        if (c.p.row === n.row) arches.push('<path class="rv-tcross arch" data-n="' + n.i + '" d="' + over(x0, x1, Y(n), 0.4) + '"/>');
+        else svg.push('<path class="rv-tcross" data-n="' + n.i + '" d="' + curve(x0, Y(c.p), x1, Y(n)) + '"/>');
+      });
+    });
+    placed.forEach((n) => n.cites.filter((c) => c.row != null).forEach((c) => {
+      // Out of the earlier thread's tick to the left and into the later
+      // one's, so the arc never runs along a line.
+      const x0 = X(c.r), y0 = Y(c), x1 = X(n.r), y1 = Y(n);
+      if (c.row === n.row) { arches.push('<path class="rv-tcite arch" data-n="' + n.i + '" d="' + over(x0, x1, y0, 0.6) + '"/>'); return; }
+      const bend = 26 + Math.min(60, Math.abs(y1 - y0) * 0.25);
+      svg.push('<path class="rv-tcite" data-n="' + n.i + '" d="M' + f1(x0) + ' ' + f1(y0) + 'C' + f1(x0 - bend) + ' ' + f1(y0) + ' ' + f1(x1 - bend) + ' ' + f1(y1) + ' ' + f1(x1) + ' ' + f1(y1) + '"/>');
+    }));
+    // A folded branch: one grey ribbon from its circle to a summary circle
+    // in the column of the last round it reaches — all its fixes' lines,
+    // ringed dashed — with how many it hides and how their threads ended.
+    placed.forEach((n) => {
+      if (!n.folded) return;
+      // One row, but a circle in every round the branch reaches: that
+      // round's hidden fixes, ringed dashed, joined by a grey ribbon as
+      // heavy as the circle it leads to.
+      const q = n.sum, y = Y(n);
+      const NAMES = {fixed: 'fixed', declined: 'declined', yours: 'left to you', reversal: 'would undo a fix', open: 'open', side: 'no thread', moved: 'moved', asked: 'asked for'};
+      const outs = Object.entries(q.out).sort((a, b) => b[1] - a[1]);
+      q.outs = outs.map(([k, v]) => ({k, v, name: NAMES[k] || k}));
+      q.parts = [{v: q.add, fill: ADD}, {v: q.del, fill: DEL}].filter((p) => p.v);
+      let px = knotX(n), xs = px, rs = 0;
+      const steps = Object.values(q.byR).sort((a, b) => a.r - b.r);
+      // The ribbon into each round's circle carries all that is still ahead
+      // of it — that round's and the later ones' — so it thins as a branch.
+      let ahead = q.add + q.del;
+      // The hidden findings' severity on the first stretch.
+      const hiddenSev = addUp(n.kids.map((c) => c.sev));
+      steps.forEach((b, si) => {
+        const v = b.add + b.del;
+        rs = v ? rad(v) : 4;
+        xs = X(b.r) + 12 + rs;
+        const w = thick(ahead);
+        ahead -= v;
+        const fpts = ribbonPts(px, y, px + 1, y, xs, w, w);
+        svg.push('<path class="rv-tfoldline" data-foldtip="' + n.i + '" d="' + outline(fpts) + '"/>');
+        if (si === 0) svg.push(sliced(fpts, px + n.rad, xs - rs, hiddenSev, ' data-foldtip="' + n.i + '"'));
+        b.parts = [{v: b.add, fill: ADD}, {v: b.del, fill: DEL}].filter((p) => p.v);
+        b.outs = Object.entries(b.out).sort((a, c) => c[1] - a[1]).map(([k, c]) => ({k, v: c, name: NAMES[k] || k}));
+        b.x = xs; b.rs = rs;
+        px = xs;
+      });
+      steps.forEach((b) => {
+        // What the hidden nodes of that round carried, lifted onto its
+        // circle: a purple tick before it for a check that missed, and over
+        // it ◆ a thread the person opened, ✨ the polish, ✋ their answers.
+        const marks = [b.person ? '◆' : '', b.polish ? '✨' : '', b.hands ? '✋' : ''].filter(Boolean).join('');
+        const tx = X(b.r);
+        svg.push('<g class="rv-tfold" data-fold="' + h(n.id) + '" data-foldtip="' + n.i + '">'
+          + (b.missed ? '<line class="rv-tfound missed" x1="' + f1(tx) + '" x2="' + f1(tx) + '" y1="' + f1(y - 7) + '" y2="' + f1(y + 7) + '"/>' : '')
+          + (b.parts.length ? pie(b.x, y, b.rs, b.parts, 'rv-tpie' + (b.guess === b.n ? ' guess' : '')) : '<circle cx="' + f1(b.x) + '" cy="' + f1(y) + '" r="' + f1(b.rs) + '" fill="var(--surface)"/>')
+          + '<circle class="rv-tfoldring" cx="' + f1(b.x) + '" cy="' + f1(y) + '" r="' + f1(b.rs + 2.5) + '"/>'
+          + '<text class="rv-tdesc folded" x="' + f1(b.x + b.rs + 3) + '" y="' + f1(y - b.rs + 1) + '">' + b.n + '</text>'
+          + (marks ? '<text class="rv-tfoldm" x="' + f1(b.x) + '" y="' + f1(y - b.rs - 4) + '">' + marks + '</text>' : '') + '</g>');
+      });
+      // The branch's end, as a fix's: ✓ where every end of it was read again
+      // with nothing found, ⋯ while one is not read yet.
+      let endX = xs + rs;
+      if (q.unread) {
+        svg.push('<text class="rv-tend" x="' + f1(endX + 4) + '" y="' + f1(y + 4) + '">⋯</text>');
+        endX += 16;
+      } else if (q.readAt != null) {
+        const xr = Math.max(X(q.readAt), endX + 12);
+        svg.push('<line class="rv-tquiet" x1="' + f1(endX + 3) + '" x2="' + f1(xr - 6) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/>'
+          + '<text class="rv-tend ok" x="' + f1(xr) + '" y="' + f1(y + 4) + '">✓</text>');
+        endX = xr + 4;
+      }
+      svg.push('<g class="rv-tfold" data-fold="' + h(n.id) + '" data-foldtip="' + n.i + '"><text class="rv-tfoldt" x="' + f1(endX + 10) + '" y="' + f1(y + 4) + '">+' + q.n + ' '
+        + outs.map(([k, v]) => '<tspan style="fill:' + colour(k, 1) + '">●</tspan>' + v).join(' ') + '</text></g>');
+    });
+    svg.push(prSvg);
+    // The fixes, the largest first: a circle wider than its row lies under
+    // the smaller ones it reaches. Then each thread's tick and end marks.
+    placed.slice().sort((a, b) => b.rad - a.rad).forEach((n) => {
+      if (!n.hs.length) return;
+      const px = knotX(n), pr = n.rad, y = Y(n);
+      const parts = [];
+      ['add', 'del'].forEach((part) => {
+        const by = {};
+        n.hs.forEach((hk) => {
+          if (!hk[part]) return;
+          let k = kindOf(hk.path);
+          if (k === 'code' && !hk.code && hk.comment) k = 'comment';
+          const key = k + '|' + fillOf(hk, part);
+          const what = hk.asked ? 'asked' : hk.outcome === 'moved' && !hk.thread ? 'moved' : '';
+          (by[key] = by[key] || {k, fill: fillOf(hk, part), v: 0, part, what}).v += hk[part];
+        });
+        Object.values(by).sort((a, b) => FLAGS.indexOf(a.k) - FLAGS.indexOf(b.k)).forEach((q) => parts.push(q));
+      });
+      n.parts = parts;
+      const polish = !n.t && n.outcome === 'side' && rounds[n.r].polish;
+      n.polish = polish;
+      svg.push('<g class="rv-tn" data-n="' + n.i + '">' + pie(px, y, pr, parts, 'rv-tpie' + (n.guess ? ' guess' : ''))
+        + (polish ? '<text class="rv-tpolish" x="' + f1(px) + '" y="' + f1(y - pr - 2) + '">✨</text>' : '')
+        + (n.desc ? '<text class="rv-tdesc' + (n.folded ? ' folded' : '') + '" data-fold="' + h(n.id) + '" x="' + f1(px + pr + 2) + '" y="' + f1(y - pr + 1) + '">' + (n.folded ? '+' : '') + n.desc + '</text>' : '') + '</g>');
+    });
+    placed.forEach((n) => {
+      const x = X(n.r), y = Y(n);
+      const g = ['<g class="rv-tn" data-n="' + n.i + '">'];
+      if (n.t && n.t.by === 'person') {
+        // Found by the person, not a pass: a diamond on the line.
+        g.push('<path class="rv-tfound you" d="M' + f1(x) + ' ' + f1(y - 6) + 'L' + f1(x + 6) + ' ' + f1(y) + 'L' + f1(x) + ' ' + f1(y + 6) + 'L' + f1(x - 6) + ' ' + f1(y) + 'Z" fill="' + colour(n.outcome, 1) + '"/>');
+      } else if (n.t && n.t.missed != null) {
+        // Only a mark that tells something: which round found a thread its
+        // column says already (its fix sits there), so a tick is drawn only
+        // where a round had read that code and passed it — purple.
+        const w = n.w || 1.6;
+        g.push('<line class="rv-tfound missed" x1="' + f1(x) + '" x2="' + f1(x) + '" y1="' + f1(y - w / 2 - 4) + '" y2="' + f1(y + w / 2 + 4) + '"/>');
+      }
+      if (n.t && !n.hs.length) {
+        // A thread nothing was changed for ends where it was found: a bar
+        // when declined or left to the person, an open end while open.
+        const xe = lineEnd(n);
+        g.push(n.outcome === 'open' ? '<text class="rv-tend" x="' + f1(xe + 2) + '" y="' + f1(y + 4) + '">⋯</text>'
+          : '<line class="rv-tbar" x1="' + f1(xe) + '" x2="' + f1(xe) + '" y1="' + f1(y - 5) + '" y2="' + f1(y + 5) + '" style="stroke:' + colour(n.outcome, 1) + '"/>');
+      }
+      if (n.hs.length && !n.kids.length) {
+        const px = knotX(n), pr = n.rad;
+        if (n.readAt != null) {
+          const xr = X(n.readAt);
+          g.push('<line class="rv-tquiet" x1="' + f1(px + pr + 3) + '" x2="' + f1(xr - 6) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/>'
+            + '<text class="rv-tend ok" x="' + f1(xr) + '" y="' + f1(y + 4) + '">✓</text>');
+        } else g.push('<text class="rv-tend" x="' + f1(px + pr + 4) + '" y="' + f1(y + 4) + '">⋯</text>');
+      }
+      if (n.hands.length && !noHands) {
+        const rec = n.hands.some((q) => q.rec), hy = y - 9;
+        g.push('<g class="rv-thands" data-handn="' + n.i + '">' + (rec ? '<circle class="rv-thring" cx="' + f1(x) + '" cy="' + f1(hy - 4) + '" r="7"/>' : '')
+          + '<text class="rv-thandh" x="' + f1(x) + '" y="' + f1(hy) + '">✋</text>'
+          + (n.hands.length > 1 ? '<text class="rv-thn" x="' + f1(x + 9) + '" y="' + f1(hy) + '" style="text-anchor:start">' + n.hands.length + '</text>' : '') + '</g>');
+      }
+      g.push('</g>');
+      svg.push(g.join(''));
+    });
+    svg.push(...arches);
+    if (loose.length) {
+      // One line from the PR, as a thread with no file, and a 💬 in each
+      // round that posted such a comment — how many beside it.
+      const y = HEAD + rows.length * ROW + ROW / 2;
+      const byR = {};
+      loose.forEach((x) => { (byR[x.r] = byR[x.r] || []).push(x); });
+      const rs = Object.keys(byR).map(Number).sort((a, b) => a - b);
+      const col = colour('open', 1);
+      if (rows.length % 2) svg.push('<rect class="rv-trow" x="0" y="' + f1(y - ROW / 2) + '" width="' + W + '" height="' + ROW + '"/>');
+      svg.push('<g data-loose="all"><text class="rv-tl muted" x="' + (LEFT - 6) + '" y="' + f1(y + 4) + '">no file</text>'
+        + '<text class="rv-tt muted" x="' + f1(titleX) + '" y="' + f1(y + 4) + '">💬 ' + loose.length + ' comment' + (loose.length > 1 ? 's' : '') + ' of findings not on a line, by the review on GitHub</text></g>');
+      svg.push('<path class="rv-tline" data-loose="all" d="' + ribbon(PRX, prY, X(0) - 18, y, X(rs[rs.length - 1]), 1.6, 1.6) + '" style="fill:' + col + '"/>');
+      rs.forEach((r) => {
+        const x = X(r), n = byR[r].length;
+        svg.push('<g class="rv-tloose" data-loose="' + r + '"><circle cx="' + f1(x) + '" cy="' + f1(y) + '" r="7" style="stroke:' + col + '"/>'
+          + '<text x="' + f1(x) + '" y="' + f1(y + 3.5) + '">💬</text>'
+          + (n > 1 ? '<text class="rv-thn" x="' + f1(x + 9) + '" y="' + f1(y - 4) + '" style="text-anchor:start">' + n + '</text>' : '') + '</g>');
+      });
+    }
+    if (!rows.length && !loose.length) svg.push('<text class="rv-rs" x="' + (LEFT + PAD) + '" y="' + (HEAD + 20) + '">No thread and no fix by this moment.</text>');
+    svg.push('</svg>');
+    const keep = [body.scrollLeft, body.scrollTop];
+    // The box in the corner over the rows' labels: chains on one row.
+    const box = '<label class="rv-tchains" title="A branch goes on along one row: an only child stays on its parent\'s row, of several the one with the most grown from it, the others above and below. A long row is one place of the code a problem kept coming back to; its label is its first node\'s place, its title its last thread\'s, with how many threads it holds and the last other file it went on into (→).">'
+      + '<input type="checkbox"' + (treeChains ? ' checked' : '') + '> chains on one row</label>';
+    body.innerHTML = '<div class="rv-wrap" style="position:relative;width:' + W + 'px">' + box + svg.join('') + '</div>';
+    body.scrollLeft = keep[0]; body.scrollTop = keep[1];
+    drawn = true;
+    requestAnimationFrame(afterDraw);
+  }
+  // Every node that grew from n, depth first.
+  const below = (n) => n.kids.flatMap((c) => [c, ...below(c)]);
+  // A node's whole line: its ancestors and everything that grew from it.
+  function treeLine(n) {
+    const all = new Set([n]);
+    for (let p = n.parent; p; p = p.parent) all.add(p);
+    below(n).forEach((q) => all.add(q));
+    n.cites.concat(n.citedBy).forEach((q) => all.add(q));
+    return all;
+  }
+  // --- the tree's hover: each element drawn large and read out ---------------
+  const KIND_NAME = {code: 'code', test: 'tests', schema: 'a migration', doc: 'docs or config', comment: 'comments only'};
+  const PATTERN_SAY = {test: 'hatched / — tests', schema: 'hatched \\ — a migration', doc: 'lined — — docs or config', comment: 'dotted · — only comments changed'};
+  // A swatch as the sector is filled: its colour, its pattern over it.
+  const swatch = (fill, k, shade) => '<svg width="14" height="14" class="t-sw"><rect width="14" height="14" rx="2" fill="' + fill + '"/>'
+    + (shade ? '<rect width="14" height="14" rx="2" fill="' + shade + '"/>' : '')
+    + (k && k !== 'code' ? '<rect width="14" height="14" rx="2" fill="url(#rv-tp-' + k + ')"/>' : '') + '</svg>';
+  // A pie drawn large, as on the map, in a box of its own.
+  function bigPie(parts, r, cls, ring) {
+    const S = 2 * r + 10;
+    return '<svg class="t-big" width="' + S + '" height="' + S + '" viewBox="0 0 ' + S + ' ' + S + '">'
+      + treeGeo.pie(S / 2, S / 2, r, parts, 'rv-tpie' + (cls ? ' ' + cls : ''))
+      + (ring ? '<circle cx="' + S / 2 + '" cy="' + S / 2 + '" r="' + (r + 3) + '" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 2" opacity=".7"/>' : '') + '</svg>';
+  }
+  const share100 = (v, tot) => tot ? Math.round(100 * v / tot) + '%' : '';
+  const row2 = (sw, text) => '<div class="t-leg">' + sw + '<span>' + text + '</span></div>';
+  // The fix's circle: every sector, what it is and how much.
+  function fixPart(n) {
+    if (!n.hs.length || !n.parts) return '';
+    const tot = n.add + n.del;
+    const g = treeGeo;
+    const rows = n.parts.map((q) => row2(swatch(q.fill, q.k),
+      '<b>' + (q.part === 'add' ? 'added' : 'removed') + '</b>'
+      + (q.what === 'asked' ? ' · asked for by the person (beige)' : q.what === 'moved' ? ' · moved code (mauve)' : q.part === 'add' ? ' (green)' : ' (red)')
+      + ' · ' + KIND_NAME[q.k] + (q.k !== 'code' ? ' — ' + PATTERN_SAY[q.k] : ', solid')
+      + ' · <b>' + q.v + '</b> line' + (q.v === 1 ? '' : 's') + ' · ' + share100(q.v, tot)));
+    const notes = [];
+    notes.push('Size: ' + tot + ' lines changed; radius ' + g.rad(tot).toFixed(1) + ' px, against ' + g.rad(g.most).toFixed(0) + ' px for this review\'s largest fix (' + g.most + ' lines). Sectors run clockwise from the top: added first, then removed.');
+    if (n.guess) notes.push('Paler: tied to its thread only by sitting near it in the same round — no reply named its commit and no subagent was given the thread.');
+    if (n.polish) notes.push('✨ over it: made by the polish round, /simplify over the whole pull request.');
+    if (n.desc) notes.push('The number over it: ' + n.desc + ' row' + (n.desc > 1 ? 's' : '') + ' grew from it in all — click it to ' + (n.folded ? 'open the branch' : 'fold them into one summary') + '.');
+    if (!n.kids.length) notes.push(n.readAt != null ? '✓ after it: ' + roundName(n.readAt) + ' read its files again and posted nothing on its lines.' : '⋯ after it: no round has read its files since.');
+    return '<div class="t-h">The circle — its fix, in ' + h(roundName(n.r).toLowerCase()) + '\'s fixing</div>'
+      + '<div class="t-pair">' + bigPie(n.parts, 34, n.guess ? 'guess' : '') + '<div>' + rows.join('') + '</div></div>'
+      + notes.map((t) => '<div class="t-r muted">' + h(t) + '</div>').join('');
+  }
+  // The thread's line: a piece of it as thick as on the map, its tick and
+  // its end, each said.
+  function linePart(n) {
+    const g = treeGeo, W = 250;
+    if (!n.t) {
+      const sw = n.w || 1.2, sy = Math.max(10, sw / 2 + 5);
+      return '<div class="t-h">The line — no thread</div>'
+        + '<div class="t-pair"><svg width="' + W + '" height="' + Math.max(20, sw + 10) + '"><path d="' + g.ribbon(6, sy, 7, sy, W - 24, sw, sw) + '" class="t-side"/>'
+        + '</svg></div>'
+        + '<div class="t-r muted">Grey: no thread asked for this change. It hangs from ' + (n.parent ? 'the fix whose lines it rewrote' : 'the PR — no earlier fix wrote those lines') + '; as thick as all it carries — ' + n.tot + ' lines, its own and what grew from it.</div>';
+    }
+    const w = n.w || 1.6, H = Math.max(24, w + 18), c = H / 2, tx = 130, ex = W - 26;
+    const col = colour(n.outcome, 1);
+    const spts = g.ribbonPts(6, c, 70, c, n.hs.length ? ex : tx + 30, w, w);
+    let svgEl = '<svg width="' + W + '" height="' + H + '"><path d="' + g.outline(spts) + '" fill="' + col + '"' + (n.guess ? ' fill-opacity=".5"' : '') + '/>'
+      + g.sliced(spts, 6, n.hs.length ? ex - Math.min(10, n.rad) : tx + 30, n.sev);
+    if (n.t.by === 'person') svgEl += '<path d="M' + tx + ' ' + (c - 7) + 'L' + (tx + 7) + ' ' + c + 'L' + tx + ' ' + (c + 7) + 'L' + (tx - 7) + ' ' + c + 'Z" fill="' + col + '" class="t-you"/>';
+    else if (n.t.missed != null) svgEl += '<line x1="' + tx + '" x2="' + tx + '" y1="' + (c - w / 2 - 5) + '" y2="' + (c + w / 2 + 5) + '" class="t-tick missed"/>';
+    if (n.hs.length) svgEl += g.pie(ex + 8, c, Math.min(10, n.rad), n.parts || [], 'rv-tpie');
+    else if (n.outcome === 'open') svgEl += '<text x="' + (tx + 34) + '" y="' + (c + 4) + '" class="t-end">⋯</text>';
+    else svgEl += '<line x1="' + (tx + 30) + '" x2="' + (tx + 30) + '" y1="' + (c - 6) + '" y2="' + (c + 6) + '" stroke="' + col + '" stroke-width="2.5"/>';
+    svgEl += '</svg>';
+    const say = [];
+    say.push(row2(swatch(col), '<b>Colour</b>: ' + h(howEnded(n.t)) + ' — how the thread ended.'));
+    say.push(row2('<b class="t-g">' + w.toFixed(1) + '</b>', '<b>Thickness</b>: ' + (n.tot ? w.toFixed(1) + ' px — all it carries: ' + n.tot + ' lines, its own fix\'s ' + (n.add + n.del)
+      + (n.tot > n.add + n.del ? ' and ' + (n.tot - n.add - n.del) + ' in the ' + n.desc + ' that grew from it' : '') + '. As a tree\'s branch, it grows with the root of what it carries; the heaviest line from the PR, ' + g.TOT + ' lines, is ' + g.thick(g.TOT).toFixed(0) + ' px.'
+      : 'a hairline: nothing was changed for it, and nothing grew from it.')));
+    if (n.t.by === 'person') say.push(row2('<b class="t-g">◆</b>', '<b>Diamond</b>: the person opened this thread, during ' + h(roundName(n.r).toLowerCase()) + '.'));
+    else say.push(row2('<b class="t-g">▯</b>', '<b>Found</b> by ' + h(roundName(n.r)) + '\'s pass — the column its ' + (n.hs.length ? 'fix' : 'end') + ' stands in.'));
+    if (n.t.missed != null) say.push(row2('<b class="t-g t-miss">|</b>', '<b class="t-miss">Purple tick</b>: ' + h(roundName(n.t.missed)) + ' had read the fix it grew from and passed it; this round found a problem on those lines.'));
+    say.push(row2('<b class="t-g">' + (n.hs.length ? '●' : n.outcome === 'open' ? '⋯' : '┃') + '</b>', '<b>End</b>: ' + (n.hs.length ? 'its fix, the circle below.' : n.outcome === 'open' ? 'still open, nothing changed yet.' : 'a bar — nothing was changed for it (' + h(OUT[n.outcome][1]) + ').')));
+    if (n.guess) say.push(row2('<b class="t-g">░</b>', '<b>Paler</b>: tied to its fix by nearness alone.'));
+    // Each share's swatch as it lies on this line: its colour, darkened.
+    const sevTxt = SEV_ORDER.filter((k) => n.sev[k]).map((k) => swatch(col, SEV_PAT[k], SEV_FILL[k]) + ' ' + n.sev[k] + ' ' + SEV_NAME[k]).join(' · ');
+    const nSev = Object.values(n.sev).reduce((a, v) => a + v, 0);
+    if (sevTxt) say.push(row2('<b class="t-g">▌</b>', '<b>Start</b>, out of the circle it leaves — darkened by the severity of the ' + nSev + ' finding' + (nSev > 1 ? 's' : '') + ' in its branch, cut along by their shares: ' + sevTxt
+      + '. With no mark, a finding is important when its round marked any (the review marks only the minor ones), else unmarked.'));
+    say.push(row2('<b class="t-g">⌒</b>', '<b>Starts</b> at ' + (n.parent ? 'the fix it was posted on — the lines that fix wrote.' : 'the PR: no earlier fix wrote the line it is on.')));
+    return '<div class="t-h">The line — the thread</div><div class="t-pair">' + svgEl + '</div>' + say.join('');
+  }
+  // The person's answers: each question whole, the answer chosen, whether
+  // it was the recommended one, how long it waited, and its thread.
+  function handRows(list) {
+    return list.map((x) => {
+      const t = x.rid && treeNodes.find((q) => q.t && q.t.rid === x.rid);
+      return '<div class="t-hand' + (x.rec ? ' rec' : '') + '">'
+        + '<div class="t-q">' + (x.kind === 'sclaude' ? '<span class="muted">sclaude asked</span> ' : '') + h(x.q || '(a question of sclaude\'s own)') + '</div>'
+        + (x.a ? '<div class="t-a">→ <b>' + h(x.a.replace(/\s*\(Recommended\)\s*$/i, '')) + '</b>' + (x.rec ? ' <span class="t-rec">the recommended one</span>' : x.rec === false ? ' <span class="muted">— not the recommended one</span>' : '') + '</div>' : '')
+        + '<div class="t-r muted">' + (x.at ? stamp(x.t) : '')
+        + (x.waited != null ? ' · answered in ' + dur(x.waited) : '')
+        + (t ? ' · ' + threadLink(t.t, h(t.path.split('/').pop()) + ':' + t.line) : '') + '</div></div>';
+    }).join('');
+  }
+  function handsTip(i) {
+    const list = treeHands[i] || [];
+    const rec = list.filter((x) => x.rec).length;
+    return '<div class="t-f">✋ You stepped in ' + list.length + ' time' + (list.length > 1 ? 's' : '') + ', during ' + h(roundName(+i).toLowerCase()) + '</div>'
+      + '<div class="t-r muted">Questions about the change as a whole, or sclaude\'s own: no thread holds them.' + (rec ? ' ' + rec + ' took the recommended answer — the amber ring.' : '') + '</div>'
+      + handRows(list);
+  }
+  // A round's header: everything it says, and what a narrow one leaves out.
+  function roundTip(i) {
+    const r = (data.rounds || [])[i];
+    if (!r) return '';
+    const q = treeSess[i], hs = treeHands[i] || [];
+    const found = data.threads.filter((t) => t.r === i && (until == null || (t.t || 0) * 1000 <= until));
+    const by = {};
+    found.forEach((t) => { by[t.outcome] = (by[t.outcome] || 0) + 1; });
+    const rows = [];
+    rows.push('<div class="t-r">' + (r.source === 'github' ? 'On GitHub' : 'On this machine') + ' · ' + dur(r.seconds) + (r.cost ? ' · $' + r.cost.toFixed(2) : '')
+      + (r.at ? ' · ' + stamp(r.t) : '') + '</div>');
+    if (r.stopped) rows.push('<div class="t-r"><b>⏹ Stopped</b>, no answer from the pass.</div>');
+    if (r.more) rows.push('<div class="t-r">Cut short at its cap of findings: some were left for the next pass.</div>');
+    // Played back, what was posted by the moment shown; else the pass's count.
+    const n = until != null && !r.stopped ? found.length : r.new;
+    rows.push('<div class="t-h">The pass</div><div class="t-r">' + (n != null ? n + ' found' + (until != null ? ' by this moment' : '') : 'found —') + (found.length ? ': ' + Object.entries(by).map(([k, v]) => '<span style="color:' + colour(k, 1) + '">●</span>' + v + ' ' + h(OUT[k][1])).join(', ') : '') + '</div>'
+      + (r.seen ? '<div class="t-r muted">Opened ' + r.seen.length + ' file' + (r.seen.length === 1 ? '' : 's') + '.</div>' : ''));
+    if (q) rows.push('<div class="t-h">The fix session' + (q.polish ? ' — ✨ the polish round, /simplify' : '') + '</div><div class="t-r">+' + q.add + ' −' + q.del + ' lines; its circle in the header, hover it for what they answered.</div>');
+    else if (r.polish) rows.push('<div class="t-r">✨ The polish round, /simplify.</div>');
+    if (hs.length) rows.push('<div class="t-r">✋ ' + hs.length + ' answer' + (hs.length > 1 ? 's' : '') + ' by the person no thread holds — the hand in the header.</div>');
+    return '<div class="t-f">' + h(roundName(i)) + '</div>' + rows.join('');
+  }
+  // The review's comments of findings not on a line: each with its round,
+  // its time, its opening words and its link.
+  function looseTip(r) {
+    const list = treeLoose.filter((x) => r === 'all' || x.r === +r);
+    return '<div class="t-f">💬 ' + list.length + ' comment' + (list.length > 1 ? 's' : '') + ' of findings not on a line</div>'
+      + '<div class="t-r muted">The review on GitHub put these findings in an ordinary comment of the conversation: their lines are outside the diff, or the run could not post on a line. No file, so no fix is tied to them.</div>'
+      + list.map((x) => '<div class="t-hand"><div class="t-r muted">' + h(roundName(x.r)) + ' · ' + stamp(x.t)
+        + ' · <a class="t-link" href="' + h(x.url) + '" target="_blank" rel="noopener">open on GitHub ↗</a></div><div class="t-q">' + h(x.text.slice(0, 400)) + (x.text.length > 400 ? '…' : '') + '</div></div>').join('');
+  }
+  function sessTip(q) {
+    const rows = q.sectors.map((x) => row2(swatch(x.fill), '<b>' + h(x.name) + '</b> · ' + x.v + ' lines · ' + share100(x.v, q.tot)));
+    return '<div class="t-f">' + h(roundName(q.i)) + '\'s fix session' + (q.polish ? ' — ✨ the polish round, /simplify' : '') + '</div>'
+      + '<div class="t-r">+' + q.add + ' −' + q.del + ' lines in all</div>'
+      + '<div class="t-pair">' + bigPie(q.sectors, 34) + '<div>' + rows.join('') + '</div></div>'
+      + '<div class="t-r muted">Its sectors: the session\'s lines by what they answered, in the threads\' colours. Size: ' + q.tot + ' lines, against ' + q.most + ' for the largest session.</div>';
+  }
+  function prTip(q) {
+    const names = ['added', 'removed'];
+    const rows = q.parts.map((x, i) => row2(swatch(x.fill), '<b>' + names[q.parts.length === 1 && !q.add ? 1 : i] + '</b> · ' + x.v + ' lines · ' + share100(x.v, q.add + q.del)));
+    return '<div class="t-f">PR #' + h(q.pr) + '</div><div class="t-r">The development\'s code, written before the review: +' + q.add + ' −' + q.del + ' lines in ' + q.files + ' files.</div>'
+      + (q.parts.length ? '<div class="t-pair">' + bigPie(q.parts, 30) + '<div>' + rows.join('') + '</div></div>' : '')
+      + '<div class="t-r muted">The root: ' + q.roots + ' line' + (q.roots === 1 ? '' : 's') + ' leave it — every first finding (a thread\'s colour) and every change no earlier fix explains (grey, dashed).</div>';
+  }
+  function foldTip(n) {
+    const q = n.sum, tot = q.add + q.del;
+    const rows = q.parts.map((x, i) => row2(swatch(x.fill), '<b>' + (x.fill === treeGeo.ADD ? 'added' : 'removed') + '</b> · ' + x.v + ' lines · ' + share100(x.v, tot)));
+    return '<div class="t-f">' + q.n + ' folded</div><div class="t-r">What grew from ' + h(n.path.split('/').pop()) + ':' + n.line + ', up to ' + h(roundName(q.r).toLowerCase()) + '.</div>'
+      + '<div class="t-pair">' + bigPie(q.parts, 30, '', true) + '<div>' + rows.join('') + '</div></div>'
+      + '<div class="t-h">Their threads</div>' + q.outs.map((x) => row2(swatch(colour(x.k, 1)), x.v + ' ' + h(x.name))).join('')
+      + (() => {
+        const th = q.all.filter((c) => c.t);
+        return th.length ? '<div class="t-h">Its threads, on GitHub</div>' + th.slice(0, 12).map((c) => '<div class="t-r"><span style="color:' + colour(c.outcome, 1) + '">●</span> '
+          + threadLink(c.t, h(c.path.split('/').pop()) + ':' + c.line + ' — ' + h((c.t.title || '').slice(0, 90))) + ' <span class="muted">· ' + h(roundName(c.r, true)) + '</span></div>').join('')
+          + (th.length > 12 ? '<div class="t-r muted">…and ' + (th.length - 12) + ' more</div>' : '') : '';
+      })()
+      + (() => {
+        const all = Object.values(q.byR), sum = (k) => all.reduce((a, b) => a + b[k], 0);
+        const say = [];
+        if (q.read.length || q.unread) say.push(row2('<b class="t-g">' + (q.unread ? '⋯' : '✓') + '</b>', (q.read.length ? '✓ ' + q.read.length + ' of its end fixes read again with nothing found' + (q.readAt != null ? ' (last by ' + h(roundName(q.readAt)) + ')' : '') : '') + (q.read.length && q.unread ? '; ' : '') + (q.unread ? '⋯ ' + q.unread + ' not read yet' : '') + '.'));
+        if (sum('missed')) say.push(row2('<b class="t-g t-miss">|</b>', sum('missed') + ' found where a round had read the fix and passed it (the purple tick before a circle).'));
+        if (sum('person')) say.push(row2('<b class="t-g">◆</b>', sum('person') + ' opened by the person.'));
+        if (sum('polish')) say.push(row2('<b class="t-g">✨</b>', sum('polish') + ' made by the polish round.'));
+        if (sum('hands')) say.push(row2('<b class="t-g">✋</b>', sum('hands') + ' answer' + (sum('hands') > 1 ? 's' : '') + ' by the person about them.'));
+        if (sum('guess')) say.push(row2('<b class="t-g">░</b>', sum('guess') + ' tied to their thread by nearness alone' + (all.some((b) => b.guess === b.n) ? ' (a circle all of them, paler)' : '') + '.'));
+        return say.length ? '<div class="t-h">What it carries</div>' + say.join('') : '';
+      })()
+      + '<div class="t-h">Round by round</div>' + Object.values(q.byR).sort((a, b) => a.r - b.r).map((b) => '<div class="t-pair">'
+        + '<span class="t-slot">' + (b.parts.length ? bigPie(b.parts, Math.max(6, Math.min(16, b.rs)), '', true) : '') + '</span>'
+        + '<div><b>' + h(roundName(b.r)) + '</b>: ' + b.n + ' hidden, +' + b.add + ' −' + b.del + ' lines · '
+        + b.outs.map((x) => '<span style="color:' + colour(x.k, 1) + '">●</span>' + x.v + ' ' + h(x.name)).join(', ') + '</div></div>').join('')
+      + '<div class="t-r muted">Each dashed ring: a summary of that round\'s hidden fixes, not one fix; its number, how many threads and changes it hides. The grey ribbon: the folded branch, as thick as all still ahead of it, so it thins round by round. Click to open.</div>';
+  }
+  // A thread named in a hover is a link to it on GitHub; the hover can be
+  // entered and nothing else in it is clicked.
+  const threadLink = (t, text) => t && t.url ? '<a class="t-link" href="' + h(t.url) + '" target="_blank" rel="noopener">' + text + '</a>' : text;
+  function treeTip(n) {
+    const name = (q) => q.t ? threadLink(q.t, h(q.path.split('/').pop()) + ':' + q.line + ' — ' + h((q.t.title || '').slice(0, 110)))
+      : (q.outcome === 'asked' ? 'asked for by the person' : q.outcome === 'moved' ? 'code moved' : 'a change no thread asked for') + ' in ' + h(q.path.split('/').pop());
+    const dot = (q) => '<svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="' + (q.t ? colour(q.outcome, 1) : 'none') + '" stroke="' + colour(q.outcome, 1) + '"/></svg> ';
+    const out = [];
+    out.push('<div class="t-f">' + h(n.path) + (n.line ? ':' + n.line : '') + '</div>');
+    if (n.t) out.push('<div class="t-r">' + threadLink(n.t, h(n.t.title || '') + ' ↗') + '</div><div class="t-r muted">' + (n.t.conv ? '💬 A finding in the conversation (its file is not in the diff, so no thread holds it), found by ' : n.t.by === 'person' ? '◆ Opened by the person, during ' : 'Found by ') + h(roundName(n.r).toLowerCase()) + ' · ' + h(howEnded(n.t)) + '</div>');
+    else if (n.outcome === 'side' && ((data.rounds || [])[n.r] || {}).polish) out.push('<div class="t-r muted">✨ Changed by the polish round: /simplify over the whole pull request, once nothing was left open. The next pass reads it like any fix.</div>');
+    else out.push('<div class="t-r muted">' + (n.outcome === 'asked' ? 'The person asked for it during the review (a feat or Requirement: commit).'
+      : n.outcome === 'moved' ? 'Code moved here from another file: neither a fix nor new code.'
+        : 'Changed in ' + h(roundName(n.r).toLowerCase()) + '\'s fixing with no thread asking for it — it came along with the fixes.') + '</div>');
+    {
+      const q = n.res, ok = q.done + q.closed;
+      out.push('<div class="t-r"><b>' + (ok === q.ends ? (q.done ? '<span class="t-ok">✓ Resolved</span>' : '<span class="muted">✓ Closed without a change</span>') : ok + ' of ' + q.ends + ' resolved') + '</b>'
+        + (q.ends > 1 || n.kids.length ? ' <span class="muted">— the ends of its branch: ' + q.done + ' fixed and read again, ' + q.closed + ' closed without a change, ' + (q.ends - ok) + ' still open or unread</span>' : '') + '</div>');
+    }
+    out.push(linePart(n));
+    out.push(fixPart(n));
+    out.push('<div class="t-h">Grew from</div>');
+    if (!n.parent) out.push('<div class="t-r">' + (n.t ? 'The development\'s code: no earlier fix wrote the line it is on.' : 'Nothing the review wrote earlier: it rewrote the development\'s code.') + '</div>');
+    else {
+      out.push('<div class="t-r">' + dot(n.parent) + name(n.parent) + '</div>');
+      out.push('<div class="t-r muted">' + (n.t ? 'posted on lines that fix wrote (' + (n.pw || 0) + ' changed there)' : 'rewrote ' + (n.pw || 0) + ' lines that fix had written')
+        + (n.t && n.t.missed != null ? '; <b class="t-miss">' + h(roundName(n.t.missed)) + ' had read that fix and passed it</b>' : '')
+        + (n.outcome === 'reversal' ? '; <b>it would undo that fix</b>' : '') + '</div>');
+      n.cross.forEach((c) => out.push('<div class="t-r muted">and ' + c.w + ' lines of ' + dot(c.p) + name(c.p) + '</div>'));
+    }
+    if (n.cites.length) out.push('<div class="t-h">Repeats</div>' + n.cites.map((c) => '<div class="t-r">' + dot(c) + name(c) + ' <span class="muted">· ' + h(roundName(c.r, true)) + ' · ' + h(howEnded(c.t)) + '</span></div>').join(''));
+    if (n.citedBy.length) out.push('<div class="t-h">Repeated by ' + n.citedBy.length + '</div>' + n.citedBy.map((c) => '<div class="t-r">' + dot(c) + name(c) + ' <span class="muted">· ' + h(roundName(c.r, true)) + '</span></div>').join(''));
+    if (n.hs.length) {
+      out.push('<div class="t-h">Its fix, by file</div>');
+      n.files.forEach((f) => {
+        const hs = n.hs.filter((x) => x.path === f);
+        out.push('<div class="t-r muted">' + h(f.split('/').pop()) + ' +' + hs.reduce((a, x) => a + x.add, 0) + ' −' + hs.reduce((a, x) => a + x.del, 0)
+          + (kindOf(f) !== 'code' ? ' · ' + kindOf(f) : hs.every((x) => !x.code) ? ' · comments only' : '') + '</div>');
+      });
+    } else if (n.t) out.push('<div class="t-h">No fix</div><div class="t-r muted">' + (n.outcome === 'open' ? 'Not fixed yet.' : 'Nothing was changed for it.') + '</div>');
+    if (n.kids.length) {
+      out.push('<div class="t-h">Grew from it: ' + n.kids.length + (n.desc > n.kids.length ? ', ' + n.desc + ' in all' : '') + '</div>');
+      n.kids.slice(0, 8).forEach((c) => out.push('<div class="t-r">' + dot(c) + name(c) + ' <span class="muted">· ' + h(roundName(c.r, true)) + '</span></div>'));
+      if (n.kids.length > 8) out.push('<div class="t-r muted">…</div>');
+    } else if (n.hs.length) out.push('<div class="t-r muted">' + (n.readAt != null ? '✓ ' + h(roundName(n.readAt)) + ' read its files again and posted nothing on its lines.' : '⋯ No round has read its files since.') + '</div>');
+    if (n.hands.length) out.push('<div class="t-h">✋ ' + n.hands.length + ' answer' + (n.hands.length > 1 ? 's' : '') + ' by the person</div>' + handRows(n.hands));
+    const row = n.chain || [];
+    const rowThreads = row.filter((c) => c.t).length, rowSide = row.length - rowThreads;
+    if (row.length > 1) out.push('<div class="t-h">On its row: ' + [rowThreads ? rowThreads + ' thread' + (rowThreads > 1 ? 's' : '') : '', rowSide ? rowSide + ' other change' + (rowSide > 1 ? 's' : '') : ''].filter(Boolean).join(' and ') + ', each grown from the one before</div>'
+      + row.map((c) => '<div class="t-r">' + dot(c) + (c === n ? '<b>' + name(c) + '</b>' : name(c)) + ' <span class="muted">· ' + h(roundName(c.r, true)) + '</span></div>').join(''));
+    out.push('<div class="t-r muted">Generation ' + (n.gen + 1) + '</div>');
+    return out.join('');
   }
   // --- the hover on an icicle ------------------------------------------------
   // What a place is and how it went: where, what this round did there, the
@@ -1698,14 +2678,167 @@ const reviewMap = (() => {
   // The held names come up only once the map is scrolled sideways: at
   // rest the whole name and its duration are there on the map.
   body.addEventListener('scroll', () => body.classList.toggle('rv-sx', body.scrollLeft > 2), {passive: true});
+  // In the tree: a node's whole line stands out, the rest fades.
+  let treeLit = null;
+  function treeLight(n) {
+    if (treeLit === n) return;
+    treeLit = n;
+    const svgEl = body.querySelector('.rv-tree');
+    if (!svgEl) return;
+    svgEl.classList.toggle('rv-tdim', !!n);
+    const on = n ? new Set([...treeLine(n)].map((q) => String(q.i))) : new Set();
+    svgEl.querySelectorAll('[data-n]').forEach((el) => el.classList.toggle('hi', on.has(el.dataset.n)));
+  }
+  // --- a note clicked open: pinned, and kept in the page's address ---------
+  // A click on an element whose note the hover shows keeps that note open,
+  // with a ✕, until it is closed, another is clicked or Esc; its key — one
+  // that outlives a redraw and a new round — is `rvi` in the address
+  // (process_url.js), so a link opens the map with the same note. Clicks
+  // that mean something already (a count folds, a summary opens, a block's
+  // name folds it, a link) stay theirs.
+  let pinned = null, wantPin = null;
+  const placeKey = (p) => {
+    const b = p.bits[0];
+    return 'p:' + p.ri + ':' + b.f + ':' + Math.min(...b.hs.map((x) => x.x));
+  };
+  function pinTarget(key) {
+    const q = (sel) => body.querySelector(sel);
+    if (mode === 'tree') {
+      if (key === 'pr') return treePR && q('[data-pr]') ? {el: q('[data-pr]'), html: () => prTip(treePR)} : null;
+      // Keys come from the address too: what goes into a selector is escaped.
+      const at = (attr, v) => q('[' + attr + '="' + CSS.escape(v) + '"]');
+      // The header's and the rows' marks by their attribute: what it holds
+      // must still be there, and its note.
+      const KEYED = {l: ['data-loose', () => true, looseTip], r: ['data-round', () => true, (v) => roundTip(+v)],
+        h: ['data-hands', (v) => treeHands[v], handsTip], s: ['data-sess', (v) => treeSess[v], (v) => sessTip(treeSess[v])]};
+      const kind = key[1] === ':' && KEYED[key[0]];
+      if (kind) {
+        const v = key.slice(2), el = kind[1](v) && at(kind[0], v);
+        return el ? {el, html: () => kind[2](v)} : null;
+      }
+      const id = key.slice(2), n = treeNodes.find((x) => x.id === id);
+      if (!n) return null;
+      if (key.startsWith('f:')) { const el = n.folded && n.row != null && q('[data-foldtip="' + n.i + '"]'); return el ? {el, html: () => foldTip(n), n} : null; }
+      if (n.row == null) return null;
+      const el = [...body.querySelectorAll('.rv-tn[data-n="' + n.i + '"]')].find((g) => g.querySelector('.rv-tpie')) || q('[data-n="' + n.i + '"]');
+      return el ? {el, html: () => treeTip(n), n} : null;
+    }
+    if (key.startsWith('p:')) {
+      const i = placesNow.findIndex((p) => placeKey(p) === key);
+      const el = i >= 0 && q('.rv-fix[data-i="' + i + '"]');
+      return el ? {el, html: () => tipHtml(placesNow[i])} : null;
+    }
+    return null;
+  }
+  function pinShow(key) {
+    if (key.startsWith('c:')) {
+      const g = body.querySelector('.rv-cut[data-cut="' + CSS.escape(key.slice(2)) + '"]');
+      if (!g) return false;
+      const r = g.getBoundingClientRect();
+      openCut(g, r.x + 60, r.y + r.height / 2);
+      return true;
+    }
+    const t = pinTarget(key);
+    if (!t) return false;
+    const r = t.el.getBoundingClientRect();
+    hold.pin(key, () => '<button type="button" class="t-x" aria-label="Close">✕</button>' + t.html(), {clientX: r.x + r.width / 2, clientY: r.y + r.height / 2}, t.el);
+    // Not shown (text being selected in another note): nothing pinned yet.
+    if (hold.key !== key) return false;
+    pinned = key;
+    if (t.n) { treeLit = null; treeLight(t.n); }
+    return true;
+  }
+  function unpin() {
+    if (!pinned) return;
+    pinned = null; hold.unpin(); treeLight(null);
+  }
+  // The person closing it (a click, ✕, another view): a note a link still
+  // waits for goes too.
+  function closeNote() { wantPin = null; unpin(); }
+  // A note from the link waits until the map can show it; the person's own
+  // click, ✕, Esc or another view drops it, so it never comes back over theirs.
+  // A pinned note keeps its text and what is selected in it over a redraw,
+  // and follows what it is about to where that is drawn now (not while the
+  // pointer is in it, so it does not slide away from under it); it closes
+  // once that is no longer drawn.
+  function afterDraw() {
+    if (wantPin && pinShow(wantPin)) { wantPin = null; return; }
+    if (!pinned) return;
+    const t = pinTarget(pinned);
+    if (!t) unpin();
+    else if (hold.key !== pinned) pinShow(pinned);
+    else { if (!hold.busy) hold.moveTo(t.el); if (t.n) treeLight(t.n); }
+  }
+  body.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (!t.closest || t.closest('a,[data-fold],[data-go],.rv-cut,.rv-bk,.rv-tchains')) return;
+    let key = null;
+    if (mode === 'tree') {
+      const sx = t.closest('[data-loose],[data-hands],[data-sess],[data-pr],[data-foldtip],[data-n],[data-round]');
+      if (sx && sx.dataset.loose != null) key = 'l:' + sx.dataset.loose;
+      else if (sx && sx.dataset.foldtip != null) key = treeNodes[+sx.dataset.foldtip] ? 'f:' + treeNodes[+sx.dataset.foldtip].id : null;
+      else if (sx && sx.dataset.hands != null) key = 'h:' + sx.dataset.hands;
+      else if (sx && sx.dataset.round != null) key = 'r:' + sx.dataset.round;
+      else if (sx) key = sx.dataset.sess != null ? 's:' + sx.dataset.sess : sx.dataset.pr ? 'pr' : treeNodes[+sx.dataset.n] ? 'n:' + treeNodes[+sx.dataset.n].id : null;
+    } else {
+      const g = t.closest('.rv-fix');
+      if (g && placesNow[+g.dataset.i]) key = placeKey(placesNow[+g.dataset.i]);
+    }
+    if (!key || key === pinned) { closeNote(); return; }
+    wantPin = null;
+    pinShow(key);
+  });
+  tip.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('.t-x')) closeNote(); });
+  addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    wantPin = null;
+    if (!pinned) return;
+    // The note alone: not full screen, not the page's own Esc.
+    ev.stopImmediatePropagation(); unpin();
+  }, true);
   body.addEventListener('mouseover', (ev) => {
+    if (pinned) return;
+    if (mode === 'tree') {
+      const lx = ev.target.closest && ev.target.closest('[data-loose]');
+      if (lx) { treeLight(null); hold.show('l' + lx.dataset.loose, () => looseTip(lx.dataset.loose), ev, lx); return; }
+      const hx = ev.target.closest && ev.target.closest('[data-hands],[data-handn]');
+      if (hx) {
+        if (hx.dataset.hands != null) { treeLight(null); hold.show('h' + hx.dataset.hands, () => handsTip(hx.dataset.hands), ev, hx); return; }
+        const hn = treeNodes[+hx.dataset.handn];
+        if (hn) { treeLight(hn); hold.show('hn' + hn.i, () => '<div class="t-f">✋ About ' + h(hn.path.split('/').pop()) + ':' + hn.line + '</div>' + handRows(hn.hands), ev, hx); return; }
+      }
+      const sx = ev.target.closest && ev.target.closest('[data-sess],[data-pr],[data-foldtip],[data-round]');
+      if (sx && sx.dataset.round != null) { treeLight(null); hold.show('r' + sx.dataset.round, () => roundTip(+sx.dataset.round), ev, sx); return; }
+      if (sx) {
+        treeLight(null);
+        if (sx.dataset.sess != null && treeSess[sx.dataset.sess]) { hold.show('s' + sx.dataset.sess, () => sessTip(treeSess[sx.dataset.sess]), ev, sx); return; }
+        if (sx.dataset.pr && treePR) { hold.show('pr', () => prTip(treePR), ev, sx); return; }
+        const fn = treeNodes[+sx.dataset.foldtip];
+        if (fn && fn.sum) { treeLight(fn); hold.show('f' + fn.i, () => foldTip(fn), ev, sx); return; }
+      }
+      const el = ev.target.closest && ev.target.closest('[data-n]');
+      const n = el && treeNodes[+el.dataset.n];
+      if (!n) { treeLight(null); hold.leave(); return; }
+      treeLight(n);
+      hold.show('n' + n.i, () => treeTip(n), ev, el);
+      return;
+    }
     const bk = ev.target.closest && ev.target.closest('.rv-bk[data-n]');
     const blk = bk && blocksNow.find((b) => b.n === +bk.dataset.n);
     const g = !blk && ev.target.closest && ev.target.closest('.rv-fix');
     if (!blk && (!g || !placesNow[+g.dataset.i])) { hold.leave(); return; }
     hold.show(blk ? 'b' + blk.id : 'p' + g.dataset.i, () => blk ? blockTip(blk) : tipHtml(placesNow[+g.dataset.i]), ev, blk ? bk : g);
   });
-  body.addEventListener('mouseleave', () => hold.leave());
+  body.addEventListener('mouseleave', () => { if (pinned) return; treeLight(null); hold.leave(); });
+  // A circle's count, or a folded branch's summary: fold or open it.
+  body.addEventListener('click', (ev) => {
+    if (mode !== 'tree') return;
+    const el = ev.target.closest && ev.target.closest('[data-fold]');
+    if (!el) return;
+    ev.stopPropagation();
+    toggleKept(treeFolded, TREE_FOLDED, el.dataset.fold);
+    treeLit = null; hold.hide(); drawnKey = ''; draw();
+  });
   // A split's line clicked: a card of what happened — the block as it
   // was, and the parts it became, each with what it answers for.
   const card = document.createElement('div');
@@ -1717,7 +2850,7 @@ const reviewMap = (() => {
     const next = (data.earlier[j + 1] || data).blocks || [];
     const tail = /\d$/.test(e.split) ? /^[a-z]$/ : /^\d+$/;
     const parts = next.filter((b) => b.id.startsWith(e.split) && tail.test(b.id.slice(e.split.length)));
-    const when = new Date(e.until * 1000).toLocaleString([], {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    const when = stamp(e.until);
     const crit = (b) => b.criteria.length ? b.criteria.length + (b.criteria.length === 1 ? ' criterion (' : ' criteria (')
       + h(b.criteria.join(', ')) + ')' : 'no criterion of its own';
     return '<button type="button" class="c-x" aria-label="Close">✕</button>'
@@ -1730,14 +2863,19 @@ const reviewMap = (() => {
       + parts.map((b) => '<div class="c-part"><b>' + h(b.id) + '</b> ' + h(b.title) + '<span>' + b.files.length + ' file'
         + (b.files.length === 1 ? '' : 's') + ' · ' + crit(b) + '</span></div>').join('');
   }
+  // Open: its split kept as `c:<j>` in the address until the card closes.
+  function openCut(g, x, y) {
+    card.innerHTML = cutCard(+g.dataset.cut, +g.dataset.r);
+    card.hidden = !card.innerHTML;
+    card.dataset.cut = g.dataset.cut;
+    const w = Math.min(460, innerWidth - 24);
+    card.style.left = Math.max(12, Math.min(x - 40, innerWidth - w - 12)) + 'px';
+    card.style.top = Math.max(12, Math.min(y + 14, innerHeight - card.offsetHeight - 12)) + 'px';
+  }
   body.addEventListener('click', (ev) => {
     const g = ev.target.closest && ev.target.closest('.rv-cut');
     if (!g) return;
-    card.innerHTML = cutCard(+g.dataset.cut, +g.dataset.r);
-    card.hidden = !card.innerHTML;
-    const w = Math.min(460, innerWidth - 24);
-    card.style.left = Math.max(12, Math.min(ev.clientX - 40, innerWidth - w - 12)) + 'px';
-    card.style.top = Math.max(12, Math.min(ev.clientY + 14, innerHeight - card.offsetHeight - 12)) + 'px';
+    openCut(g, ev.clientX, ev.clientY);
     ev.stopPropagation();
   });
   card.addEventListener('click', (ev) => { if (ev.target.closest('.c-x')) card.hidden = true; ev.stopPropagation(); });
@@ -1747,8 +2885,7 @@ const reviewMap = (() => {
     const bk = ev.target.closest && ev.target.closest('.rv-bk[data-n]');
     const b = bk && blocksNow.find((x) => x.n === +bk.dataset.n);
     if (!b) return;
-    if (folded.has(b.id)) folded.delete(b.id); else folded.add(b.id);
-    try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch (e) {}
+    toggleKept(folded, FOLDED, b.id);
     hold.hide();
     draw();
   });
@@ -1793,8 +2930,33 @@ const reviewMap = (() => {
 
   // The legend: a short name a kind, and on hover what it means (the
   // user's word, 2026-11-17: the screen keeps the names short).
+  // The tree's own legend: what its marks are, in the icicles' words.
+  function treeLegend(tl) {
+    const sw = (c, name, say) => '<span class="rv-k" style="--c:' + c + '"' + tl(say) + '>' + name + '</span>';
+    const mark = (sign, name, say) => '<span class="rv-k rv-m"' + tl(say) + '><b>' + sign + '</b>' + name + '</span>';
+    const group = (name, items) => '<span class="rv-lg"><i>' + name + '</i>' + items + '</span>';
+    const NAME = {fixed: 'fixed', declined: 'declined', yours: 'yours', reversal: 'undoes a fix', open: 'open'};
+    const ADD = addColour(), DEL = delColour();
+    return group('thread', Object.keys(NAME).map((k) => sw(colour(k, 1), NAME[k], 'A thread is a line, coloured by how it ended: from the fix it was found on (or the PR) to its own fix. Its thickness is all it carries — its own fix and everything that grew from it — as a branch carries its twigs: the heaviest lines leave the PR.')).join('')
+        + mark('┃', 'nothing changed', 'A bar at a thread\'s end: declined or left to the person, nothing changed for it; ⋯ still open. The round that found a thread is the column its fix or end stands in.')
+        + mark('◆', 'the person\'s', 'A diamond on the line: a thread the person opened, not the review.')
+        + mark('▌', 'start: severity', 'The first fifth of a line out of the circle it leaves, cut along by the shares of its branch\'s findings and darkened: dark important, its own colour a nit, a little darker and hatched in older code, dotted unmarked (a round before the marks).')
+        + mark('💬', 'conversation', 'A finding posted in the pull request\'s conversation, its file not in the diff: no thread holds it, a fix that answers it says it was fixed.'))
+      + group('fix', sw(ADD, 'added', 'A fix is a circle, as large as the lines it changed; added lines clockwise from the top.')
+        + sw(DEL, 'removed', 'Removed lines: the rest of the circle. Over each round, the fix session\'s own circle: its lines by what they answered, in the threads\' colours.')
+        + mark('╱', 'tests · docs · comments', 'Hatched by the kind of file, as on the icicles: / tests, \\ migrations, — docs and config, dots comments only. Paler, its line dashed: tied to its thread by nearness alone.')
+        + mark('▬', 'no thread', 'A circle on a grey line: a change no thread asked for, hung from the fix whose lines it rewrote — beige where the person asked for it; the line as thick as all it carries.')
+        + mark('✨', 'polish', 'A change the polish round made: /simplify over the whole pull request, once nothing was left open.'))
+      + group('edge', '<span class="rv-k rv-mk"' + tl('A purple tick: a round had read the fix this thread grew from and passed it; a later one found a problem on its lines.') + '>missed</span>'
+        + mark('┄', 'second parent', 'A change that rewrote lines of more than one earlier fix: the thinner, dashed curve to the others.')
+        + mark('⋰', 'repeats', 'A dotted arc on the left of the dots: a reply named an earlier thread (as on r<id>) — the same finding raised again, not grown from a fix.'))
+      + group('end', mark('✓', 'read, nothing new', 'A later round read the fix\'s files and posted nothing on its lines. Beside a row\'s label: its whole branch resolved — green when a change did it, grey when every end needed none (declined, left to you and resolved); a ring filled green by the share of its branch\'s ends resolved; nothing beside a row still wholly in work.')
+        + mark('⋯', 'not read yet', 'No round has read the fix\'s files since it landed.')
+        + mark('n', 'descendants', 'The number over a circle: how many threads and changes no thread asked for grew from it; click it to fold the branch.'));
+  }
   function legend() {
     const tl = (say) => ' title="' + h(say) + '"';
+    if (mode === 'tree') { panel.querySelector('.rv-legend').innerHTML = treeLegend(tl); return; }
     const sw = (c, name, say, cls) => '<span class="rv-k' + (cls ? ' ' + cls : '') + '" style="--c:' + c + '"' + tl(say) + '>' + name + '</span>';
     const pat = (id, name, say, solid) => '<span class="rv-k"' + tl(say) + '><svg width="12" height="12"><rect width="12" height="12" fill="' + (solid ? colour('fixed', 1) : colour('side', 1))
       + '"' + (solid ? '' : ' fill-opacity=".28"') + '/><rect width="12" height="12" fill="url(#rv-lp-' + id + ')"/></svg>' + name + '</span>';
@@ -1862,18 +3024,33 @@ const reviewMap = (() => {
     try { localStorage.setItem('review-map-off', '0'); } catch (e) {}
     update();
   });
+  body.addEventListener('change', (ev) => {
+    if (!ev.target.closest('.rv-tchains')) return;
+    treeChains = ev.target.checked;
+    try { localStorage.setItem('review-tree-chains', treeChains ? '1' : '0'); } catch (e) {}
+    draw();
+  });
   panel.querySelector('.rv-hands').addEventListener('change', (ev) => {
     panel.classList.toggle('rv-nohands', !ev.target.checked); draw();
   });
   panel.querySelector('.rv-centre').addEventListener('click', centre);
   panel.querySelector('.rv-full').addEventListener('click', () => full(!panel.classList.contains('rv-max')));
+  // The view: kept in the browser when picked here; from a link (the
+  // address's `rvm`) it is shown without becoming this browser's choice.
+  function setMode(m, save) {
+    if (!['fix', 'file', 'tree'].includes(m)) return;
+    if (save) { try { localStorage.setItem('review-map-mode', m); } catch (e) {} }
+    if (m === mode) return;
+    mode = m;
+    closeNote(); hold.hide(); treeLit = null; card.hidden = true;
+    panel.querySelectorAll('.rv-mode input').forEach((x) => { x.checked = x.value === mode; });
+    legend(); drawnKey = ''; draw();
+  }
   panel.querySelectorAll('.rv-mode input').forEach((r) => {
     r.checked = r.value === mode;
     r.addEventListener('change', () => {
       if (!r.checked) return;
-      mode = r.value;
-      try { localStorage.setItem('review-map-mode', mode); } catch (e) {}
-      draw();
+      setMode(r.value, true);
     });
   });
   // A click on the map: the step picked, or none.
@@ -1906,6 +3083,20 @@ const reviewMap = (() => {
     live: (node) => { ctx.live = isReview(node); update(); },
     // Full screen, for the page's address: asked, and restored from a link.
     full: (on) => { if (on === undefined) return maxed; maxed = !!on; if (shown) full(maxed); },
+    // Whether the panel is up: the address keeps its view and note only then.
+    shown: () => shown,
+    // The view, for the address: fix, file or thread.
+    mode: (m) => {
+      if (m === undefined) return mode === 'tree' ? 'thread' : mode;
+      setMode(m === 'thread' ? 'tree' : m, !window.processUrlRestoring);
+    },
+    // The note clicked open, for the address: its key, or none; restored
+    // once the map is drawn.
+    info: (k) => {
+      if (k === undefined) return pinned || wantPin || (!card.hidden && card.dataset.cut ? 'c:' + card.dataset.cut : null);
+      wantPin = k || null;
+      if (drawn) requestAnimationFrame(afterDraw);
+    },
   };
 })();
 window.reviewMap = reviewMap;

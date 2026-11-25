@@ -765,6 +765,10 @@ review_polish_is_due() {
 review_polish_owe() {
   local state="$1/.sclaude/local/feature/state.json"
   state_set "$state" steps.review.polish due
+  # The head the clean pass read: the round the polish is the fixing of, as
+  # the review's report and map name it (polish_round in review_report.py
+  # and review_map.py).
+  state_set "$state" polish_head "$(git -C "$1" rev-parse HEAD 2>/dev/null)"
   state_set "$state" steps.review.session null
 }
 

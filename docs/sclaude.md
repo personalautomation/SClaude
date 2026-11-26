@@ -465,14 +465,23 @@ lines it removed and wrote) and a thread's (`p`) are the same place in every
 round, and an icicle grows from the lines it changed. A file whose fixes do
 not add up to its next version (a rename) is placed by line numbers instead.
 The panel draws by fix (files joined by thread or subagent), by file (one
-icicle a file, never joined) or by thread, a choice kept in the browser. By
+icicle a file, never joined) or by thread, a choice kept in the browser. In
+the two icicle views a file's column is as wide as the root of the lines in
+it, never under a minimum: a column held at the minimum leaves the sharing
+and the rest divide what is left, so the map scrolls sideways only when
+every column is at it. The
+title's summary opens with the pull request against main now (`total`, from
+the fork point with main today) and the development's share of it. By
 thread (`drawTree` in process_review.js) draws the same JSON as descent: a
 node a thread, or a round's changes in one file that no thread asked for;
 a thread's parent is the owner of the fix its `of` names, such a change's
 the owners of its `from`, the one it rewrote most first. A fix is a pie at
 the head of its round's column, a thread the line from its parent's pie (or
 the PR's) to its own, the pies lying over it as knots — a tick on it only
-where a check missed; each branch takes a band of rows, the node in
+where a check missed. The person's asks no earlier fix explains grow not
+from the PR but from a ✋ of their round (`treeHandRoots`), at the left of
+that round's column, their trees below the review's under a dashed rule;
+the round header's ✋ moves there. Each branch takes a band of rows, the node in
 the middle of its children, so the ribbons turn in the gap before the next
 round and never cross. With chains on one row (`treeChains`, kept in the
 browser) a node's trunk — its only child, or the one with the largest
@@ -598,8 +607,13 @@ axis. A line on the same scale gives each round's added minus deleted
 lines (asks left out), right grown, left shrunk, its tone by how many
 threads review posted in the round, to the moment shown. A hunk whose
 added lines are mostly from a commit the person asked for (`asked_lines`: a
-`feat` subject or a `Requirement:` trailer, by a blame of the round's range)
-is `asked`, drawn as the development's; a place's lightness is how many
+`feat` subject or a `Requirement:` trailer, by a blame of the round's range),
+or that only removes lines in a file no other commit of the range touched
+(its `None` key), is `asked`, drawn as the development's — unless it is a
+thread's fix for sure (`unask`: a reply's "Fixed in <sha>" whose commit
+wrote its lines, or a subagent briefed on the thread editing the thread's
+own file), which a Requirement: footer the person's answer put on it does
+not make theirs; a place's lightness is how many
 earlier rounds' other hunks overlap its own (its `depth`, 3 and more alike),
 its fill split by the share of `asked` lines; solid when a line of code in
 an ordinary file or a migration changed, hollow otherwise; a solid place's only pattern is

@@ -72,6 +72,9 @@ changed. A finding posted on the lines an earlier fix wrote is that fix's
 child, so the tree shows which fixes bred new problems and which were read
 again and left alone (✓). With chains on one row, a problem that kept
 coming back to one place of the code is one long straight row, marked ×N.
+What the person asked for during the review grows below, from their ✋ in
+the round they stepped in — one tree for each such round — and a fix that
+answered a thread stays the review's even inside a commit of their asks.
 
 It is a diagnosis, not a cure: it shows which parts of the code have had
 enough review and which are still worth it, and leaves the decision with

@@ -338,15 +338,21 @@ def asked_lines(tree, a, b):
     wrote: a `feat` commit (Conventional Commits) or one carrying a
     `Requirement:` trailer — the development going on during the review, not
     a fix of a finding (review.md: a fix needs no Requirement footer). A
-    blame of each file they touched says which lines are theirs."""
+    blame of each file they touched says which lines are theirs.
+
+    A deletion leaves no line to blame: `None` under a path says that every
+    commit from a to b that touched it was asked for, so a hunk there that
+    only removes lines is theirs too, not a fix's."""
     log = git(tree, "log", "--first-parent", "--no-merges",
               "--format=%x01%H%x02%s%x02%(trailers:key=Requirement,valueonly,separator=;)", a + ".." + b) or ""
-    mine = set()
+    mine, others = set(), set()
     for rec in log.split("\x01")[1:]:
         sha, subject, req = (rec.strip("\n").split("\x02") + ["", ""])[:3]
-        if review_report.asked_commit(subject, req):
-            mine.add(sha)
-    out = {}
+        (mine if review_report.asked_commit(subject, req) else others).add(sha)
+    unasked = set()
+    for sha in others:
+        unasked.update(p for p in (git(tree, "show", "--name-only", "--format=", sha) or "").split("\n") if p)
+    out = {None: set()}
     for sha in mine:
         for path in (git(tree, "show", "--name-only", "--format=", sha) or "").split("\n"):
             if not path or path in out:
@@ -357,6 +363,8 @@ def asked_lines(tree, a, b):
                 if m and m.group(1) in mine:
                     got.add(int(m.group(2)))
             out[path] = got
+            if path not in unasked:
+                out[None].add(path)
     return out
 
 
@@ -776,7 +784,7 @@ def replied(tree, rounds, ends, threads, fixes):
     for t in threads:
         # A thread left as it is names commits as its reasons — the fix it
         # would undo, the decision it stands on — not as its fix.
-        if t["outcome"] in ("declined", "reversal", "yours"):
+        if t["outcome"] in LEFT_AS_IS:
             continue
         text = "\n".join(t.get("_replies") or [])
         for sha in SHA.findall(text):
@@ -819,11 +827,64 @@ def replied(tree, rounds, ends, threads, fixes):
             if away:
                 t["fixedIn"] = {"r": r, "files": away}
             for h in fixes:
-                if h["r"] == r and h["path"] in best and not h["thread"]:
-                    if own and h["path"] == t["path"] and not wrote(full, r, h):
+                if h["r"] != r or h["path"] not in best or h["thread"] not in ("", t["rid"]):
+                    continue
+                made = wrote(full, r, h)
+                if not h["thread"]:
+                    if own and h["path"] == t["path"] and not made:
                         continue
                     h["thread"], h["outcome"], h["via"] = t["rid"], t["outcome"], "reply"
+                # The named commit itself changed these lines — a fix the
+                # reply ties, or one nearness tied to this thread already:
+                # what unask() needs to take them from the person's asks.
+                if made:
+                    h["_made"] = True
             break
+
+
+def moved_over(h, share):
+    """Whether moved code takes a hunk from what it was tied to: one with
+    no thread, or one a thread is only near and that is almost all moved
+    code — half moved, the other half may be the fix of that thread. A tie
+    a reply or a brief made stays (build() ties a briefed nearness as
+    `agent`, unask() a nearness the reply confirms as `reply`), and so do
+    the person's asks."""
+    return not h.get("asked") and (h.get("via") == "" or (h.get("via") == "near" and share >= MOVE_ALL))
+
+
+def unask(fixes, threads):
+    """A fix tied to its thread for sure is that thread's, though its commit
+    carries a Requirement: footer — the person's answer on the thread made
+    the fix a requirement, it did not make the review's work theirs (the
+    user's word, 2026-11-26): its thread's reply "Fixed in <sha>" names a
+    commit that changed the hunk's own lines (`_made`, replied() — whether
+    the hunk was tied by the reply or by nearness), or a subagent briefed on
+    the thread edited the thread's own file (`via` agent there). Nearness
+    alone, a reply naming a commit that did not write the hunk, or a
+    subagent's edit elsewhere (a request of the person's may ride in the
+    same brief) leave it theirs, and so does a tie to a thread left as it
+    is — declined, a reversal, left to the person — which nothing fixed.
+
+    A tie by nearness the reply confirms is no guess any more: its `via`
+    becomes the reply's, so the page draws no guessed edge and the move
+    pass, which overrides a guess, leaves it the thread's (a brief's is
+    `agent` from the start)."""
+    of = {t["rid"]: t for t in threads}
+    for h in fixes:
+        made = h.pop("_made", False)
+        if h["via"] == "near" and made:
+            h["via"] = "reply"
+        t = (h["thread"] and of.get(h["thread"])) or {}
+        if t.get("outcome") in LEFT_AS_IS:
+            continue
+        if h.get("asked") and (made or (h["via"] == "agent" and t.get("path") == h["path"])):
+            del h["asked"]
+
+
+# A thread left as it is — declined, a reversal, left to the person:
+# nothing fixed it, so no commit a reply names and no change near it is
+# its fix.
+LEFT_AS_IS = ("declined", "reversal", "yours")
 
 
 def settled(t):
@@ -1309,6 +1370,8 @@ def build(tree):
                 theirs = asked.get(h["path"])
                 if theirs and h["add"] and sum(1 for k in range(h["x"], h["x"] + h["n"]) if k in theirs) * 2 > h["add"]:
                     h["asked"] = True
+                elif not h["add"] and h["path"] in asked[None]:
+                    h["asked"] = True
                 (fixes if h["path"] in own else carried).append(h)
     # The files: what the pull request changed by its first round, and every
     # file a fix or a thread touched since.
@@ -1343,6 +1406,18 @@ def build(tree):
         # by the fixes before it: an empty file has no lines either, but is there.
         r["absent"] = absent_files(tree, r["head"], paths)
     final = line_counts(tree, ends[-1], paths)
+    # The pull request as it is now, against main where it forks from it
+    # now (main merged in since is not the feature's): what the page's
+    # summary opens with, before the development's share and the rounds'.
+    total = None
+    for main in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+        fork = (git(tree, "merge-base", main, ends[-1]) or "").strip()
+        if fork:
+            total = [0, 0]
+            for h in hunks(tree, fork, ends[-1]):
+                total[0] += h["add"]
+                total[1] += h["del"]
+            break
     absent_end = absent_files(tree, ends[-1], paths)
     for r in rounds:
         sessions = r["sessions"]
@@ -1352,15 +1427,6 @@ def build(tree):
             if r.get("source") != "github" or r["logs"] else None
         r["seen"] = None if how is None else sorted(how)
         r["how"] = how
-    for k, h in enumerate(fixes):
-        h["i"] = k
-    axis = project(paths, rounds, fixes + carried, threads, dev, final)
-    # Code moved from another file grows from the fixes that wrote it there:
-    # the blame of the removal it came from.
-    for h in fixes:
-        srcs = h.get("_moved_from") or []
-        if srcs and not h.get("asked"):
-            h["_blame"] = sorted(set(h.get("_blame", [])) | {b for s in srcs for b in s.get("_blame", [])})
     # Each fix's answer: the nearest thread of its round in its file, within
     # NEAR lines; failing that, the thread a subagent of its round was given
     # when it edited the fix's file — one of the brief's threads in that file,
@@ -1394,8 +1460,22 @@ def build(tree):
                     h["outcome"], h["thread"], h["via"] = t["outcome"], t["rid"], "agent"
                     continue
         if best:
-            h["outcome"], h["thread"], h["via"] = best[1]["outcome"], best[1]["rid"], "near"
+            # Near a thread its subagent was briefed on: the brief ties it,
+            # no guess.
+            briefed = mine and any(t["rid"] == best[1]["rid"] for t in a["threads"])
+            h["outcome"], h["thread"], h["via"] = best[1]["outcome"], best[1]["rid"], "agent" if briefed else "near"
     replied(tree, rounds, ends, threads, fixes)
+    # Before the projection, so a fix's rewrites count as the review's.
+    unask(fixes, threads)
+    for k, h in enumerate(fixes):
+        h["i"] = k
+    axis = project(paths, rounds, fixes + carried, threads, dev, final)
+    # Code moved from another file grows from the fixes that wrote it there:
+    # the blame of the removal it came from.
+    for h in fixes:
+        srcs = h.get("_moved_from") or []
+        if srcs and not h.get("asked"):
+            h["_blame"] = sorted(set(h.get("_blame", [])) | {b for s in srcs for b in s.get("_blame", [])})
     # Moved code is no answer to a thread found near it: only a reply or a
     # subagent's brief ties it to one. Each side names the other's files.
     for h in fixes + carried:
@@ -1406,9 +1486,7 @@ def build(tree):
         if to and out:
             h["movedTo"] = sorted({s["path"] for s in to})
         share = h.pop("_moved_share", 0)
-        # A thread found near it gives way only to a hunk that is almost all
-        # moved code: half moved, the other half may be the fix of that thread.
-        if (frm or (to and out)) and not h.get("asked") and (h.get("via") == "" or (h.get("via") == "near" and share >= MOVE_ALL)):
+        if (frm or (to and out)) and moved_over(h, share):
             h["outcome"], h["thread"], h["via"] = "moved", "", "move"
     # A finding in the conversation has no thread to resolve: a fix that
     # answers it is what says it was fixed.
@@ -1476,7 +1554,7 @@ def build(tree):
     step = state.get("step") or ""
     closed = step == "done" or step in places and places.index(step) > places.index("review")
     now = (state.get("blocks") or {}).get("current")
-    return {"pr": pr, "repo": repo, "head": head, "final": final, "absentEnd": absent_end, "alive": survive, "dev": dev, "blocks": blocks, "earlier": earlier,
+    return {"pr": pr, "repo": repo, "head": head, "final": final, "total": total, "absentEnd": absent_end, "alive": survive, "dev": dev, "blocks": blocks, "earlier": earlier,
             "blockNow": now if isinstance(now, int) and blocks and not closed else None, "closed": closed,
             "blockSize": int(size) if size.isdigit() else review_blocks.SIZE,
             "files": [dict({"path": p, "lines": rounds[0]["lines"].get(p, 0)},

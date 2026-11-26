@@ -144,6 +144,20 @@ const reviewMap = (() => {
   // added and removed, +a −d, wherever the map counts them.
   const kilo = (n) => n < 1000 ? String(n) : (n / 1000).toFixed(n < 100000 ? 1 : 0).replace(/\.0$/, '') + 'K';
   const pm = (a, b) => '+' + kilo(a) + ' −' + kilo(b);
+  // The map's line counts — the header's, the summary's, a ✋'s — give a
+  // sense of size: roughly right is enough (the user's word, 2026-11-26).
+  // A count off at an edge case (a merge, a reply that names the wrong
+  // commit, a line tied to two threads) is not worth more code to settle.
+  // Fixed threads of the first `R` rounds whose every fix line is in a
+  // commit the person asked for (feat or Requirement:) and not tied to the
+  // thread for sure (review_map.py's unask): counted among the asks, said
+  // apart.
+  const insideAsks = (d, R) => {
+    const by = {};
+    d.hunks.forEach((x) => { if (x.thread && x.r < R) (by[x.thread] = by[x.thread] || []).push(x); });
+    return d.threads.filter((t) => t.r < R && t.outcome === 'fixed' && (by[t.rid] || []).length && by[t.rid].every((x) => x.asked)).length;
+  };
+  const insideSay = (n) => n + ' thread' + (n === 1 ? '' : 's') + ' fixed inside your commits';
   // What is left of the development's code in a block's files now (blame,
   // review_map.py's `alive`): [wrote, alive, written since, from main].
   function survival(files) {
@@ -167,9 +181,21 @@ const reviewMap = (() => {
     // Every round's changes summed, as the header's +a −d, with what the
     // person asked for and the code moved between files apart.
     const sum = (f) => data.hunks.filter((x) => x.r < roundsShown.length && f(x)).reduce((a, x) => [a[0] + x.add, a[1] + x.del], [0, 0]);
-    const lines = '<div class="t-f">Lines changed during the review, every round summed</div>'
-      + [['the review\'s fixes', sum((x) => !x.asked && x.outcome !== 'moved')], ['what you asked for', sum((x) => x.asked)], ['moved between files', sum((x) => !x.asked && x.outcome === 'moved')]]
-        .filter(([, v]) => v[0] || v[1]).map(([k, v]) => '<div class="t-r"><b>' + pm(...v) + '</b> ' + k + '</div>').join('');
+    // First the pull request as it is now and the development's share of
+    // it, then what the rounds changed (the user's word, 2026-11-26).
+    const devf = (data.dev && data.dev.files) || {};
+    const dev = Object.values(devf).reduce((a, f) => [a[0] + (f.add || 0), a[1] + (f.del || 0)], [0, 0]);
+    const own = sum((x) => !x.asked && x.outcome !== 'moved'), asked = sum((x) => x.asked);
+    const inside = insideAsks(data, roundsShown.length);
+    const hidden = inside ? ' <span class="muted">— and ' + insideSay(inside) + ' (feat or Requirement:), counted below as yours</span>' : '';
+    const lines = '<div class="t-f">Lines of the pull request</div>'
+      + (data.total ? '<div class="t-r"><b>' + pm(...data.total) + '</b> now, against main</div>' : '')
+      + (dev[0] || dev[1] ? '<div class="t-r"><b>' + pm(...dev) + '</b> by the development, before the review</div>' : '')
+      + '<div class="t-f" style="margin-top:8px">Changed during the review, every round summed</div>'
+      + '<div class="t-r"><b>' + pm(...own) + '</b> the review\'s fixes' + hidden + '</div>'
+      + [['what you asked for', asked], ['moved between files', sum((x) => !x.asked && x.outcome === 'moved')]]
+        .filter(([, v]) => v[0] || v[1]).map(([k, v]) => '<div class="t-r"><b>' + pm(...v) + '</b> ' + k + '</div>').join('')
+      + '<div class="t-r muted">A line rewritten in several rounds counts in each, so these do not add up to the total above.</div>';
     if (!data.alive || !(data.blocks || []).length) return lines;
     const rows = data.blocks.map((b) => [b, survival(b.files)]).filter(([, n]) => n[0] || n[2]);
     if (!rows.length) return lines;
@@ -357,12 +383,14 @@ const reviewMap = (() => {
       + (sAdd || sDel ? '; after a stopped pass, not drawn in the icicles: +' + sAdd + ' −' + sDel : '');
     const cost = rounds.reduce((a, r) => a + (r.cost || 0), 0);
     const rec = hands.filter((x) => x.rec).length;
+    const inside = insideAsks(d, rounds.length);
     return '<b>PR #' + h(d.pr) + '</b> · ' + rounds.length + ' round' + (rounds.length === 1 ? '' : 's')
       + (cost ? ' · $' + cost.toFixed(2) : '')
       + ' · threads: ' + Object.entries(n).map(([k, v]) => '<span class="rv-k" style="--c:' + colour(k, 1) + '">' + v + ' ' + OUT[k][1] + '</span>').join(' ')
       // The person's asks and moved code are in the title's note, beside
       // the blocks' table: the header stays one line (the user's word).
       + ' · <span class="rv-lines" title="' + h(linesSay) + '">' + pm(rAdd, rDel) + ' in review fixes'
+      + (inside ? ' (and ' + insideSay(inside) + ')' : '')
       + (sAdd || sDel ? ' (and ' + pm(sAdd, sDel) + ' after a stopped pass)' : '') + '</span>'
       + ' · ✋ ' + hands.length + (rec ? ' (' + rec + ' recommended)' : '');
   }
@@ -546,8 +574,23 @@ const reviewMap = (() => {
     const total = weight.reduce((a, w) => a + w, 0) || 1;
     const groupsN = hasBlocks ? new Set(files.map((f) => blockOf[f] || 999)).size : 1;
     const open_ = files.filter((f) => !isFold(f));
-    const avail = width - GUT - 8 - GAP * open_.length - BGAP * (groupsN - 1) - MINW * open_.filter((f) => !touched.has(f)).length
+    let avail = width - GUT - 8 - GAP * open_.length - BGAP * (groupsN - 1) - MINW * open_.filter((f) => !touched.has(f)).length
       - (FOLD + GAP) * Object.keys(foldN).length;
+    // A column whose share is under MINW is held at MINW, and what that
+    // costs comes out of the others' shares, not past the panel's edge:
+    // the narrow ones leave the sharing until none is left under MINW.
+    // Only when every column is at MINW does the map grow wider than the
+    // panel and scroll.
+    const held = new Set();
+    let share = total;
+    for (let again = true; again;) {
+      again = false;
+      weight.forEach((w, i) => {
+        if (w && !held.has(i) && avail * w / share < MINW && share > w) {
+          held.add(i); avail -= MINW; share -= w; again = true;
+        }
+      });
+    }
     const cols = [], groups = [];
     let cx = GUT;
     files.forEach((f, i) => {
@@ -562,7 +605,7 @@ const reviewMap = (() => {
       const fold = isFold(f), grp = groups[groups.length - 1];
       if (fold && grp.fold) { cols.push([grp.x0, FOLD]); return; }
       if (fold) grp.fold = true;
-      const w = fold ? FOLD : touched.has(f) ? Math.max(MINW, avail * weight[i] / total) : MINW;
+      const w = fold ? FOLD : touched.has(f) && !held.has(i) ? Math.max(MINW, avail * weight[i] / share) : MINW;
       cols.push([cx, w]); cx += w + GAP;
       grp.x1 = cx - GAP;
     });
@@ -1590,7 +1633,7 @@ const reviewMap = (() => {
   //   after a knot with no child: ✓ in the column of the round that read
   //     its files again and found nothing there, ⋯ while none has;
   //   ✋ the person answered about that thread.
-  let treeNodes = [], treeSess = {}, treePR = null, treeGeo = null, treeHands = {}, treeMeasure = null, treeLoose = [];
+  let treeNodes = [], treeSess = {}, treePR = null, treeGeo = null, treeHands = {}, treeHandRoots = {}, treeAsked = {}, treeMeasure = null, treeLoose = [];
   // Branches folded in the tree, by node id, kept per feature: a click on
   // a circle's count folds what grew from it, a click again (or on the
   // summary) opens it.
@@ -1669,6 +1712,26 @@ const reviewMap = (() => {
       if (n) { n.hands.push(x); return; }
       if (x.r == null || x.r >= R) return;
       (treeHands[x.r] = treeHands[x.r] || []).push(x);
+    });
+    // What the person asked for grows from their hand, not from the pull
+    // request: a change of theirs no earlier fix explains hangs from a ✋ in
+    // the round it was made in — they step in only during the rounds — and
+    // those trees go below the review's, one for each round the person's
+    // asks came in (the user's word, 2026-11-26).
+    treeHandRoots = {};
+    // What the person asked for in each round, wherever it hangs — a hand
+    // root, a thread's node it lies near, a fix it builds on: its ✋ says
+    // the round's whole, as the summary does.
+    treeAsked = {};
+    d.hunks.forEach((x) => {
+      if (!x.asked || x.r == null || x.r >= R) return;
+      const a = treeAsked[x.r] = treeAsked[x.r] || {add: 0, del: 0, paths: new Set()};
+      a.add += x.add; a.del += x.del; a.paths.add(x.path);
+    });
+    nodes.forEach((n) => {
+      if (n.parent || !n.side || n.outcome !== 'asked') return;
+      n.hand = n.r;
+      (treeHandRoots[n.r] = treeHandRoots[n.r] || {r: n.r, roots: []}).roots.push(n);
     });
     // A reply naming an earlier thread ("as on r<id>", review_map.py's
     // `cites`): a repeat, drawn as a dotted arc, not a parent.
@@ -1753,7 +1816,12 @@ const reviewMap = (() => {
       rows.push(n);
       chain.slice().reverse().forEach((q) => q.below.forEach((k) => visit(k, q.g + 1)));
     };
-    nodes.filter((n) => !n.parent).sort((a, b) => (fileIdx(a.path) - fileIdx(b.path)) || (a.r - b.r) || (a.line - b.line)).forEach((n) => visit(n, 0));
+    const handOf = (n) => n.hand == null ? -1 : n.hand;
+    // Where the person's trees begin: the first row of the first hand
+    // root's band, its children above it included — the rule goes there.
+    let handRow = null;
+    nodes.filter((n) => !n.parent).sort((a, b) => (handOf(a) - handOf(b)) || (fileIdx(a.path) - fileIdx(b.path)) || (a.r - b.r) || (a.line - b.line))
+      .forEach((n) => { if (n.hand != null && handRow == null) handRow = rows.length; visit(n, 0); });
     // Every node drawn, a row's after its first.
     const placed = rows.flatMap((n) => n.chain);
     // A folded branch in sum: every node below, their fixes' lines, the
@@ -1903,7 +1971,8 @@ const reviewMap = (() => {
       const mine = perRound[i], tot = linesIn[i];
       const rr = tot ? (compact[i] ? 3 + 8 * Math.pow(tot / sessionMost, 0.7) : 4 + 10 * Math.pow(tot / sessionMost, 0.7)) : 0;
       const cx = start[i] + wid[i] - (compact[i] ? 14 : 18);
-      const hs = noHands ? [] : treeHands[i] || [];
+      // A round whose asks have a tree of their own: its ✋ is that tree's root.
+      const hs = noHands || treeHandRoots[i] ? [] : treeHands[i] || [];
       const roomOf = [wid[i] - 10, wid[i] - 12 - (rr ? 2 * rr + 8 : 0), wid[i] - 10 - (hs.length ? 22 : 0)];
       const fit = (line, font, forms) => { treeMeasure.font = font; return forms.find((t) => treeMeasure.measureText(t).width <= roomOf[line]) || ''; };
       const name = roundName(i), num = roundName(i, true), took = dur(r.seconds);
@@ -1944,15 +2013,41 @@ const reviewMap = (() => {
     // The root: the pull request, its pie the development's code (added,
     // removed); a curve from it to every first finding and every change no
     // earlier fix explains, turning in the gap before the first round.
-    const roots = rows.filter((n) => !n.parent);
+    const roots = rows.filter((n) => !n.parent && n.hand == null);
     const prY = roots.length ? (Y(roots[0]) + Y(roots[roots.length - 1])) / 2 : HEAD + ROW / 2;
+    // The person's hands: each at the left of its round's column — clear of
+    // the PR's circle, whose trees may be none — in the middle of its trees' rows, a
+    // line from it to each change it asked for turning just before the
+    // round. A rule across above the first, under the review's trees.
+    const HR = 11;
+    let handSvg = '';
+    Object.values(treeHandRoots).forEach((g) => {
+      const ys = g.roots.map(Y);
+      g.y = (Math.min(...ys) + Math.max(...ys)) / 2;
+      g.x = X(g.r) - 20;
+      g.turn = X(g.r) - 4;
+      const a = treeAsked[g.r];
+      const hs = noHands ? [] : treeHands[g.r] || [], rec = hs.some((x) => x.rec);
+      handSvg += '<g class="rv-thands rv-thandroot"' + (hs.length ? ' data-hands="' + g.r + '"' : '') + '>'
+        + (hs.length ? '' : '<title>✋ What the person asked for during ' + h(roundName(g.r).toLowerCase()) + ': feat commits or ones with a Requirement: footer; no answer of theirs recorded in this round.\n+' + a.add + ' −' + a.del + ' lines in ' + a.paths.size + ' files: this tree starts with what no earlier fix explains; the rest hangs where it was written.</title>')
+        + '<circle class="rv-thandc" cx="' + f1(g.x) + '" cy="' + f1(g.y) + '" r="' + HR + '" fill="' + devColour(1) + '"/>'
+        + (rec ? '<circle class="rv-thring" cx="' + f1(g.x) + '" cy="' + f1(g.y) + '" r="' + (HR + 3) + '"/>' : '')
+        + '<text class="rv-thandh" x="' + f1(g.x) + '" y="' + f1(g.y + 4) + '">✋</text>'
+        + '<text class="rv-tprt" x="' + f1(g.x) + '" y="' + f1(g.y - HR - 6) + '">' + h(roundName(g.r, true)) + (hs.length > 1 ? ' · ' + hs.length + '✋' : '') + '</text>'
+        + '<text class="rv-tprs" x="' + f1(g.x) + '" y="' + f1(g.y + HR + 13) + '">' + pm(a.add, a.del) + '</text></g>';
+    });
+    if (handRow != null && roots.length) {
+      const sy = HEAD + handRow * ROW;
+      svg.push('<line class="rv-thandsep" x1="0" x2="' + W + '" y1="' + f1(sy) + '" y2="' + f1(sy) + '"/>');
+    }
     // Drawn after the lines, which start at its centre.
     let prSvg = '';
     {
       const dv = Object.values((d.dev && d.dev.files) || {}).reduce((a, v) => [a[0] + (v.add || 0), a[1] + (v.del || 0)], [0, 0]);
       const parts = [{v: dv[0], fill: devColour(1)}, {v: dv[1], fill: devColour(0.45)}].filter((q) => q.v);
       treePR = {pr: d.pr, add: dv[0], del: dv[1], files: Object.keys((d.dev && d.dev.files) || {}).length, roots: roots.length, parts};
-      prSvg = ('<g class="rv-tpr" data-pr="1">'
+      prSvg += handSvg;
+      prSvg += ('<g class="rv-tpr" data-pr="1">'
         + (parts.length ? pie(PRX, prY, PRR, parts, 'rv-tpie') : '<circle cx="' + PRX + '" cy="' + f1(prY) + '" r="' + PRR + '" fill="' + devColour(1) + '"/>')
         + '<text class="rv-tprt" x="' + PRX + '" y="' + f1(prY - PRR - 6) + '">PR #' + h(d.pr) + '</text>'
         + '<text class="rv-tprs" x="' + PRX + '" y="' + f1(prY + PRR + 13) + '">' + pm(dv[0], dv[1]) + '</text></g>');
@@ -2035,6 +2130,7 @@ const reviewMap = (() => {
     // allows and widens through the turn — a filled ribbon, so no line
     // shows over a circle's edge.
     const fromOf = (n) => n.parent ? [knotX(n.parent), Y(n.parent), Math.max(knotX(n.parent) + n.parent.rad + 16, X(n.parent.r + 1) - 18), n.parent.rad]
+      : n.hand != null ? [treeHandRoots[n.hand].x, treeHandRoots[n.hand].y, treeHandRoots[n.hand].turn, HR]
       : [PRX, prY, X(0) - 18, PRR];
     const lineEnd = (n) => n.hs.length ? knotX(n) : X(n.r) + 22;
     // A ribbon's middle line, sampled: [x, y, width, normal x, normal y,
@@ -2382,7 +2478,13 @@ const reviewMap = (() => {
     const rec = list.filter((x) => x.rec).length;
     return '<div class="t-f">✋ You stepped in ' + list.length + ' time' + (list.length > 1 ? 's' : '') + ', during ' + h(roundName(+i).toLowerCase()) + '</div>'
       + '<div class="t-r muted">Questions about the change as a whole, or sclaude\'s own: no thread holds them.' + (rec ? ' ' + rec + ' took the recommended answer — the amber ring.' : '') + '</div>'
-      + handRows(list);
+      + handRows(list)
+      + (() => {
+        const g = treeAsked[i];
+        if (!g) return '';
+        return '<div class="t-h">What you asked for, then</div><div class="t-r">+' + g.add + ' −' + g.del + ' lines in ' + g.paths.size + ' files'
+          + (treeHandRoots[i] ? ' — the tree that grows from this ✋ starts with what no earlier fix explains; the rest hangs where it was written' : ' — on what earlier fixes wrote, or by the threads near them') + '</div>';
+      })();
   }
   // A round's header: everything it says, and what a narrow one leaves out.
   function roundTip(i) {

@@ -223,6 +223,8 @@ background:var(--surface);color:var(--ink);border:1px solid var(--line);border-l
 .rv-tree .rv-thands{cursor:help}
 .rv-tree .rv-thandh{font-size:12px;text-anchor:middle}
 .rv-tree .rv-thring{fill:none;stroke:var(--signal);stroke-width:1.5}
+.rv-tree .rv-thandsep{stroke:var(--line);stroke-width:1;stroke-dasharray:4 3}
+.rv-tree .rv-thandroot .rv-thandh{font-size:13px}
 .rv-tree .rv-thn{font:700 10px var(--body);fill:var(--ink);text-anchor:end}
 #rv-tip .t-hand{margin-top:7px;padding-left:8px;border-left:2px solid var(--line)}
 #rv-tip .t-hand.rec{border-left-color:var(--signal)}

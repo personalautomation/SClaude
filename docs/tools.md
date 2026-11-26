@@ -303,8 +303,9 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   On a review step — where the feature stands, the step you click, or the
   player passing it — the lower half of the page shows **the review's map**
   (its header gives the lines the review's fixes added and removed; hovering
-  its title gives those beside what you asked for and the code moved
-  between files, and a table, block by block, of what the development
+  its title gives the pull request's lines now and the development's
+  share of them, then the review's fixes beside what you asked for and the
+  code moved between files, and a table, block by block, of what the development
   wrote, how much of it is still there and how much was written during the
   review),
   and the step is centred in the half above. On top lies all the code the
@@ -325,7 +326,10 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   of file, as on the icicles). A purple tick marks a check that missed, a
   dotted arc a finding repeated, 💬 a finding posted in the conversation;
   the review on GitHub's findings put in a comment are one row with no
-  file. Beside each row's label, ✓ when its branch is resolved, a filling
+  file. What you asked for during the review grows below them, from your
+  ✋ in the round you stepped in, one tree for each such round — and a
+  fix that answered a thread is the review's, even inside a commit of your
+  asks. Beside each row's label, ✓ when its branch is resolved, a filling
   ring while it partly is. Click the number over a circle to fold what grew
   from it into one row. Tick **chains on one row** in the tree's corner
   and a branch goes on along its parent's row — an only child, or of several

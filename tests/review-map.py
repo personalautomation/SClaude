@@ -188,6 +188,8 @@ with tempfile.TemporaryDirectory() as tmp:
           and fixes[1]["outcome"] == "declined" and fixes[1]["thread"] == "r2")
     check("a fix near a thread takes it, whoever edited the file",
           fixes[0]["thread"] == "r1" and fixes[1]["thread"] == "r2" and fixes[1]["via"] == "near")
+    check("a fix near a thread its subagent was briefed on is tied by the brief, no guess",
+          fixes[0]["via"] == "agent")
     axis = {f["path"]: f.get("axis") for f in d["files"]}
     check("the projected axis keeps every line ever in the file: the first round's and all a fix wrote",
           axis["app.py"] == 40 + sum(x["add"] for x in fixes))
@@ -224,6 +226,21 @@ with tempfile.TemporaryDirectory() as tmp:
     # pass on that head after it makes it a round like any other.
     sys.path.insert(0, os.path.dirname(MAP))
     import review_map  # noqa: E402
+    # replied(): a reply naming the commit that wrote a fix marks it made
+    # (`_made`, what unask() takes from the person's asks) — the fix in
+    # another file it ties, and the one nearness already tied to the same
+    # thread alike.
+    hs = review_map.hunks(tree, first, second)
+    for x in hs:
+        x.update(r=0, thread="", outcome="side", via="")
+    near = next(x for x in hs if x["path"] == "app.py" and x["x"] == 10)
+    near.update(thread="r1", outcome="fixed", via="near")
+    review_map.replied(tree, [{"head": first}], [second],
+                       [{"rid": "r1", "r": 0, "path": "app.py", "line": 10, "outcome": "fixed",
+                         "_replies": ["Fixed in %s: app.py and notes.md." % second[:7]]}], hs)
+    other = next(x for x in hs if x["path"] == "notes.md")
+    check("a reply whose commit wrote the fix marks it made, tied by nearness or by the reply",
+          near.get("_made") is True and other.get("_made") is True and other["via"] == "reply")
     with open(os.path.join(tree, JOURNAL)) as fh:
         kept = fh.read()
     with open(os.path.join(tree, JOURNAL), "w") as fh:
@@ -275,7 +292,22 @@ with tempfile.TemporaryDirectory() as tmp:
     got = review_map.asked_lines(tree, later, git(tree, "rev-parse", "HEAD"))
     n = len(lines)
     check("lines of a feat commit or one with a Requirement are the person's, a fix's are not",
-          got == {"app.py": {n + 1, n + 2, n + 4}})
+          got == {"app.py": {n + 1, n + 2, n + 4}, None: set()})
+    # A file only asked commits touched: a hunk there that only removes
+    # lines is the person's too, having no line left to blame.
+    with open(os.path.join(tree, "asked.py"), "w") as fh:
+        fh.write("a = 1\nb = 2\n")
+    git(tree, "add", "asked.py")
+    git(tree, "commit", "-qm", "feat: a file the person asked for")
+    mid = git(tree, "rev-parse", "HEAD")
+    with open(os.path.join(tree, "asked.py"), "w") as fh:
+        fh.write("a = 1\n")
+    git(tree, "commit", "-qam", "refactor: less\n\nRequirement: the person said so")
+    got = review_map.asked_lines(tree, later, git(tree, "rev-parse", "HEAD"))
+    check("a file only asked commits touched is named for its deletions; one a fix touched is not",
+          got[None] == {"asked.py"})
+    got = review_map.asked_lines(tree, mid, git(tree, "rev-parse", "HEAD"))
+    check("so is one whose only commit from a to b removed lines", got[None] == {"asked.py"})
     check("a path named is not a longer path ending in it",
           review_map.named("lib/x.js", "Read src/lib/x.js") is False
           and review_map.named("lib/x.js", '{"file_path": "lib/x.js"}') is True)
@@ -430,6 +462,42 @@ on_asked = {"path": "f", "r": 1, "line": 6}
 review_map.project(["f"], [{"lines": {"f": 10}}, {"lines": {"f": 11}}], [asked, later], [on_asked], {"files": {}}, {"f": 11})
 check("the lines the person asked for are the development's: no fix wrote them",
       later["_blame"] == [] and "_of" not in on_asked)
+
+# In a commit with a Requirement: footer (the person's answer on a thread
+# made its fix one), a fix tied to its thread for sure stays the review's:
+# a reply whose commit wrote its lines, or a subagent's brief in the
+# thread's own file. Nearness, a reply's commit that did not write it, or
+# a subagent's edit in another file leave it the person's.
+ts = [{"rid": "r1", "path": "f"}]
+hs = [dict(via="reply", thread="r1", path="g", asked=True, _made=True),
+      dict(via="reply", thread="r1", path="g", asked=True),
+      dict(via="agent", thread="r1", path="f", asked=True),
+      dict(via="agent", thread="r1", path="g", asked=True),
+      dict(via="near", thread="r1", path="f", asked=True),
+      dict(via="near", thread="r1", path="f", asked=True, _made=True),
+      dict(via="near", thread="r9", path="f", asked=True, _made=True),
+      dict(via="agent", thread="r9", path="f", asked=True),
+      dict(via="agent", thread="r8", path="f", asked=True),
+      dict(via="agent", thread="r7", path="f", asked=True)]
+ts += [{"rid": "r9", "path": "f", "outcome": "declined"}, {"rid": "r8", "path": "f", "outcome": "reversal"},
+       {"rid": "r7", "path": "f", "outcome": "yours"}]
+review_map.unask(hs, ts)
+check("a fix tied for sure is the review's in an asked commit; by nearness alone, an unwritten reply, a brief elsewhere or a thread left as it is, the person's",
+      [bool(h.get("asked")) for h in hs] == [False, True, False, True, True, False, True, True, True, True]
+      and not any("_made" in h for h in hs))
+check("a tie by nearness the reply confirms takes the reply's via",
+      [h["via"] for h in hs[5:7]] == ["reply", "reply"])
+# A finding in the conversation may have no rid: a declined one must not
+# stand for every hunk with no thread — a hunk is looked up only by a
+# thread it has.
+loose = [dict(via="", thread="", path="f", asked=True, _made=True)]
+review_map.unask(loose, [{"rid": "", "path": "f", "outcome": "declined"}])
+check("a hunk with no thread is judged on its own marks, whatever thread has no rid",
+      not loose[0].get("asked"))
+check("moved code takes an untied hunk and a guess, never a confirmed tie or an ask",
+      review_map.moved_over({"via": ""}, 0) and review_map.moved_over({"via": "near"}, 1)
+      and not review_map.moved_over({"via": "near"}, 0) and not review_map.moved_over({"via": "reply"}, 1)
+      and not review_map.moved_over({"via": "agent"}, 1) and not review_map.moved_over({"via": "", "asked": True}, 1))
 
 
 # "Fixed in <sha>" in the thread's own file credits only what that commit

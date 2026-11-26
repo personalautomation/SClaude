@@ -180,6 +180,13 @@ feature's own stack did not start; the log in its tree says why. `sclaude dev
 ports* on Windows means a reserved port range: the message names the commands
 that free it.
 
+**`database: could not stop this feature's stack on its old block of ports`** —
+its block of ports moved (on Windows, to a range the system came to reserve)
+while the stack ran, and stopping it to start it on the new block failed, so
+the feature falls back to the shared local database. `db.log` in its tree says
+why; `sclaude dev --stop <name>` and then `sclaude dev <name>` start it on the
+new block.
+
 **`database: \`npx\` is not on this process's PATH`** (or **`the dev server did
 not start: \`npm\` is not on this process's PATH`**) — the process that started
 the feature cannot find the command the product's config runs, so nothing was

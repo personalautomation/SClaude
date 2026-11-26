@@ -394,6 +394,53 @@ def ensure_cases():
         check("another failure does not blame the ports",
               ("supabase start failed" in out, "Docker could not publish" in out), (True, False))
 
+        # A block moved while its stack ran: the stack is started again on
+        # the new one, or the environment file names ports nobody listens on.
+        g = feature_tree(root, "g")
+        write_config(g, cli, "")
+        os.symlink(g, os.path.join(root, "registry", "g"))
+        bash(root, 'ensure_db "%s"' % g)
+        g_state = os.path.join(g, ".sclaude/local/feature", "state.json")
+        old = state(g)["db"]["base"]
+        last = int(bash(root, 'echo "$DB_BLOCK_LAST"'))
+        new = old + 10 if old + 10 <= last else old - 10
+        bash(root, 'state_set "%s" db.base %d' % (g_state, new))
+        os.remove(os.path.join(root, "cli.log"))
+        # Running while the stub CLI's stack is started: a stop takes it down.
+        up = os.path.join(g, ".sclaude/local/feature/supabase", ".started")
+        on_old = ('docker() { case "$1" in inspect) [[ -f "%s" ]] && echo true ;; '
+                  'port) echo "0.0.0.0:%d"; echo "[::]:%d" ;; esac; return 0; }\n' % (up, old + 2, old + 2))
+        out = bash(root, on_old + 'ensure_db "%s"' % g)
+        verbs = [c.split()[0] for c in calls(root) if c.split()[0] in ("stop", "start")]
+        with open(os.path.join(g, ".sclaude/local/feature", "db.env")) as fh:
+            genv = fh.read()
+        check("a stack left on its old block is restarted on the new one",
+              (verbs, "restarting it on %d" % new in out, "127.0.0.1:%d\n" % (new + 1) in genv),
+              (["stop", "start"], True, True))
+        os.remove(os.path.join(root, "cli.log"))
+        on_new = on_old.replace(str(old + 2), str(new + 2))
+        out = bash(root, on_new + 'ensure_db "%s"' % g)
+        check("a stack on its own block is left running",
+              ([c for c in calls(root) if c.startswith(("stop", "start"))], "restarting" in out),
+              ([], False))
+
+        # A stop that leaves it on the old block falls back, rather than
+        # pointing the feature at ports nobody listens on.
+        stuck = os.path.join(root, "stop-fails")
+        with open(stuck, "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ "$1" == stop ]] && { echo "$*" >> "$STUB_LOG"; exit 1; }\n'
+                     'exec "%s" "$@"\n' % cli)
+        os.chmod(stuck, 0o755)
+        write_config(g, stuck, "")
+        os.remove(os.path.join(root, "cli.log"))
+        out = bash(root, on_old + 'ensure_db "%s"' % g)
+        check("a stack the stop cannot move falls back loudly",
+              ("could not stop this feature's stack" in out,
+               os.path.exists(os.path.join(g, ".sclaude/local/feature", "db.env")),
+               [c.split()[0] for c in calls(root)]), (True, False, ["stop"]))
+        os.remove(os.path.join(root, "cli.log"))
+        write_config(g, cli, "")
+
         # Switched to the cloud project: the local address must go.
         on_env(a, "dev")
         bash(root, 'ensure_db "%s"' % a)

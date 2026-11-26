@@ -1404,7 +1404,10 @@ project needs. On WSL a block is also clear of the ranges Windows keeps
 (`netsh int ipv4 show excludedportrange protocol=tcp`): Docker Desktop cannot
 publish a port there, though nothing listens on it, and WinNAT can reserve most
 of 55000-55990 at boot. A recorded block that Windows has come to keep since is
-given up for another, and a start Docker refuses for its ports says so, rather
+given up for another — a stack still running on the old block is stopped, its
+data kept, and started on the new one, or the feature would be pointed at ports
+nobody listens on; one the stop cannot move falls back to the shared database
+with a warning — and a start Docker refuses for its ports says so, rather
 than failing the same way at every step. For a typical web app that is a handful of containers and a
 few hundred MB, up in under a minute the first time. It is filled once: with a copy of the main local
 database's data when the project sets `copyFromMain` and the main stack is up —

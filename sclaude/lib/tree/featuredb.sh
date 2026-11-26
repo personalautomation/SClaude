@@ -343,6 +343,26 @@ db_wait_up() {
   return 1
 }
 
+# Whether this tree's stack is running on a block other than $2: its database
+# container publishes Postgres on a port that is not the block's.
+#
+# A recorded block Windows has come to keep is moved (db_base) while the stack
+# may still be up on it. The config was rewritten to the new block, `status`
+# still answered — it finds the containers by project_id — so nothing started
+# them again, and the environment file named ports nobody listened on: every
+# check that reached the database in the middle of a regression got
+# "connection refused". The published port is asked of Docker rather than the
+# block compared before and after: a lazy start of the dev server beside the
+# regression may be the one that moved it.
+db_on_other_block() {
+  local wt="$1" base="$2" db port
+  db="$(db_container "$(db_project_id "$wt")")"
+  [[ "$(docker inspect -f '{{.State.Running}}' "$db" 2>/dev/null)" == "true" ]] || return 1
+  port="$(docker port "$db" 5432/tcp 2>/dev/null | head -1 | tr -d '\r')"
+  port="${port##*:}"
+  [[ "$port" =~ ^[0-9]+$ && "$port" != "$((base + 2))" ]]
+}
+
 # Starts this feature's stack if it should have one, and writes the file that
 # points the feature at it. Removes that file whenever the feature should not
 # have one — a feature switched to the cloud project must not keep sourcing a
@@ -380,6 +400,27 @@ ensure_db() {
     warn "  database: \`$missing\` is not on this process's PATH — the feature's own database was neither started nor migrated; sharing the main local database"
     return 0
   fi
+
+  # Stopped, its data kept, so the start below brings it up on this block.
+  # Looked at and stopped under the feature's lock: a lazy start of the dev
+  # server beside the regression saw the same old block, and its stop, landing
+  # after the regression had started the stack again, would take it down
+  # under its tests. Behind the lock the second one finds it stopped, or up
+  # on this block already. A stop that failed, or left it running on the old
+  # block, is the bug again — `status` answers, nothing starts — so it falls
+  # back loudly.
+  db_lock "$wt"
+  if db_on_other_block "$wt" "$base"; then
+    info "  database: this feature's stack runs on another block of ports — restarting it on $base-$((base + 9)) (its data is kept)…"
+    if ! (cd "$wt" && $cli stop --workdir "$dir") >> "$log" 2>&1 \
+       || db_on_other_block "$wt" "$base"; then
+      db_unlock
+      rm -f "$envf"
+      warn "  database: could not stop this feature's stack on its old block of ports — see .sclaude/local/feature/db.log; sharing the main local database"
+      return 0
+    fi
+  fi
+  db_unlock
 
   local started=""
   if ! (cd "$wt" && $cli status --workdir "$dir" -o env) >/dev/null 2>&1; then
@@ -527,8 +568,9 @@ db_rebuild() {
   return "$rc"
 }
 
-# The feature's database lock, from the stale-migration check (or a rebuild's
-# reset) to the fill: two starts at once reset and fill it once. Said when it
+# The feature's database lock, around a stack's restart off a block it no
+# longer has, and from the stale-migration check (or a rebuild's reset) to the
+# fill: two starts at once restart, reset and fill it once. Said when it
 # has to wait, since a reset and a copy take minutes and the wait looks like a
 # hang; given up after SCLAUDE_DB_LOCK_WAIT seconds (900) with a warning, as a
 # holder that never ends must not stop the feature. Released by hand: what
@@ -539,7 +581,7 @@ db_lock() {
   [[ "$limit" =~ ^[0-9]+$ ]] || limit=900
   exec {DB_LOCK_FD}>"$1/.sclaude/local/feature/db.lock"
   flock -n "$DB_LOCK_FD" && return 0
-  info "  database: another start of this feature's database is resetting or filling it — waiting for it…"
+  info "  database: another start of this feature's database is restarting, resetting or filling it — waiting for it…"
   flock -w "$limit" "$DB_LOCK_FD" && return 0
   warn "  database: still busy after ${limit}s — going on without waiting"
 }

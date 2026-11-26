@@ -417,7 +417,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |
 | `SCLAUDE_DOCKER_DESKTOP` | where Docker Desktop is, when it is somewhere unusual |
 | `SCLAUDE_DB_WAIT` | how long a feature's own database may take to answer after its start reported a failure, in seconds (120) |
-| `SCLAUDE_DB_LOCK_WAIT` | how long a feature's start waits for another start of the same feature to finish resetting or filling its database, in seconds (900) |
+| `SCLAUDE_DB_LOCK_WAIT` | how long a feature's start waits for another start of the same feature to finish restarting, resetting or filling its database, in seconds (900) |
 | `SCLAUDE_CHECKS_PERIOD` | how often `sclaude checks` reads the pull request's checks, in seconds (15) |
 | `SCLAUDE_CLASSIFY_MODEL` | the model that matches proposed rules to the ones already put off (`haiku`) |
 | `SCLAUDE_DEV_LOGIN_FILE` | the file whose first line is the address one-click sign-in uses, instead of `~/.claude/sclaude/dev-login` |

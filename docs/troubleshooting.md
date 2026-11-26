@@ -130,8 +130,8 @@ the step, so it closed without a final look. If the review was still running,
 check the pull request on GitHub; nothing else needs doing.
 
 **`Nothing is left open on PR #N: a polish round`** — the review found nothing
-more, and one session cleans the whole change with `/simplify` before step 4
-closes. Turn it off with `simplify: off` ([simplify](config.md#simplify)).
+more, and one session cleans what changed since step 2's `/simplify` (or the
+whole change, the line says which) before step 4 closes. Turn it off with `simplify: off` ([simplify](config.md#simplify)).
 
 **`Yours to resolve on GitHub — you decided to leave these as they are:`** —
 threads you chose to leave still count as open until resolved. Open each link,

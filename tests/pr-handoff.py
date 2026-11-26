@@ -231,7 +231,9 @@ check("auto-handoff-ready", "pr ready 40 --repo o/r" in log, True)
 check("auto-handoff-no-backlog", any(c.startswith("project item-edit") for c in log), False)
 check("auto-handoff-no-unassign", any("--remove-assignee" in c for c in log), False)
 check("auto-handoff-comment", any(c.startswith("api repos/o/r/issues/40/comments --input") for c in log), True)
-check("auto-handoff-says-why", "stays with its author: `merge` is auto" in out, True)
+check("auto-handoff-says-why", "stays with its author for sclaude to merge" in out, True)
+# The setting is named where the way is announced and at the merge, not here.
+check("auto-handoff-no-setting-again", "`merge` is auto" in out, False)
 check("auto-handoff-head-recorded", json.load(open(STATE)).get("handoff"), "abc123")
 
 # A step that warns leaves the head unrecorded, so the next look repeats it.

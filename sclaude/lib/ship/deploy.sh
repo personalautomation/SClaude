@@ -109,6 +109,10 @@ remind_prod() {
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.after_failure null 2>/dev/null || true
   local issue preview_done=0 prod_done=0 prod_tried=0 prod_unanswered=0 qa_skipped=0 prod_said="" qa_said="" qa_quiet="" ASK_FEED_QUIET="" QA_FELL_BACK=""
+  # The pull request the phone was just told is ready for the merge, by the
+  # preview's one line below: merge_wait's own line would say it again there.
+  # Local, so a pass of its own (remind_prod again after a resync) starts clear.
+  local MERGE_READY_FED="" qa_ready=""
   # What `deployed-preview` is actually about, which is not preview_done.
   #
   # preview_done means "we shipped one in this run", and it is right for what it
@@ -349,7 +353,9 @@ remind_prod() {
       [[ "$QA_MODE" != auto ]] && demo_refresh "$wt" preview
       qa_retest "$wt" "$issue" "$pr" fresh || true
       [[ -n "$issue" ]] && issue_qa_ready "$issue"
-      cycle_edge "$wt" preview in_qa sclaude "preview regression green"
+      # The gate passes a project that runs no preview suite as well, and the
+      # history said "green" for a run that never was (preview_suite_said).
+      cycle_edge "$wt" preview in_qa sclaude "$(preview_suite_said "$wt")"
       cycle_edge "$wt" in_qa qa_check sclaude "the issue moved to ${QA_TO:-QA}"
       qa_sent "$wt"
       qa_missed "$issue" "${merged:-}" "$wt" && qa_skipped=1
@@ -476,7 +482,7 @@ remind_prod() {
       [[ "$handed" -eq 0 ]] && QA_ACCEPT_SAID="$pr"
       # pr_qa_handoff's codes, each in words of its own.
       case "$handed" in
-        0|3) qa_said="QA accepted (auto) → PR #$pr ready for the merge" ;;
+        0|3) qa_said="QA accepted (auto) → PR #$pr ready for the merge" qa_ready="$pr" ;;
         1)   qa_said="QA accepted (auto); PR #$pr not handed over yet — another of its issues waits, or GitHub did not answer" ;;
         2)   qa_said="QA accepted (auto); PR #$pr not handed over — it is merged or closed, or the board has no Done column" ;;
         *)   qa_said="QA accepted (auto); PR #$pr handed over in part — the warning above says what is left" ;;
@@ -504,6 +510,7 @@ remind_prod() {
     local preview_url
     preview_url="$(state_get "$wt/.sclaude/local/feature/state.json" regression.preview.url 2>/dev/null | grep -v '^null$' || true)"
     ask_feed say "🚀 Preview${preview_url:+ $preview_url}${qa_said:+ → $qa_said}"
+    MERGE_READY_FED="$qa_ready"
   fi
   # Without a deploy no QA hand-off makes the pull request ready, so it is
   # made ready here: a draft cannot be merged.

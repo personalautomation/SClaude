@@ -54,6 +54,7 @@ FIELDS = [
     ("steps.<step>.rounds", (FEATURE,), "review rounds the step's session closed (counted per session)"),
     ("steps.<step>.auto_returns", (FEATURE,), "automatic returns to the session used since the step last closed"),
     ("steps.<step>.runs", (FEATURE,), "one entry per conversation the step ran in (session_runs)"),
+    ("steps.code.head", (FEATURE,), "where step 4's polish round starts from (review_polish_base): the head a step 2 session left after its own /simplify, when it may be trusted (review_polish_mark says when)"),
     ("steps.review.enough", (FEATURE,), "the person said \"enough\" in this round"),
     ("steps.review.go_on", (FEATURE,), "[g]: the review goes on by itself while the person is away"),
     ("steps.review.go_on_rounds", (FEATURE,), "rounds run under [g] in this review"),

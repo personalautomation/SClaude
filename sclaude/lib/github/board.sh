@@ -598,7 +598,9 @@ pr_qa_handoff_now() {
     fi
   fi
   if [[ "$(project_flow_mode merge)" == auto ]]; then
-    info "PR #$pr stays with its author: \`merge\` is auto, sclaude merges it next."
+    # The setting is named where the way is announced and at the merge
+    # (merge_offer); said here too, it came four times in forty lines.
+    info "PR #$pr stays with its author for sclaude to merge."
   else
     pr_board_set "$pr" "$PROGRESS_FROM" "$issue" || failed=1
 

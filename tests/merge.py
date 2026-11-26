@@ -320,15 +320,26 @@ check_true("merge-wait-auto-stops-on-an-answer",
 check_true("merge-wait-red-held-until-the-pair-moves",
            'held="$(merge_check_pair "$wt")"' in mwait
            and '"$held" != "$(merge_check_pair "$wt")"' in mwait)
-# Held by a red check of the merge with main, it says so, not "merges it itself".
+# Held by a red check of the merge with main, it says so, not "merges it".
 check_true("merge-wait-auto-held-said",
-           0 <= mwait.find("is auto, but held") < mwait.find("is auto: sclaude merges it itself")
+           0 <= mwait.find("is auto, but held") < mwait.find("sclaude merges it once GitHub calls it ready")
            and "merge_check_red" in mwait)
+# The setting is named once before the wait, not again under it; and the
+# wait's own line stays off the phone right after the preview's line there
+# said the pull request is ready for the merge.
+check_true("merge-wait-auto-names-no-setting-again",
+           "is auto: sclaude merges" not in mwait)
+check_true("merge-wait-quiet-after-ready-said",
+           '"${MERGE_READY_FED:-}" == "$pr"' in mwait
+           and 'ready for the merge" qa_ready="$pr" ;;' in deploy
+           and 'MERGE_READY_FED="$qa_ready"' in deploy
+           and 'local MERGE_READY_FED="" qa_ready=""' in deploy
+           and 'ASK_FEED_QUIET="$fed" info "Waiting for the merge of PR' in mwait)
 check_true("merge-wait-m-says-why-not", "Nothing to merge from here yet" in mwait)
 # Under `merge: auto` nobody is asked to merge it, nor named as what the
 # wait is on: "merge it on GitHub" only where the person is the one to.
 check_true("merge-wait-auto-asks-nobody",
-           re.search(r'if \[\[ "\$mode" == auto \]\]; then\n\s*info "Waiting for the merge of PR #\$pr\$\{issue:\+ \(issue #\$issue\)\}\."', mwait)
+           re.search(r'if \[\[ "\$mode" == auto \]\]; then\n(?:\s*#.*\n|\s*if .*\n)*\s*(?:local fed.*\n|\[\[ .*fed=1\n|\s)*(?:ASK_FEED_QUIET="\$fed" )?info "Waiting for the merge of PR #\$pr\$\{issue:\+ \(issue #\$issue\)\}\."', mwait)
            is not None
            and '[[ "$held" == none || "$held" != "$(merge_check_pair "$wt")" ]] && who="Running by itself"' in mwait)
 check_true("merge-wait-gets-the-offer-mode",
@@ -599,6 +610,11 @@ check_true("auto-qa-says-what-the-suite-did",
            'and $(preview_suite_said "$wt").${OFF}"' in deploy
            and 'and $(preview_suite_said "$wt"). Nobody looked at the preview.' in deploy
            and "preview regression was green" not in deploy)
+# The edge into QA says the same: a project with no preview suite read
+# "preview regression green" in its history for a run that never was.
+check_true("preview-edge-says-what-the-suite-did",
+           'cycle_edge "$wt" preview in_qa sclaude "$(preview_suite_said "$wt")"' in deploy
+           and "preview regression green" not in deploy)
 check_true("qa-accept-here-gets-the-tree",
            'qa_accept_here "$issue" "$set_as" "$wt"' in deploy
            and 'qa_accept_here "$issue" key "$wt"' in deploy)

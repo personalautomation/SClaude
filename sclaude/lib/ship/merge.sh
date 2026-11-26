@@ -459,7 +459,12 @@ merge_wait() {
   # Under `merge: auto` nobody is asked to merge: "merge it on GitHub" read
   # as a question to the person while sclaude waited for GitHub's checks.
   if [[ "$mode" == auto ]]; then
-    info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}."
+    # Right after the preview's line to the phone said "ready for the merge"
+    # (MERGE_READY_FED, remind_prod), the wait is that line again there: the
+    # terminal alone.
+    local fed="${ASK_FEED_QUIET:-}"
+    [[ "${MERGE_READY_FED:-}" == "$pr" ]] && fed=1
+    ASK_FEED_QUIET="$fed" info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}."
   else
     info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}; merge it on GitHub."
   fi
@@ -473,7 +478,7 @@ merge_wait() {
     info "  \`merge\` is auto, but held: the merge with main fails \`$red\`. sclaude tries"
     info "  again once the branch or main moves; or merge it on GitHub."
   elif [[ "$mode" == auto ]]; then
-    info "  \`merge\` is auto: sclaude merges it itself once GitHub calls it ready."
+    info "  sclaude merges it once GitHub calls it ready."
   fi
   info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   echo ""

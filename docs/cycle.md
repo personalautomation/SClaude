@@ -249,7 +249,7 @@ own issue)) and `off` (no demo videos anywhere in the cycle; the report and the
 criteria are the check).
 `simplify` takes `on` (the default: Claude Code's `/simplify` cleans the
 code in step 2 before its question, each part's session over its part, and
-once more over the whole pull request in step 4's polish round) and `off` (no
+once more in step 4's polish round, over what changed since step 2's) and `off` (no
 `/simplify`, and no polish round).
 `demoVoice` takes `on` (the default: the demo's videos are spoken, in English,
 by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo))

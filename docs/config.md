@@ -162,8 +162,9 @@ code, efficiency. The review in step 4 looks for bugs, not for this.
 
 - `on` — step 2 runs `/simplify` before its Accept question; a feature built in
   parts runs it in each part's session, over that part. Step 4 runs it once
-  more, over the whole pull request, in a polish round once the review has
-  nothing left open.
+  more in a polish round once the review has nothing left open, over what was
+  changed since step 2's `/simplify` (the whole pull request when that point
+  is not known); with nothing changed since, there is no polish round.
 - `off` — no `/simplify`, and no polish round.
 
 ### demoVoice

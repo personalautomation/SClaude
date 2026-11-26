@@ -2119,6 +2119,88 @@ CYCLE = open(os.path.join(LIB, "cycle", "run.sh"), encoding="utf-8").read()
 DEPLOY = open(os.path.join(LIB, "ship", "deploy.sh"), encoding="utf-8").read()
 check("next-said-once", ("Next: the preview" in CYCLE, "QA${issue:+ on issue #$issue}" in DEPLOY), (False, True))
 
+# The polish round starts where step 2's last session ended, after its own
+# /simplify over the whole change (review_polish_mark): nothing since, no
+# round; commits since, only those; no mark, a rebase that dropped the head,
+# or main merged in since, the whole change as before.
+polish_dirs = []
+
+
+def polish_world():
+    wt = tempfile.mkdtemp()
+    polish_dirs.append(wt)
+    os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+    with open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w") as fh:
+        json.dump({"steps": {"code": {}, "review": {}}}, fh)
+    def git(*args):
+        return subprocess.run(["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    with open(os.path.join(wt, "a.txt"), "w") as fh:
+        fh.write("a\n")
+    git("add", "a.txt")
+    git("commit", "-qm", "base")
+    return wt, git
+
+
+def polish_sh(wt, script, simplify="on", building=False):
+    body = ('source "%s/core/state.sh"\nproject_simplify_mode() { echo %s; }\n'
+            'parts_building() { %s; }\nREVIEW_UNREVIEWED=""\nproject_review_mode() { echo local; }\n'
+            'review_enough() { :; }\nblocks_before_last() { return 1; }\n%s\nwt="%s"\n%s\n') % (
+        LIB, simplify, "return 0" if building else "return 1",
+        functions(["review_polish_due", "review_polish_base", "review_polish_mark"]),
+        wt, script)
+    return subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
+                          stdin=subprocess.DEVNULL).stdout.strip()
+
+
+def commit(git, wt, name):
+    with open(os.path.join(wt, name), "w") as fh:
+        fh.write(name + "\n")
+    git("add", name)
+    git("commit", "-qm", name)
+
+
+_wt, _git = polish_world()
+check("polish-no-mark-whole", polish_sh(_wt, 'review_polish_due "$wt" && echo "due:$REVIEW_POLISH_BASE."'),
+      "due:.")
+polish_sh(_wt, 'review_polish_mark "$wt" own')
+_head = _git("rev-parse", "HEAD")
+check("polish-mark-records-head", polish_sh(_wt, 'state_get "$wt/.sclaude/local/feature/state.json" steps.code.head'), _head)
+check("polish-nothing-since-step-2", polish_sh(_wt, 'review_polish_due "$wt" && echo due || echo none'), "none")
+commit(_git, _wt, "fix.txt")
+check("polish-since-step-2", polish_sh(_wt, 'review_polish_due "$wt" && echo "due:$REVIEW_POLISH_BASE"'),
+      "due:%s" % _head)
+# main merged into the branch since: its changes are not the branch's.
+_git("checkout", "-qb", "other", _head)
+commit(_git, _wt, "main.txt")
+_git("checkout", "-q", "main")
+_git("merge", "-q", "--no-edit", "--no-ff", "other")
+check("polish-merge-since-whole", polish_sh(_wt, 'review_polish_due "$wt" && echo "due:$REVIEW_POLISH_BASE."'),
+      "due:.")
+# A head rebased away is no base either.
+_wt, _git = polish_world()
+polish_sh(_wt, 'state_set "$wt/.sclaude/local/feature/state.json" steps.code.head %s' % ("f" * 40))
+check("polish-head-gone-whole", polish_sh(_wt, 'review_polish_base "$wt" || echo none'), "none")
+# A part's session simplifies its part alone, and with simplify off there is
+# no /simplify at all: no mark either way.
+for _name, _own, _kw in (("part", "own", {"building": True}), ("simplify-off", "own", {"simplify": "off"}),
+                         ("not-its-own-marker", "", {})):
+    _wt, _git = polish_world()
+    polish_sh(_wt, 'review_polish_mark "$wt" own')
+    polish_sh(_wt, 'review_polish_mark "$wt" %s' % _own, **_kw)
+    check("polish-no-mark-%s" % _name, polish_sh(_wt, 'review_polish_base "$wt" || echo none'), "none")
+# The gate's words follow the base review_polish_due found.
+check("polish-gate-words-follow-the-base",
+      ('local polish=0 polish_scope="over the whole change"' in RUN,
+       '[[ -n "$REVIEW_POLISH_BASE" ]] && polish_scope="over what changed since step 2\'s /simplify"' in RUN),
+      (True, True))
+check("polish-marked-at-step-2-end",
+      'review_polish_mark "$wt" "$([[ -n "$SESSION_AUTO_CLOSED" && -z "$said_key" ]] && echo own)"' in RUN, True)
+
+for _d in polish_dirs:
+    shutil.rmtree(_d, ignore_errors=True)
+
 if failures:
     for name, want, got in failures:
         print("FAIL %s: want %r, got %r" % (name, want, got))

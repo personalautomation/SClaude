@@ -174,8 +174,10 @@ cost. The review marks each finding important, a nit, or a bug older than the
 change, and the session weighs a finding by that mark: a minor one is the
 readiest to leave with a reason, and an older bug too big for this change is
 filed as an issue of its own. Once nothing is left open, one **polish round**
-runs before the step closes: `/simplify` over the whole pull request (with
-`simplify: on`). Its push is reviewed like any; in the report its row's
+runs before the step closes: `/simplify` over what changed since step 2's own
+`/simplify` — the review's fixes and anything else changed since — or over
+the whole pull request when that point is not known (with `simplify: on`);
+with nothing changed since, there is no polish round. Its push is reviewed like any; in the report its row's
 session reads `simplify`, and each place it changed counts as a finding found and fixed, in the row and the totals. The step closes when the review has
 nothing left open, the preview is deployed and its tests pass.
 A pull request too big for one review to read well — past 5,000 changed lines,

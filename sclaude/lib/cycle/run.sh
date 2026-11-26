@@ -725,6 +725,10 @@ session_ended() {
   # issue says so: without a reason an earlier row reads "interrupted", as it
   # did for every review session the review on this machine sent back to.
   step_run "$wt" "$step" end "$session" "${SESSION_AUTO_CLOSED:+finished}"
+  # Where step 4's polish round will start: kept for a session that ended
+  # on its own marker, no key of the tab said (review_polish_mark).
+  [[ "$step" == code ]] \
+    && review_polish_mark "$wt" "$([[ -n "$SESSION_AUTO_CLOSED" && -z "$said_key" ]] && echo own)"
 
   # The way out of the session to the step's check — not after [R], which
   # leaves the step where it is. Before the friction review: one cut off

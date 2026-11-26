@@ -721,7 +721,7 @@ const reviewMap = (() => {
       if (!r.polish || (until != null && (r.t + (r.seconds || 0)) * 1000 > until)) return;
       // Beside a split's label, at the far end of the line instead.
       const at = splitAt.has(i) ? '" x="' + (W - 8) + '" style="text-anchor:end' : '" x="' + (GUT + 4);
-      svg.push('<g class="rv-polishcut"><title>✨ — the polish round: this round found nothing, and its fixing was /simplify over the whole pull request; the review read what it changed next</title>'
+      svg.push('<g class="rv-polishcut"><title>✨ — the polish round: this round found nothing, and its fixing was /simplify over what changed since step 2 ran it (the whole pull request where that point was not known); the review read what it changed next</title>'
         + '<line x1="0" x2="' + W + '" y1="' + ys[i] + '" y2="' + ys[i] + '"/>'
         + '<text' + at + '" y="' + (ys[i] - 3) + '">✨ simplify</text></g>');
     });
@@ -2317,7 +2317,7 @@ const reviewMap = (() => {
     const notes = [];
     notes.push('Size: ' + tot + ' lines changed; radius ' + g.rad(tot).toFixed(1) + ' px, against ' + g.rad(g.most).toFixed(0) + ' px for this review\'s largest fix (' + g.most + ' lines). Sectors run clockwise from the top: added first, then removed.');
     if (n.guess) notes.push('Paler: tied to its thread only by sitting near it in the same round — no reply named its commit and no subagent was given the thread.');
-    if (n.polish) notes.push('✨ over it: made by the polish round, /simplify over the whole pull request.');
+    if (n.polish) notes.push('✨ over it: made by the polish round, /simplify over what changed since step 2 ran it (the whole pull request where that point was not known).');
     if (n.desc) notes.push('The number over it: ' + n.desc + ' row' + (n.desc > 1 ? 's' : '') + ' grew from it in all — click it to ' + (n.folded ? 'open the branch' : 'fold them into one summary') + '.');
     if (!n.kids.length) notes.push(n.readAt != null ? '✓ after it: ' + roundName(n.readAt) + ' read its files again and posted nothing on its lines.' : '⋯ after it: no round has read its files since.');
     return '<div class="t-h">The circle — its fix, in ' + h(roundName(n.r).toLowerCase()) + '\'s fixing</div>'
@@ -2469,7 +2469,7 @@ const reviewMap = (() => {
     out.push('<div class="t-f">' + h(n.path) + (n.line ? ':' + n.line : '') + '</div>');
     if (n.t) out.push('<div class="t-r">' + threadLink(n.t, h(n.t.title || '') + ' ↗') + '</div><div class="t-r muted">' + (n.t.conv ? '💬 A finding in the conversation (its file is not in the diff, so no thread holds it), found by ' : n.t.by === 'person' ? '◆ Opened by the person, during ' : 'Found by ') + h(roundName(n.r).toLowerCase()) + ' · ' + h(howEnded(n.t)) + '</div>'
         + (n.t.stillOpen ? '<div class="t-r muted">' + h(stillOpenLine(n.t).trim()) + '</div>' : ''));
-    else if (n.outcome === 'side' && ((data.rounds || [])[n.r] || {}).polish) out.push('<div class="t-r muted">✨ Changed by the polish round: /simplify over the whole pull request, once nothing was left open. The next pass reads it like any fix.</div>');
+    else if (n.outcome === 'side' && ((data.rounds || [])[n.r] || {}).polish) out.push('<div class="t-r muted">✨ Changed by the polish round: /simplify over what changed since step 2 ran it (the whole pull request where that point was not known), once nothing was left open. The next pass reads it like any fix.</div>');
     else out.push('<div class="t-r muted">' + (n.outcome === 'asked' ? 'The person asked for it during the review (a feat or Requirement: commit).'
       : n.outcome === 'moved' ? 'Code moved here from another file: neither a fix nor new code.'
         : 'Changed in ' + h(roundName(n.r).toLowerCase()) + '\'s fixing with no thread asking for it — it came along with the fixes.') + '</div>');
@@ -2952,7 +2952,7 @@ const reviewMap = (() => {
         + sw(DEL, 'removed', 'Removed lines: the rest of the circle. Over each round, the fix session\'s own circle: its lines by what they answered, in the threads\' colours.')
         + mark('╱', 'tests · docs · comments', 'Hatched by the kind of file, as on the icicles: / tests, \\ migrations, — docs and config, dots comments only. Paler, its line dashed: tied to its thread by nearness alone.')
         + mark('▬', 'no thread', 'A circle on a grey line: a change no thread asked for, hung from the fix whose lines it rewrote — beige where the person asked for it; the line as thick as all it carries.')
-        + mark('✨', 'polish', 'A change the polish round made: /simplify over the whole pull request, once nothing was left open.'))
+        + mark('✨', 'polish', 'A change the polish round made: /simplify over what changed since step 2 ran it (the whole pull request where that point was not known), once nothing was left open.'))
       + group('edge', '<span class="rv-k rv-mk"' + tl('A purple tick: a round had read the fix this thread grew from and passed it; a later one found a problem on its lines.') + '>missed</span>'
         + mark('┄', 'second parent', 'A change that rewrote lines of more than one earlier fix: the thinner, dashed curve to the others.')
         + mark('⋰', 'repeats', 'A dotted arc on the left of the dots: a reply named an earlier thread (as on r<id>) — the same finding raised again, not grown from a fix.'))

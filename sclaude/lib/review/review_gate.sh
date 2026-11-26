@@ -585,16 +585,18 @@ review_close_gate() {
     return $?
   fi
   # Nothing left open: a polish round is owed before the step closes,
-  # /simplify over the whole pull request (review_polish_due). It is open
-  # work like any, and goes back to a session the way below — held the same
+  # /simplify over what changed since step 2's own /simplify
+  # (review_polish_due). It is open work like any, and goes back to a
+  # session the way below — held the same
   # when the person left the last session, counted against [g]'s ceiling.
   # GitHub not answering keeps it owed: one failed look would otherwise lose
   # it for good, no later gate asking again.
-  local polish=0
+  local polish=0 polish_scope="over the whole change"
   if [[ "$word" == ok || "$word" == unknown ]] && review_polish_due "$wt"; then
     review_polish_owe "$wt"
     polish=1
-    word="open: a polish round is owed — /simplify over the whole change"
+    [[ -n "$REVIEW_POLISH_BASE" ]] && polish_scope="over what changed since step 2's /simplify"
+    word="open: a polish round is owed — /simplify $polish_scope"
   fi
   # A pull request merged or closed, or one GitHub did not answer about:
   # nothing holds the step, and it closes saying so, not as a clean review.
@@ -646,7 +648,7 @@ review_close_gate() {
   elif [[ "$polish" -eq 1 ]]; then
     # No failure: nothing is open. info keeps it for [g]'s ceiling question
     # too (ask_note), which would otherwise not say what "it" is.
-    local told="Nothing is left open on PR #$pr: a polish round — /simplify over the whole change."
+    local told="Nothing is left open on PR #$pr: a polish round — /simplify $polish_scope."
     echo ""
     info "  $told"
     # To the phone too: info's indented line stays in the terminal's feed.
@@ -734,18 +736,66 @@ review_close_gate() {
 # `simplify` on, not once the person ended the search (they stopped the
 # rounds to stop paying for them), and not while blocks before the last are
 # read: /simplify reads the whole pull request, which the blocks after are
-# still to review. 1 when none is owed.
+# still to review. Nor when nothing changed since step 2's own /simplify
+# (review_polish_base): it read that very change. 1 when none is owed.
+# Leaves the base it found in REVIEW_POLISH_BASE, empty when none, for the
+# gate's words.
 #
 #   review_polish_due <wt>
 review_polish_due() {
   local wt="$1"
+  REVIEW_POLISH_BASE=""
   # The cheapest first: once taken, nothing else is asked.
   [[ "$(state_get "$wt/.sclaude/local/feature/state.json" polished 2>/dev/null || true)" == true ]] && return 1
   [[ -z "${REVIEW_UNREVIEWED:-}" ]] || return 1
   [[ "$(project_simplify_mode "$wt")" == on && "$(project_review_mode "$wt")" != off ]] || return 1
   [[ -z "$(review_enough "$wt")" ]] || return 1
   declare -F blocks_before_last >/dev/null && blocks_before_last "$wt" && return 1
+  REVIEW_POLISH_BASE="$(review_polish_base "$wt")" \
+    && git -C "$wt" diff --quiet "$REVIEW_POLISH_BASE" HEAD 2>/dev/null && return 1
   return 0
+}
+
+# Where the polish round's /simplify starts: steps.code.head, which
+# review_polish_mark keeps, and step 2's own /simplify had read whole. Run
+# again over the whole pull request, the polish rewrote what
+# step 2 had cleaned and the review had accepted since, and the review's next
+# round found what the rewrite lost. Printed when that head is still under
+# this one with only commits on this branch between; nothing, and 1, when it
+# is not recorded (a feature built in parts, or from before), was rebased
+# away, or main was merged in since — its changes would be read as the
+# branch's own. The polish then reads the whole change, as it did.
+#
+#   review_polish_base <wt>
+review_polish_base() {
+  local wt="$1" head
+  head="$(state_get "$wt/.sclaude/local/feature/state.json" steps.code.head 2>/dev/null || true)"
+  [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git -C "$wt" merge-base --is-ancestor "$head" HEAD 2>/dev/null || return 1
+  [[ -z "$(git -C "$wt" rev-list --merges "$head..HEAD" 2>/dev/null)" ]] || return 1
+  printf '%s\n' "$head"
+}
+
+# The end of a step 2 session: where the polish round will start from
+# (steps.code.head, review_polish_base), its only writer. Kept — the head —
+# when the session ended on its own done marker with no key of sclaude's
+# tab said (<own> non-empty): it ran /simplify over the whole change last
+# (<if:simplify> in code.md). Cleared on any other end — /exit, [n]/[N]
+# (whose marker the watcher writes when the session has not, the two not
+# told apart), [R] — which may follow commits made on remarks before
+# /simplify ran again: a longer polish, never a commit left unread. Cleared
+# too under `simplify: off`, and for a part's session, which simplifies its
+# part alone; the session over the joined parts reads the whole and sets it.
+#
+#   review_polish_mark <wt> [<own>]
+review_polish_mark() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json"
+  if [[ -z "${2:-}" || "$(project_simplify_mode "$wt")" != on ]] \
+     || { declare -F parts_building >/dev/null && parts_building "$state"; }; then
+    state_set "$state" steps.code.head null
+    return 0
+  fi
+  state_set "$state" steps.code.head "$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
 }
 
 # Whether the polish round is owed now (`due`): its session's prompt says so

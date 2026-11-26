@@ -570,14 +570,27 @@ review = render("review", DONE)
 check("ordinary-round-weighs-minor", ("This round is the polish round" in review,
                                       "is fixed all the same" in review,
                                       "<!-- sclaude:minor pre-existing -->" in review), (False, True, True))
-review = render("review", dict(DONE, SCLAUDE_V_POLISH="1", SCLAUDE_V_ISSUE="41"))
+review = render("review", dict(DONE, SCLAUDE_V_POLISH="1", SCLAUDE_V_ISSUE="41",
+                               SCLAUDE_V_POLISH_BASE="origin/main"))
 check("polish-round-told", ("This round is the polish round" in review, "/simplify" in review,
-                            "git diff origin/main...HEAD" in review, "issues/41/sub_issues" in review),
-      (True, True, True, True))
+                            "git diff origin/main...HEAD" in review, "since step 2" in review,
+                            "issues/41/sub_issues" in review),
+      (True, True, True, False, True))
+# From the head step 2's /simplify left (review_polish_base): only what came
+# after it, which that /simplify never read.
+review = render("review", dict(DONE, SCLAUDE_V_POLISH="1", SCLAUDE_V_POLISH_BASE="abc1234",
+                               SCLAUDE_V_POLISH_SINCE="1"))
+check("polish-round-from-step-2", ("git diff abc1234...HEAD" in review, "since step 2's own `/simplify`" in review),
+      (True, True))
 # The polish round is read from the feature's state, so a round after it
 # is an ordinary one again (review_polish_taken).
 with open(os.path.join(LIB, "cycle", "prompt.sh")) as fh:
-    check("polish-key-from-state", 'review_polish_is_due "$wt" && SCLAUDE_V_POLISH=1' in fh.read(), True)
+    _prompt_sh = fh.read()
+check("polish-key-from-state", 'review_polish_is_due "$wt" && SCLAUDE_V_POLISH=1' in _prompt_sh, True)
+check("polish-base-from-state", ('SCLAUDE_V_POLISH_BASE="$(review_polish_base "$wt")"' in _prompt_sh,
+                                 '|| SCLAUDE_V_POLISH_BASE="origin/$SCLAUDE_V_BASE"' in _prompt_sh,
+                                 _prompt_sh.find("parts_building \"$pstate\"") < _prompt_sh.find("SCLAUDE_V_POLISH_BASE=\"$(")),
+      (True, True, True))
 # /simplify in step 2 runs in a part's session too, over the part's change.
 code = render("code", dict(IN_PART, SCLAUDE_V_SIMPLIFY="1"))
 check("part-session-simplifies-its-part", "/simplify" in code and "git diff feat/t-1...HEAD` and what is not committed" in code, True)

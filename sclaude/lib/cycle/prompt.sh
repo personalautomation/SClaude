@@ -139,6 +139,14 @@ render_prompt() {
       fi
     fi
   fi
+  # The polish round's scope (review_polish_base): <polish-base> is the head
+  # step 2's /simplify left, and <if:polish-since> says so; otherwise the
+  # whole change from origin/<base>.
+  local -x SCLAUDE_V_POLISH_BASE="" SCLAUDE_V_POLISH_SINCE=""
+  if [[ -n "$SCLAUDE_V_POLISH" ]]; then
+    SCLAUDE_V_POLISH_BASE="$(review_polish_base "$wt")" && SCLAUDE_V_POLISH_SINCE=1 \
+      || SCLAUDE_V_POLISH_BASE="origin/$SCLAUDE_V_BASE"
+  fi
   # A pull request read in review blocks (review_blocks.sh), for review.md:
   # <if:in-blocks> while one is read, <block> of <blocks> — the last one the
   # seams — and <block-title>; the cut is review-blocks.json.

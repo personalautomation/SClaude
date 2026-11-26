@@ -379,6 +379,9 @@ REGRESSION_TIMINGS_KEPT=5
 # one run long, and still reads.
 regression_expected() {
   local wt="$1" stage="$2" part="$3" file
+  # The gate's rerun of a few failed specs (REGRESSION_TESTS) runs them alone:
+  # the whole suite's median said "expected 20m 16s" over one that took 25s.
+  [[ -n "${REGRESSION_TESTS:-}" ]] && regression_has_browser "$part" && return 1
   file="$(regression_timings_file "$wt")" || return 1
   python3 - "$file" "$stage" "$part" <<'PY' 2>/dev/null
 import json, sys

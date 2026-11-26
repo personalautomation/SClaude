@@ -1284,6 +1284,26 @@ check("failed-specs-after-the-dashes",
       "export E2E_MAX_FAILURES=10; npx playwright test -- e2e/a\\ b.spec.ts:3 e2e/c.spec.ts:9")
 check("failed-specs-not-for-another-part",
       command_with_tests("lint", "e2e/c.spec.ts:9"), "npx playwright test")
+# Nor the whole suite's expected time on such a rerun: its specs run alone.
+def expected_with_tests(part, tests):
+    script = """
+source %s/sclaude/lib/ship/regression.sh
+regression_timings_file() { printf '%%s' "$T"; }
+REGRESSION_TESTS=%s regression_expected /w local %s
+""" % (ROOT, shlex.quote(tests), part)
+    timings = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump({"local": {"e2e": [1200], "lint": [40]}}, timings)
+    timings.close()
+    try:
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                              env=dict(os.environ, T=timings.name)).stdout.strip()
+    finally:
+        os.unlink(timings.name)
+
+
+check("rerun-specs-no-suite-estimate", expected_with_tests("e2e", "e2e/c.spec.ts:9"), "")
+check("rerun-specs-other-parts-keep-theirs", expected_with_tests("lint", "e2e/c.spec.ts:9"), "40")
+check("whole-suite-keeps-its-estimate", expected_with_tests("e2e", ""), "1200")
 # The reason for export over a prefix: the second half of a chain sees it too.
 chained = command_for("e2e", "", "true && echo \"seen=$SCLAUDE_DEV\"",
                       dev_env="carol")

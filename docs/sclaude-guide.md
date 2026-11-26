@@ -30,7 +30,7 @@ sclaude drop <name>     # abandon a feature and remove its traces, here and on G
 sclaude epilogue [name] # write the status into the issue when the epilogue broke off; no name lists what waits
 sclaude friction <name> # review what got in a step's way and fix sclaude (offered after each step)
 sclaude deferred        # the monthly review of the friction put off (offered by itself)
-sclaude review-report <name>  # the review's rounds, findings fixed or declined, cost and trend
+sclaude review-report <name>  # the review's rounds, findings fixed or declined, and cost
 sclaude review-stats    # what review sessions cost in context, to tune when a round gets a fresh session
 sclaude propose         # send your commits to sclaude as a pull request
 sclaude workshop        # a session that changes sclaude with you, in a worktree of its own
@@ -176,7 +176,7 @@ readiest to leave with a reason, and an older bug too big for this change is
 filed as an issue of its own. Once nothing is left open, one **polish round**
 runs before the step closes: `/simplify` over the whole pull request (with
 `simplify: on`). Its push is reviewed like any; in the report its row's
-session reads `simplify`, and `fixed` counts the places it changed. The step closes when the review has
+session reads `simplify`, and each place it changed counts as a finding found and fixed, in the row and the totals. The step closes when the review has
 nothing left open, the preview is deployed and its tests pass.
 A pull request too big for one review to read well — past 5,000 changed lines,
 generated files left out — is read in **review blocks**. As step 4 starts, a
@@ -247,7 +247,7 @@ the review's map names it; `seams.2` is the second round of the last pass,
 over the seams between the blocks. A `w` is a value not known yet: a run
 still going, findings no session has started on, a launch whose cost comes
 when it ends. When the
-report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
+report says the fixes are feeding the review two rounds running, its verdict is red, and the
 feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
 to a review session without a question: `s` (⏭ on the topic) is how the rounds
 end, `n` and `r` in sclaude's tab act at once. Leaving the session yourself

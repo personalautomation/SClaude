@@ -536,7 +536,11 @@ def publish(wt, label, demo, entry, results, phone):
     if entry.get("part"):
         head_line = "🧩 Part %d: %s" % (entry["part"], entry["change"] or title)
     elif entry["kind"] == "delta":
-        head_line = "Δ %s → %s: %s" % (entry["from"] or "?", entry["stage"], entry["change"] or title)
+        # A delta within one stage (a remark in step 2, recorded again in it)
+        # names it once: "2-code → 2-code" read as a move that was none.
+        moved = "%s → %s" % (entry["from"] or "?", entry["stage"]) \
+            if entry["from"] != entry["stage"] else entry["stage"]
+        head_line = "Δ %s: %s" % (moved, entry["change"] or title)
     else:
         head_line = "🎬 " + title
     outcome = outcome_line(results)

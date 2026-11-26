@@ -199,9 +199,16 @@ run_step() {
   # The banner and the lines under it, except for the review's next round in
   # the same session (kept_said): they came twenty times over one step 4,
   # each right under the round's own report, with nothing in them changed.
-  # Any other way into a step — a fresh session, a return after the preview
-  # or QA — is announced, with where to look at it.
-  if [[ -z "$kept_said" ]]; then
+  # Entering a step is announced, with where to look at it, once a step in a
+  # run of sclaude (STEP_ANNOUNCED, "<slug> <step>"): a fresh session for the
+  # review's next findings, or its polish round, printed the same four lines
+  # again under the round's report. A step gone back to (step_rewind_to: a
+  # return after the preview or QA), the next part (parts_built) and the next
+  # review block clear it and are announced again.
+  local quiet_banner="$kept_said"
+  [[ "${STEP_ANNOUNCED:-}" == "$slug $step" ]] && quiet_banner=1
+  STEP_ANNOUNCED="$slug $step"
+  if [[ -z "$quiet_banner" ]]; then
     echo ""
     echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
   fi
@@ -218,7 +225,7 @@ run_step() {
   # (users_page in bin/sclaude-proxy): the address alone was said again by
   # the dev server's line below, and landed on a sign-in form.
   local users map
-  if [[ -z "$kept_said" ]]; then
+  if [[ -z "$quiet_banner" ]]; then
     if users="$(dev_users_address "$wt")"; then
       echo "   ${BOLD}Sign in as any user: $users${OFF}"
     else
@@ -1221,6 +1228,8 @@ after_step() {
   fi
   # A review block closed: the next one is read (review_blocks.sh).
   if [[ "$step" == review ]] && blocks_next "$wt" "$slug"; then
+    # A new block's reading, not a round of the last: announced again.
+    STEP_ANNOUNCED=""
     run_step "$wt" "$slug" review
     return 0
   fi

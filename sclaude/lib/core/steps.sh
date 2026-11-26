@@ -865,6 +865,8 @@ step_rewind_to() {
   local wt="$1" target="$2"; shift 2
   local state="$wt/.sclaude/local/feature/state.json" s
 
+  # A step gone back to is announced again when it is entered (run_step).
+  STEP_ANNOUNCED=""
   for s in "$@"; do
     # A step sent back has work for its session again, not only a gate left.
     state_set "$state" "steps.$s.gate" null 2>/dev/null || true

@@ -426,7 +426,7 @@ review_reopen() {
 }
 
 # Says, once a pull request and loudly, that the review's report finds the rounds
-# no longer converging, or fed by their own fixes (steps.review.stuck, written
+# fed by their own fixes round after round (steps.review.stuck, written
 # by review_report), and how
 # to end the search: each round's new findings went to a fresh session for as
 # long as the person did not press `s` — eighteen rounds on one feature, most

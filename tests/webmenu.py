@@ -571,6 +571,14 @@ try:
                   sessions.BUSY + t("feat.sclaudeask"))
         sessions.session_state = lambda session, cache=None: "busy"
         check("a session at work is what the card says", sessions.card_status(box, "alpha", "s1"), "busy")
+        # A demo's recording works in the worktree, and is not the step's.
+        recording = {"step": "done", "demo": {"runs": [
+            {"session": "s1", "about": "epilogue", "started": "2026-01-01T00:00:00+00:00"}]}}
+        sessions.feature_state = lambda repo, slug: recording
+        check("a demo's recording is said as such", sessions.card_status(box, "alpha", "s1"),
+              sessions.BUSY + t("feat.sclaudedemo"))
+        recording["demo"]["runs"][0]["finished"] = "2026-01-01T00:08:00+00:00"
+        check("a demo recording ended is no longer", sessions.card_status(box, "alpha", "s1"), "busy")
     finally:
         sessions.session_state, sessions.feature_state = saved_ss, saved_fs
 finally:

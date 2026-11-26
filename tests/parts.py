@@ -593,7 +593,12 @@ with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
 check("the-accepted-parts-are-joined", 'parts.accepted true\n    parts_join "$wt" "$slug"' in run_src, True)
 check("a-part-built-goes-on", 'parts_building "$state"; then\n    parts_built' in run_src, True)
 check("a-join-cut-off-goes-on", 'parts_joining "$state"; then\n      parts_join' in run_src, True)
-check("a-review-block-closed-goes-on", 'blocks_next "$wt" "$slug"; then\n    run_step "$wt" "$slug" review' in run_src, True)
+# The next block goes on to its session, and is announced again (STEP_ANNOUNCED).
+# find, not index: a missing line fails the check by its name.
+block_next = run_src[run_src.find('blocks_next "$wt" "$slug"; then'):]
+block_next = block_next[:block_next.find("\n  fi\n")]
+reset, step = block_next.find('STEP_ANNOUNCED=""'), block_next.find('run_step "$wt" "$slug" review')
+check("a-review-block-closed-goes-on", (step >= 0, 0 <= reset < step), (True, True))
 check("no-main-into-a-part", 'parts_open "$state" || { sync_branch' in run_src, True)
 with open(os.path.join(LIB, "commands", "feature_commands.sh")) as fh:
     check("sclaude-sync-leaves-open-parts-to-the-run", 'parts_open "$wt/.sclaude/local/feature/state.json"; then' in fh.read(), True)

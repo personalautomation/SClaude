@@ -1375,9 +1375,13 @@ Chrome resolves `*.localhost` by itself, but Node asks the system resolver,
 and a stock WSL Ubuntu answers ENOTFOUND. The suite then has to answer those
 names itself, in a test fixture.
 
-Every step starts by printing the address under the step's banner. The
-review's next round in the same conversation leaves the banner and the
-lines under it out (`REVIEW_KEPT_SAID`, read by `run_step`). The
+Every step starts by printing the address under the step's banner, once
+a step in a run of sclaude (`STEP_ANNOUNCED`, read by `run_step`): the
+review's next round in the same conversation (`REVIEW_KEPT_SAID`), a fresh
+session for its next findings and its polish round leave the banner and the
+lines under it out. A step gone back to (`step_rewind_to`, a QA hand-back
+among them), the next part (`parts_built`) and the next review block are
+announced again. The
 database's line and Chrome's "already up" are said once a process, on any
 round, unless something was started. Where
 the proxy's page can list the feature's users — through the proxy, with
@@ -2446,10 +2450,13 @@ Its snapshot of the pull request lists only the review threads still
 open — the resolved ones are counted, not repeated — so the new round starts
 with the new findings and nothing else.
 
-**Rounds that stop converging are said, once.** The report after each round
-ends on a verdict from the findings per round. When it says "Not converging"
-over four rounds or more (`stuck` in `review_report.py`), the next fresh
-session is preceded by a warning in the feature's topic that names the keys
+**Rounds fed by their own fixes are said, once.** The report after each round
+ends on a verdict — the share acted on below its floor, the fixes feeding the
+review, nothing open — and on no trend of the findings per round: the person
+reads that off the table's column, and a rule for it (a moving average) said
+"climbing" over 1, 2, 1. When the fixes feed the review two rounds running,
+over four rounds or more (`stuck` and `feeding_streak` in
+`review_report.py`), the next fresh session is preceded by a warning in the feature's topic that names the keys
 ending the search — `s` while a review pass runs, ⏭ on the topic
 (`review_stuck_say`); the terminal has the verdict in red under the report and
 `[s]` on every status line of the review, and is not told again. Said,
@@ -2465,11 +2472,8 @@ same conversation within seconds when it had committed nothing. A question here
 came to answer it, though the keys already said everything it asked; it is
 left only at `[g]`'s ceiling below. Before the keys, one two-line change took
 fifteen rounds unasked through a morning, the box unticked and its line
-promising a question; the status line now says what each key does. On one
-pull request the verdict said "Not converging" eighteen rounds in a row, each
-followed by a fresh session, until the person stopped it by hand. The same
-warning follows "the fixes are feeding the review" said two rounds running,
-after four rounds or more (`feeding_streak`): the count can fall and the rounds
+promising a question; the status line now says what each key does. The
+count can fall and the rounds
 still go on, each on the last one's fixes — four fresh sessions in a row once
 rewrote comments the one before had written. Not on one round: a last finding
 that happens to sit on an earlier fix says it too.
@@ -2510,7 +2514,10 @@ for a feature from before the record, nor for a polish owed and dropped). Its ro
 its `fixed` counts the places its commits changed up to the next run's head
 — each hunk, a deletion or a binary file too, the person's asks
 (`asked_commit`: a `feat` commit or a `Requirement:` trailer) left out
-(`own_places`) — a count of places, which the total of findings leaves out.
+(`own_places`). Each place counts as a finding found and fixed, like the
+review's own: in the row's `found` and `fixed`, in the totals, in the brief
+sent to the topic and in "Fixed X of Y" — once the polish session has ended;
+while it goes on the row waits (`w`) and the places are not counted yet.
 The review's map draws that round as a line across the icicles and a
 tinted column of the tree.
 
@@ -2522,8 +2529,7 @@ by the runs' `headSha`). By the threads alone, a round whose findings were
 all on a new function, the guide or a migration a fix had added read as
 none on the fixes. A run's `took` is timed from its last attempt's start
 (`startedAt`): re-run after a usage limit, it once counted the hours of the
-wait. The verdict says a last round that found nothing as convergence
-before any average, and the share acted on is taken over the settled
+wait. The share acted on is taken over the settled
 findings, a run's open threads left out only while its fix goes on or no
 later run has finished — what a later run left open was left to somebody
 else.
@@ -2577,7 +2583,7 @@ opens the new pull request, so step 4 records it on its way in and before it
 closes (`capture_reopened_pr` in `github.sh`). Counted with the new
 one, the merged one's rounds, whose threads the report no longer reads, showed
 as rounds that found nothing, and the new pull request's first findings were
-taken for a review that stopped converging.
+judged with the merged one's rounds.
 
 **Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review and sends what is open back to a review session, unasked; a session the person left themselves with `[g]` off holds the step open instead, and the question — back to a session, then closing anyway — is left only at `[g]`'s ceiling. A findings check red only because the review on GitHub handed back before it finished ("review did not finish", `UNFINISHED_TITLE`, with no thread open and nothing else red) is no work for a session: both questions answer `unfinished`, the gate reruns the review job's run (`gh run rerun`, `review_unfinished_rerun`) once on that head by itself (`.sclaude/local/feature/review-unfinished.head`), and if it does not finish again asks "Go on with this head unreviewed?" — `n` runs it again, `[g]` does so for `REVIEW_GO_ON_RETRIES`, and a yes closes the step saying the pull request was not reviewed. Any other red is dealt with first, and on the way out so are threads the person kept (on the way in they are reported as the step closes, as on a clean entry); each rerun is waited for with a fresh `REVIEW_WAIT_MAX`; left open on the way in (no answer, or a rerun that would not start) the step stops, telling the terminal and the topic, rather than open a session. Two questions of the review on this machine stay: the 1-3 choice once the person ended the search (check the fixes, close, leave it), and "Go on with this head unreviewed?" after a pass that did not run. `[g]` answers the first itself, and takes the second's place for `REVIEW_GO_ON_RETRIES` (ten) retries with growing pauses, then asks it.
 

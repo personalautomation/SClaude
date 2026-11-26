@@ -166,12 +166,37 @@ try:
     out = buf.getvalue()
     check_true("report-says-local", "reviewed on this machine" in out)
     check_true("report-fates", "Fixed 2 of 4 (50%) · without a fix 1 (25%)" in out)
+    # The polish round's changes are findings found and fixed like any: in its
+    # row, in the totals and in the shares under the table — once its session
+    # has ended; while none has, they are not counted yet.
+    saved = (review_report.polish_round, review_report.polish_places, review_report.fixers)
+    review_report.polish_round = lambda cwd, groups: 1
+    review_report.polish_places = lambda cwd, groups, i: 5
+
+    def polish_report():
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            review_report.main()
+        text = buf.getvalue()
+        rows = {l.split()[0]: l.split() for l in text.splitlines() if l.startswith("  ") and l.split()}
+        return text, rows
+    try:
+        text, rows = polish_report()
+        check("polish-not-before-its-session", (rows["2"][5], "Fixed 2 of 4" in text), ("1", True))
+        review_report.fixers = lambda groups, people: [[] for _ in groups[:1]] + [[0]] + [[] for _ in groups[2:]]
+        text, rows = polish_report()
+        check("polish-row-found-and-fixed", (rows["2"][5], rows["2"][6:9], rows["2"][-2]),
+              ("6", ["0", "0", "simplify"], "6"))
+        check("polish-in-totals", (rows["total"][3], rows["total"][-2]), ("9", "7"))
+        check_true("polish-in-shares", "Fixed 7 of 9 (78%)" in text)
+    finally:
+        review_report.polish_round, review_report.polish_places, review_report.fixers = saved
     # Findings no session has begun to fix: the fix waits, it is not zero.
     check("fix-waits-for-a-session", [l.split()[8:11] for l in out.splitlines() if l.startswith("  3 ")],
           [["w", "w", "w"]])
 
     # A last pass stopped before it answered (spent): not a round that found
-    # nothing — the report once said "Converging" on one stopped in 9 seconds.
+    # nothing — the report once said so on one stopped in 9 seconds.
     import local_review
     kept = open(journal).read()
     local_review.spent(journal, "h2", "h3", 9, "")
@@ -185,7 +210,6 @@ try:
     check_true("stopped-not-running", "still running" not in out)
     check_true("stopped-not-the-briefs-round", "round 4" not in open(brief_path).read())
     check_true("stopped-said", "Round 4 left no recorded answer" in out)
-    check_true("stopped-not-converging", "the last round found nothing" not in out)
     # Every round so far stopped: nothing is going, on the phone either.
     write(journal, json.dumps({"at": "2026-10-15T10:00:00+00:00", "seconds": 9, "base": "x",
                                "head": "h0", "spent": True}) + "\n")
@@ -214,8 +238,8 @@ try:
     # A feature reopened after its merge goes on under a new pull request, in
     # the same state and journal. The report starts when that one opened:
     # counted with it, the merged one's rounds, whose threads are not read,
-    # were rounds that found nothing, and its first findings read as a review
-    # that stopped converging.
+    # were rounds that found nothing, and its first findings were judged with
+    # the merged one's rounds.
     real_gh_json = review_report.gh_json
     review_report.gh_json = lambda args, cwd=None: {"createdAt": "2026-10-15T10:30:00Z"}
     since = real_pr_created(wt, 9)

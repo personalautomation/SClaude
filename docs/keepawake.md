@@ -754,7 +754,10 @@ process that printed for it lives (`notes/process.json`), else a regression
 running by the state while a live sclaude proves it (`regression_alive`: the
 run's own pid, `regression.<stage>.pid`, or the regression queue's holder note
 naming the feature and stage, its pid running sclaude), else the local review running by the state (believed three hours, as
-the process map believes it), else a question the orchestrator asks. Those words are part
+the process map believes it), else a question the orchestrator asks. A demo's
+recording (`demo_refresh`, a part's demo) has a session of its own in the
+worktree, and while its run is open (`demo_open`) the card says "recording the
+demo" rather than taking it for the step's conversation. Those words are part
 of what the card is compared by (`card_status`), so the card changes when
 that work starts and ends. One `claude agents` answer serves
 the whole pass; when Claude Code does not answer, nothing is redrawn. The

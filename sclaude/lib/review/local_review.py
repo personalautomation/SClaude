@@ -508,6 +508,14 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
            "new": posted, "lost": len(lost), "resolved": closed, "still_open": told,
+           # Posted in the conversation, with no thread to count them by: the
+           # report counts them as found all the same (unthreaded). Left out,
+           # a pass whose one finding was about a file outside the diff read
+           # "found 0". Counted in each pass that posts it, and open only
+           # for this pass's fix (the count printed below): such a comment has
+           # no way to be resolved or declined, so it is neither tracked
+           # across passes nor deduplicated.
+           "unthreaded": talked,
            "pr": str(pr),
            # Found as many as the cap: likely stopped with more unsaid, so this
            # head is not done — the next call reads the same range again.

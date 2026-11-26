@@ -416,6 +416,8 @@ parts_built() {
     info "  Every part is built. Step 2 closes on the whole feature: checked as one, shown,"
     info "  and accepted by you; then one pull request for it all."
   fi
+  # A new part's work, not a round of the last: announced (run_step).
+  STEP_ANNOUNCED=""
   run_step "$wt" "$slug" code
 }
 

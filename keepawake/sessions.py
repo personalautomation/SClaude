@@ -190,6 +190,22 @@ def run_open(run):
     return not ended or bool(resumed and resumed > ended)
 
 
+def last_open(data, place):
+    """The session of <place>'s last run in the state while that run is open
+    (run_open), and when it began or was taken up; ("", None) when not."""
+    runs = (data.get(place) or {}).get("runs")
+    last = runs[-1] if isinstance(runs, list) and runs and isinstance(runs[-1], dict) else {}
+    if not (last.get("session") and run_open(last)):
+        return "", None
+    return last["session"], _when(last.get("resumed")) or _when(last.get("started"))
+
+
+def demo_open(data):
+    """The session recording a demo (the state's `demo` runs: demo_refresh,
+    a part's demo) while it is open; "" when none is."""
+    return last_open(data, "demo")[0]
+
+
 def after_open(data):
     """The session after the four steps (the cycle table's AFTER: the sync,
     the epilogue, the retrospective) whose last run is open (run_open), as
@@ -197,13 +213,11 @@ def after_open(data):
     ("", "") when none is."""
     best = (None, "", "")
     for place in (a["name"] for a in cycle_table.steps.AFTER):
-        runs = (data.get(place) or {}).get("runs")
-        last = runs[-1] if isinstance(runs, list) and runs and isinstance(runs[-1], dict) else {}
-        if not (last.get("session") and run_open(last)):
+        session, when = last_open(data, place)
+        if not session:
             continue
-        when = _when(last.get("resumed")) or _when(last.get("started"))
         if best[0] is None or (when and when >= best[0]):
-            best = (when or best[0], place, last["session"])
+            best = (when or best[0], place, session)
     return best[1], best[2]
 
 
@@ -382,9 +396,14 @@ def card_status(repo, slug, session=None):
     if session is None:
         session = feature_session(repo, slug)[0]
     state = session_state(session)
+    data = feature_state(repo, slug)
+    # A demo's recording (demo_refresh's, a part's) works in the worktree too,
+    # and read as the step's own: the card said "6/7 epilogue · the step is
+    # running" for the eight minutes before the epilogue began.
+    if state and session == demo_open(data):
+        return BUSY + t("feat.sclaudedemo")
     if state not in ("", "idle"):
         return state
-    data = feature_state(repo, slug)
     if session and started_lately(data):
         return "working"
     busy = sclaude_busy(repo, slug, data)

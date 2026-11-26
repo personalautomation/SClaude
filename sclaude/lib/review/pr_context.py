@@ -510,6 +510,13 @@ def merge_red(cwd, pr, repo):
     return "stale" if FINDINGS_CHECK in red_checks(rollup) else "unknown"
 
 
+def with_minor(said, minor):
+    """A count with the minor findings among it (a nit or an older bug) said
+    beside it. As a part of its own, "4 open minor" after "7 for the review
+    to check" read as four more, when the session had fixed all seven."""
+    return "%s (%d minor)" % (said, minor) if minor else said
+
+
 def brief(cwd, pr, repo, since="", handed=False, done=False):
     """Where the review stands, counted, for a line in the feature's topic —
     "" when GitHub cannot say.
@@ -545,7 +552,8 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
         return ""
     start = parse_ts(since) if since else None
     mine = yours(cwd)
-    fixed = declined = older = newer = outdated = kept = minor = 0
+    fixed = declined = older = newer = outdated = kept = 0
+    minor_older = minor_newer = 0
     for t in nodes:
         comments = (t.get("comments") or {}).get("nodes") or []
         first = comments[0] if comments else {}
@@ -566,14 +574,16 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
                 else:
                     fixed += 1
             continue
-        # Open like any, and told apart: how much of what is open is minor.
-        if minor_of(first.get("body")):
-            minor += 1
+        # Open like any, and told apart: how much of what is open is minor,
+        # said beside the count it is part of.
+        is_minor = bool(minor_of(first.get("body")))
         when = parse_ts(first.get("createdAt"))
         if start and when and when >= start:
             newer += 1
+            minor_newer += is_minor
         else:
             older += 1
+            minor_older += is_minor
         if t.get("isOutdated"):
             outdated += 1
     view = pr_view(cwd, pr, "statusCheckRollup,comments,headRefOid")
@@ -585,20 +595,19 @@ def brief(cwd, pr, repo, since="", handed=False, done=False):
         unread = review_mode(cwd) == "local" or not review_read_head(cwd, view)
         found = ([] if unread and not fixed else ["%d fixed" % fixed]) \
             + (["%d declined" % declined] if declined else []) \
-            + ["%d %s" % (older, "for the review to check" if unread else "still open"),
-               "%d new" % newer]
+            + [with_minor("%d %s" % (older, "for the review to check" if unread else "still open"),
+                          minor_older),
+               with_minor("%d new" % newer, minor_newer)]
     elif start:
         found = ([] if handed else ["%d fixed" % fixed]
                  + (["%d declined" % declined] if declined else [])) \
-            + ["%d not fixed yet" % older, "%d new" % newer]
+            + [with_minor("%d not fixed yet" % older, minor_older),
+               with_minor("%d new" % newer, minor_newer)]
     else:
-        found = ["%d open" % older]
+        found = [with_minor("%d open" % older, minor_older)]
     if outdated and not handed and not done:
         found.append("%d on lines since changed" % outdated)
     parts = ["findings: " + ", ".join(found)]
-    # Its own item: appended to the list, it read as qualifying the last count.
-    if minor:
-        parts.append("%d open minor (a nit or an older bug)" % minor)
     if kept and not handed:
         parts.append("%d left to you" % kept)
     red = red_rows(cwd, pr, repo, view, nodes) if view else []

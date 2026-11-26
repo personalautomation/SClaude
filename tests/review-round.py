@@ -1145,6 +1145,25 @@ echo "watcher=[$SESSION_WATCHER]"
     check("brief-done-github-unread", pc.brief(tmp, "143", "o/r", S, done=True),
           "findings: 1 fixed, 1 declined, 1 for the review to check, 1 new · 1 left to you · red: tests")
     pc.review_read_head = real_read
+    # The minor ones are said beside the count they are part of: a part of
+    # its own, "4 open minor" after "7 for the review to check", read as four
+    # more when the session had fixed all seven.
+    minor_body = pc.minor_mark("nit") + "\n\n**x**"
+
+    def minor(created):
+        t = thread(False, created)
+        t["comments"]["nodes"][0]["body"] = minor_body
+        return t
+    saved = pc.review_threads
+    pc.review_threads = lambda cwd, pr, repo: [
+        minor("2026-10-02T10:00:00Z"), thread(False, "2026-10-02T10:00:00Z"),  # older: 2, 1 minor
+        minor("2026-10-02T14:00:00Z")]                                         # new: 1, minor
+    pc._MODES[tmp] = "local"
+    check("brief-minor-beside-its-count", pc.brief(tmp, "143", "o/r", S, done=True),
+          "findings: 2 for the review to check (1 minor), 1 new (1 minor) · red: tests")
+    pc._MODES[tmp] = "github"
+    check("brief-minor-open", pc.brief(tmp, "143", "o/r"), "findings: 3 open (2 minor) · red: tests")
+    pc.review_threads = saved
     check("read-head-needs-the-review",
           (pc.review_read_head(tmp, None),
            pc.review_read_head(tmp, {"headRefOid": "x", "statusCheckRollup": []})), (False, False))
@@ -1186,9 +1205,10 @@ echo "watcher=[$SESSION_WATCHER]"
     # REVIEW_KEPT_SAID is for one call: taken before the first way out.
     check("kept-said-taken-before-any-return",
           entry.index('REVIEW_KEPT_SAID=""') < entry.index("&& return"), True)
-    # The banner and the address under it go unsaid for a kept round alone:
-    # a return after the preview or QA, or a fresh session, says them again.
-    guard = '\n  if [[ -z "$kept_said" ]]; then\n'
+    # The banner and the address under it go unsaid for a kept round, and
+    # for a step already announced in this run (a fresh session for the next
+    # findings, the polish round); a step gone back to says them again.
+    guard = '\n  if [[ -z "$quiet_banner" ]]; then\n'
     blocks = []
     at = entry.find(guard)
     while at >= 0:
@@ -1203,6 +1223,13 @@ echo "watcher=[$SESSION_WATCHER]"
     check("header-unsaid-for-a-kept-round-only",
           ([any(line in b for b in blocks) for line in said], "STEP_HEADER_SAID" in entry),
           ([True] * len(said), False))
+    check("banner-once-a-step-in-a-run",
+          'local quiet_banner="$kept_said"' in entry
+          and '[[ "${STEP_ANNOUNCED:-}" == "$slug $step" ]] && quiet_banner=1' in entry, True)
+    with open(os.path.join(LIB, "core", "steps.sh")) as fh:
+        steps_sh = fh.read()
+    rewind = steps_sh[steps_sh.index("step_rewind_to() {"):]
+    check("banner-again-after-a-rewind", 'STEP_ANNOUNCED=""' in rewind[:rewind.index("\n}\n")], True)
     # The way in is step 4's gate (review_close_gate ... entry), whose pass
     # reports what it found unless that head was reported where it ran.
     check("entry-pass-reported",
@@ -1915,7 +1942,7 @@ echo "watcher=[$SESSION_WATCHER]"
                      extra={"steps": {"review": {"friction_held": "review-5"}}})
     check("friction-held-already-read", "FRICTION" not in out and left.get("friction_held") is None, True)
 
-    # --- rounds that stopped converging are said, once, and not asked --------
+    # --- rounds fed by their own fixes are said, once, and not asked --------
     def stuck_say(review, pr=7):
         wt = tempfile.mkdtemp()
         os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
@@ -1933,24 +1960,24 @@ echo "watcher=[$SESSION_WATCHER]"
         shutil.rmtree(wt, ignore_errors=True)
         return out
 
-    out = stuck_say({"stuck": "Not converging: findings per round hold level."})
+    out = stuck_say({"stuck": "The fixes are feeding the review."})
     check("stuck-said-once", out.count("The review's report"), 1)
     check("stuck-not-asked", "ASKED" in out, False)
     check("stuck-names-the-keys", "[s]" in out and "⏭" in out, True)
     # Said to the topic alone: the terminal has the red verdict and [s].
     check("stuck-not-in-the-terminal", "WARN" in out, False)
-    check("converging-not-said", stuck_say({"stuck": ""}).strip(), "")
-    check("ended-search-not-said", stuck_say({"stuck": "Not converging.", "enough": "now"}).strip(), "")
+    check("not-stuck-not-said", stuck_say({"stuck": ""}).strip(), "")
+    check("ended-search-not-said", stuck_say({"stuck": "The fixes are feeding the review.", "enough": "now"}).strip(), "")
     # Once per pull request: a feature reopened after its merge goes on under
     # a new one, and the merged one's verdict and its warning are not its.
-    check("said-again-for-a-new-pr", stuck_say({"stuck": "Not converging.", "stuck_pr": 9,
+    check("said-again-for-a-new-pr", stuck_say({"stuck": "The fixes are feeding the review.", "stuck_pr": 9,
                                                 "stuck_said": 7}, pr=9).count("The review's report"), 1)
-    check("old-pr-verdict-not-said", stuck_say({"stuck": "Not converging."}, pr=9).strip(), "")
+    check("old-pr-verdict-not-said", stuck_say({"stuck": "The fixes are feeding the review."}, pr=9).strip(), "")
     # A state from before the keying: a verdict with no number is the current
     # pull request's, and a `true` was said for it.
-    check("unkeyed-verdict-said", stuck_say({"stuck": "Not converging.", "stuck_pr": None})
+    check("unkeyed-verdict-said", stuck_say({"stuck": "The fixes are feeding the review.", "stuck_pr": None})
           .count("The review's report"), 1)
-    check("unkeyed-said-not-again", stuck_say({"stuck": "Not converging.", "stuck_pr": None,
+    check("unkeyed-said-not-again", stuck_say({"stuck": "The fixes are feeding the review.", "stuck_pr": None,
                                                "stuck_said": True}).strip(), "")
 
     # --- step 4 closes only once the review is done with the head -------------

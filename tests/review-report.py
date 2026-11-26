@@ -149,10 +149,9 @@ with tempfile.TemporaryDirectory() as wt:
     check("the last run still is", spans[2] is not None and spans[2] > 0, True)
     shutil.rmtree(gap, ignore_errors=True)
 
-    # Stuck: not converging over enough rounds that one bad round is not it.
-    check("stuck-over-enough-rounds", review_report.stuck([5, 5, 5, 5], "Not converging: hold level."), True)
-    check("not-stuck-too-few", review_report.stuck([5, 5, 5], "Not converging: hold level."), False)
-    check("not-stuck-converging", review_report.stuck([9, 5, 3, 1], "Converging: half."), False)
+    # Stuck: by the fixes feeding the review alone — a level or climbing count
+    # is the table's to show, not a warning's.
+    check("not-stuck-without-feeding", review_report.stuck(4, 0), False)
     # A run re-run after a usage limit is timed from its last attempt.
     saved_gh = review_report.gh_json
     review_report.gh_json = lambda args, cwd=None: [
@@ -238,13 +237,9 @@ with tempfile.TemporaryDirectory() as wt:
         check("polish-round-none-due-left-past-step-4", review_report.polish_round(p, groups), None)
     finally:
         shutil.rmtree(p, ignore_errors=True)
-    # A clean last pass is convergence, whatever the average of the last two.
-    check("verdict-last-round-clean", review_report.verdict([9, 8, 0], None, 0, 0, 2).split(".")[0],
-          "Converging: the last round found nothing")
-    said = "Converging: half. " + review_report.FEEDING
-    check("stuck-when-fixes-feed-it-two-rounds", review_report.stuck([8, 6, 5, 3, 2], said, 2), True)
-    check("not-stuck-feeding-one-round", review_report.stuck([6, 4, 2, 1], said, 1), False)
-    check("not-stuck-feeding-too-few-rounds", review_report.stuck([8, 6, 5], said, 3), False)
+    check("stuck-when-fixes-feed-it-two-rounds", review_report.stuck(5, 2), True)
+    check("not-stuck-feeding-one-round", review_report.stuck(4, 1), False)
+    check("not-stuck-feeding-too-few-rounds", review_report.stuck(3, 3), False)
     on, off = {"near_fix": True}, {"near_fix": False}
     check("feeding-streak-counts-back", review_report.feeding_streak(
         [{"threads": [on]}, {"threads": [off, off]}, {"threads": [on, off]}, {"threads": [on]}]), 2)
@@ -462,7 +457,8 @@ with tempfile.TemporaryDirectory() as wt:
     check("brief-skips-a-round-still-running",
           review_report.newest([("round 1", zeros, False), ("round 2", zeros, True)])[0], "round 1")
     check("brief-nothing-finished", review_report.newest([("round 1", zeros, True)]), None)
-    check_true("brief-verdict", "Converging slowly." in brief)
+    check_true("brief-verdict", review_report.FEEDING in brief)
+    check_true("brief-no-trend", "onverging" not in brief)
     # What was last shown — the open findings and the rounds — the same
     # again: nothing printed or sent.
     shown_file = os.path.join(wt, "shown.txt")
@@ -531,7 +527,7 @@ with tempfile.TemporaryDirectory() as wt:
     check("table-not-repeated",
           [w for w in ("Back and forth", "Hot files", "Cost", "runner time") if w in text], [])
     check("no-colour-off-a-terminal", "\033[" in text, False)
-    check("trend", "Converging slowly." in text, True)
+    check("no-trend", "onverging" in text or "Too few rounds" in text, False)
     check("fixes-feed-the-review", "the fixes are feeding the review" in text, True)
 
 # --- the fate of a resolved thread: the last decision reply decides ---------------
@@ -579,15 +575,14 @@ check("night-check-names-local-signature", ("`%s`" % pr_context.LOCAL_SIGNATURE)
 
 # --- the verdict alone ---------------------------------------------------------
 v = review_report.verdict
-check("climbing", v([3, 4, 6], 0.9, 0, 6, 6).startswith("Not converging: findings per round are climbing"), True)
-check("level", v([4, 4, 4], 0.9, 0, 4, 4).startswith("Not converging: findings per round hold level"), True)
-check("converging", v([8, 6, 2, 1], 0.9, 0, 1, 0),
-      "Converging: the last 2 rounds found half or less of the last 4's average. Nothing is open.")
-# Rising again after a low: the first rounds' many findings do not hide it.
-check("rising-after-a-low", v([8, 13, 8, 5, 2, 3, 1, 2, 5, 5], 0.9, 0, 5, 5)
-      .startswith("Not converging: findings per round are climbing"), True)
-check("noise", "mostly asking for what nobody fixes" in v([2, 1, 1], 0.3, 0, 1, 1), True)
-check("early", v([5], None, 0, 5, 5), "Too few rounds for a trend.")
+# No trend of the counts: the table's column shows it.
+check("nothing-to-say", v(0.9, 0, 6, 6), "")
+check("nothing-open", v(0.9, 0, 1, 0), "Nothing is open.")
+check("feeding", v(0.9, 2, 3, 3), review_report.FEEDING)
+check("noise", "mostly asking for what nobody fixes" in v(0.3, 0, 1, 1), True)
+check("noise-colour", review_report.verdict_colour(v(0.3, 0, 1, 1)), review_report.YELLOW)
+check("feeding-colour", review_report.verdict_colour(v(0.9, 2, 3, 3)), review_report.RED)
+check("clean-colour", review_report.verdict_colour(v(0.9, 0, 1, 0)), review_report.GREEN)
 
 # --- wiring --------------------------------------------------------------------
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()

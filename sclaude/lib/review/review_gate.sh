@@ -669,7 +669,7 @@ review_close_gate() {
   if review_go_on "$wt"; then
     review_go_on_round "$wt" && go_on=1 || go_on=2
   fi
-  # Said before the next session: the rounds stopping converging is what
+  # Said before the next session: rounds fed by their own fixes are what
   # [s] is for — not before the polish round, which finds nothing to stop.
   [[ "$polish" -eq 1 ]] || review_stuck_say "$wt"
   # Except after the person left the session (/exit, Ctrl-C) with [g] off:
@@ -892,7 +892,7 @@ cmd_review_stats() {
 }
 
 # Whether another review round is worth it: rounds, findings fixed and closed
-# without a fix, findings on earlier fixes, cost and the trend.
+# without a fix, findings on earlier fixes and cost.
 # Counted from the pull request and the feature's state, without a model.
 # Printed at the close of every review round and by `sclaude review-report`.
 #
@@ -965,7 +965,7 @@ review_report() {
     SCLAUDE_REPORT_ROUNDS_ONLY="${REVIEW_REPORT_ROUNDS_ONLY:-}" \
     python3 "$LIB/review/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" 2>/dev/null || true
-  # The verdict, when the rounds stopped converging, for review_stuck_say;
+  # The verdict, when the fixes keep feeding the review, for review_stuck_say;
   # "-" when they did not, and nothing when the report could not tell, which
   # keeps what was there.
   local verdict; verdict="$(cat "$stuck" 2>/dev/null)"

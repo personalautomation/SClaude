@@ -634,6 +634,8 @@ STRINGS = {
                           "the regression is running (%(stage)s)"),
     "feat.sclaudereview": ("идёт локальное ревью",
                            "the local review is running"),
+    "feat.sclaudedemo":  ("записывается демо",
+                          "recording the demo"),
     "feat.sclaudeask":   ("ждёт ответа на свой вопрос",
                           "waiting for your answer to its question"),
     # No Claude session for the step is open: what that means depends on

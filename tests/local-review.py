@@ -411,6 +411,10 @@ try:
         said = json.load(fh)["conversation"][-1]
     check_true("outside-pr-in-conversation", "`elsewhere:4` (not in this pull request's diff)" in said)
     check("outside-pr-not-signed", pr_context.signed_locally(said), False)
+    # And its run records it, for the report to count it found (unthreaded).
+    with open(journal) as fh:
+        last_row = [json.loads(line) for line in fh if line.strip()][-1]
+    check("outside-pr-journaled-unthreaded", (last_row.get("new"), last_row.get("unthreaded")), (1, 1))
     # The thread on the file has no line of its own: the next run is handed
     # it by the line its body names and by its claim, not by that first line.
     check_true("file-level-handed-by-claim", "fileonly:9 — **on the file**" in prompts())

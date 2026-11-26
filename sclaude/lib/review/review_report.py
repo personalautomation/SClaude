@@ -10,8 +10,9 @@
 #
 # What it measures is what reviews and test campaigns are usually judged by:
 #
-#   * findings per round — the discovery rate. A process that converges finds
-#     fewer each round; one that holds level or climbs is not converging;
+#   * findings per round — the discovery rate, a column the person reads the
+#     trend off themselves: a sentence judging it had a corner case for every
+#     shape of a few small numbers, and said "climbing" over 1, 2, 1;
 #   * the share acted on — findings fixed against findings closed without a
 #     fix. Field studies of review bots put acceptance near a third, and a
 #     share acted on below 40% is the usual sign a reviewer has turned to
@@ -43,8 +44,8 @@
 # A round is one run of the automatic review: a thread belongs to the last run
 # that started before it was posted. Not the review id GitHub gives a comment —
 # the review posts each inline comment as a review of its own, so that counted
-# every finding as a round. A run that found nothing is a round with nothing,
-# which is what convergence looks like. A round opens with its findings and
+# every finding as a round. A run that found nothing is a round with nothing.
+# A round opens with its findings and
 # goes on with their fix: the review session (state.json) whose launches began
 # after the run and before the next one is the one that answered it. Its row
 # reads in that order — find, fix, result — and a value that will come but has
@@ -254,9 +255,9 @@ def fixes_per_round(s, gs, mine=None):
 
 
 def verdict_colour(said):
-    if said.startswith("Not converging") or FEEDING in said:
+    if FEEDING in said:
         return RED
-    if said.startswith("Converging slowly") or said.startswith("Too few"):
+    if said.startswith("Under "):
         return YELLOW
     return GREEN
 
@@ -579,8 +580,7 @@ def journal_runs(path, since=None, pr=None):
                     # None when the pull request is read whole.
                     "block": block,
                     # No pass of it left a recorded answer — stopped, or its
-                    # answer not recorded: no round that found nothing, and
-                    # no word for the trend.
+                    # answer not recorded: no round that found nothing.
                     "stopped": bool(row.get("spent")),
                     # Why a pass's answer was not taken (local_review.py's
                     # REFUSED, journaled by spent), one each.
@@ -830,47 +830,17 @@ def pct(part, whole):
     return "%d%%" % round(100.0 * part / whole) if whole else "-"
 
 
-# The verdict's moving average: the mean of the last TAIL_ROUNDS rounds,
-# against the mean of the last WINDOW_ROUNDS (fewer while there are fewer).
-TAIL_ROUNDS = 2
-WINDOW_ROUNDS = 5
-
-
 # The verdict's sentence for a last round whose findings sit mostly on earlier
 # fixes; feeding_streak() applies the same test to each round, for stuck().
 FEEDING = ("Half or more of the last round's findings sit on earlier fixes: "
            "the fixes are feeding the review.")
 
 
-def verdict(per_round, acted, near_last, last_found, open_now):
-    """The trend in a sentence, from the figures alone."""
+def verdict(acted, near_last, last_found, open_now):
+    """What the figures say that the table does not show at a glance, in a
+    sentence or none. No trend of the findings per round: the person reads it
+    off the column, and a rule for it misread a few small numbers."""
     words = []
-    if not per_round:
-        return "No findings yet."
-    if len(per_round) >= 2 and per_round[-1] == 0:
-        # A clean pass says more than any average: "converging slowly" was
-        # said after 9, 8, 0, since the mean of the last two still stood at 4.
-        words.append("Converging: the last round found nothing.")
-    elif len(per_round) < 3:
-        words.append("Too few rounds for a trend.")
-    else:
-        # A moving average: the last TAIL_ROUNDS rounds against the last
-        # WINDOW_ROUNDS. Compared with the first rounds instead, the verdict
-        # stayed "converging" while the findings rose again from 1 to 5: a
-        # first pass over the whole pull request finds the most, and any
-        # later stretch looks small beside it.
-        tail = sum(per_round[-TAIL_ROUNDS:]) / float(TAIL_ROUNDS)
-        window = per_round[-WINDOW_ROUNDS:]
-        mean = sum(window) / float(len(window))
-        if tail > mean:
-            words.append("Not converging: findings per round are climbing.")
-        elif tail <= mean * 0.5:
-            words.append("Converging: the last %d rounds found half or less of the last %d's average."
-                         % (TAIL_ROUNDS, len(window)))
-        elif tail < mean:
-            words.append("Converging slowly.")
-        else:
-            words.append("Not converging: findings per round hold level.")
     if acted is not None and acted < ACTED_ON_FLOOR:
         words.append("Under %d%% of the latest findings were fixed: the review is mostly "
                      "asking for what nobody fixes." % (ACTED_ON_FLOOR * 100))
@@ -906,16 +876,17 @@ def brief(pr, last, verdict_line, going=False, ran=False):
     """The status update: <last> is (label, {measure: n}) or None; <going>,
     that a review run has begun and not finished; <ran>, that runs before it
     left no recorded answer (stopped, or their answers not recorded)."""
+    # No empty last line when the verdict has nothing to say (verdict).
+    tail = verdict_line + "\n" if verdict_line else ""
     if not last:
         said = ("a review run is going." if going and ran
                 else "the first review run is going." if going
                 else "no review run has answered yet." if ran else "no review run yet.")
-        return "Review — PR %s: %s\n%s\n" % (pr, said, verdict_line)
+        return "Review — PR %s: %s\n%s" % (pr, said, tail)
     label, values = last
     # No "#": Telegram makes a hashtag of "#N".
-    return "Review — PR %s, %s\n%s\n%s\n" % (
-        pr, label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
-        verdict_line)
+    return "Review — PR %s, %s\n%s\n%s" % (
+        pr, label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS), tail)
 
 
 def main():
@@ -1005,14 +976,16 @@ def main():
     near_all = sum(1 for t in found if t["near_fix"])
     repeats = [t for t in found if t["repeat"]]
     # A round still running has not said all it will, and one with no
-    # recorded answer said nothing: both left out of the trend — a stopped
-    # pass read as "the last round found nothing", converging.
+    # recorded answer said nothing: both left out of the rounds counted for
+    # stuck() — a stopped pass read as "the last round found nothing".
     done = [g for g in groups if not g["running"] and not g.get("stopped")]
-    per_round = [len(g["threads"]) + g.get("unthreaded", 0) for g in done]
     columns = []
     # The runs whose findings are still being decided: a fix going on them,
     # or findings nobody has begun. Read for the share acted on below.
     busy = set()
+    # What /simplify changed in the polish round: counted as found and fixed,
+    # alike with the review's findings, in its row and in the totals.
+    polished = 0
 
     if groups:
         print("")
@@ -1021,7 +994,8 @@ def main():
             print(line)
         who = fixers(groups, people)
         # The polish round's fixing is /simplify's: named so in the session
-        # column, and what it changed counted as fixed in its row.
+        # column, and each place it changed counted as a finding found and
+        # fixed, in its row and in the totals.
         polish = polish_round(cwd, groups)
         # The fixing cost of each run, summed over the sessions that answered
         # it (fixes_per_round); a session still going has not given the cost
@@ -1040,6 +1014,13 @@ def main():
             if s["going"] and now_on:
                 pending.update(i for i in range(len(groups)) if window(i, groups, now_on))
         busy = pending | {i for i, m in enumerate(who) if not m and groups[i]["threads"]}
+        # Counted once /simplify's session has ended: while it goes on, the
+        # places it has changed so far are a figure that moves under the reader.
+        if polish is not None and who[polish] and polish not in pending:
+            polished = polish_places(cwd, groups, polish) or 0
+        # Found and fixed like the review's own, in the totals and the shares.
+        total += polished
+        fixed += polished
         # A session that answered several runs labels each N.1, N.2…: the
         # session's sum, as a row of its own, read as one more round.
         answered = {}
@@ -1052,10 +1033,11 @@ def main():
             ts = g["threads"]
             # Found is every finding, a thread or not: one posted as a comment
             # (unthreaded) was found as much as one on a line.
-            counts = (len(ts) + g.get("unthreaded", 0), sum(1 for t in ts if t["near_fix"]),
+            extra = polished if i == polish else 0
+            counts = (len(ts) + g.get("unthreaded", 0) + extra, sum(1 for t in ts if t["near_fix"]),
                       sum(1 for t in ts if t["repeat"]))
             # Declined is the fix's decision, as it reads the findings.
-            result = (count(ts, "no fix"), count(ts, "fixed"), count(ts, "open"))
+            result = (count(ts, "no fix"), count(ts, "fixed") + extra, count(ts, "open"))
             # A stopped round is no finished one for the phone's brief either:
             # its zeros would say "found nothing" there too (newest).
             columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, counts + result)),
@@ -1092,8 +1074,6 @@ def main():
                 result = (WAIT,) * 3
             elif i == polish:
                 session = "simplify"
-                places = polish_places(cwd, groups, i)
-                result = (0, places if places is not None else "", 0)
             # A run still going has not said what it found: what it posted so
             # far, or nothing yet, read as its count — zeros as "found
             # nothing". The total counts every thread there is.
@@ -1110,7 +1090,7 @@ def main():
         stopped = [str(i + 1) for i, g in enumerate(groups) if g.get("stopped") and not g["threads"]]
         if stopped:
             print("  Round%s %s left no recorded answer (stopped, or its answer not recorded): "
-                  "not a round that found nothing, and not in the trend."
+                  "not a round that found nothing."
                   % ("s" if len(stopped) > 1 else "", ", ".join(stopped)))
         # Every answer refused, by why: a reason that keeps coming back is
         # how the person learns the answer's format is failing.
@@ -1130,8 +1110,8 @@ def main():
             if key == "fcost":
                 return review_cost([g for g, (c, _) in zip(groups, cells) if c != WAIT])
             return show(sum(known)) if known else ""
-        print(row(("", column("ftook", hours), column("fcost", dollars), len(found) + unthreaded, near_all,
-                   len(repeats), "", column("xtook", hours), column("xcost", dollars),
+        print(row(("", column("ftook", hours), column("fcost", dollars), total + unthreaded,
+                   near_all, len(repeats), "", column("xtook", hours), column("xcost", dollars),
                    nofix, fixed, opened), rnd="total", blk="" if blocks else None))
         print("")
     else:
@@ -1157,7 +1137,7 @@ def main():
     settled = [t for t in found
                if t["fate"] != "open" and t["round"] not in unsettled][-ACTED_ON_SAMPLE:]
     acted = (count(settled, "fixed") / float(len(settled))) if settled else None
-    if found or unthreaded:
+    if total or unthreaded:
         left = sum(1 for t in found if t["left_open"])
         line = "  Fixed %d of %d (%s) · without a fix %d (%s)" % (
             fixed, total, pct(fixed, total), nofix, pct(nofix, total))
@@ -1173,9 +1153,10 @@ def main():
         print(line)
 
     last = done[-1]["threads"] if done else []
-    said = verdict(per_round, acted, sum(1 for t in last if t["near_fix"]), len(last), opened)
-    print("")
-    print("  " + paint(said, verdict_colour(said) + ";" + BOLD))
+    said = verdict(acted, sum(1 for t in last if t["near_fix"]), len(last), opened)
+    if said:
+        print("")
+        print("  " + paint(said, verdict_colour(said) + ";" + BOLD))
     path = os.environ.get(BRIEF_ENV, "")
     # Zeros from threads nobody could read are not a status to send.
     if path and not threads_failed:
@@ -1194,20 +1175,17 @@ def main():
                 # "-" for "not stuck", so that a file left empty — threads
                 # nobody could read, a report that stopped early — tells
                 # sclaude to keep the verdict it had, not to clear it.
-                fh.write(said if stuck(per_round, said, feeding_streak(done)) else "-")
+                fh.write(said if stuck(len(done), feeding_streak(done)) else "-")
         except OSError:
             pass
     return 0
 
 
-# Whether the rounds have stopped converging, for sclaude to warn once and
-# name the keys that end the search (review_stuck_say in review_round.sh): the verdict
-# says so, over enough rounds that one bad round is not it. The report wrote
-# "Not converging" eighteen rounds in a row on one feature, and each was
-# followed by a fresh session, until the person stopped it by hand.
-#
-# Or that the fixes are feeding the review, FEEDING_ROUNDS rounds running:
-# rounds can converge in count and still go on for ever on their own fixes. On
+# Whether the rounds are going on for ever, for sclaude to warn once and name
+# the keys that end the search (review_stuck_say in review_round.sh), over
+# enough rounds that one bad round is not it: the fixes feeding the review,
+# FEEDING_ROUNDS rounds running. Rounds can shrink in count and still go on for
+# ever on their own fixes. On
 # one feature the report said so in four of the last six rounds, and four fresh
 # sessions followed, each fixing the comments the last one wrote, with nobody
 # told how to stop it. Running, because FEEDING itself reads the last round
@@ -1220,9 +1198,9 @@ STUCK_ROUNDS = 4
 FEEDING_ROUNDS = 2
 
 
-def stuck(per_round, said, feeding=0):
-    return len(per_round) >= STUCK_ROUNDS and (
-        said.startswith("Not converging") or feeding >= FEEDING_ROUNDS)
+def stuck(rounds, feeding):
+    """<rounds> finished, <feeding> of the last of them running fed by fixes."""
+    return rounds >= STUCK_ROUNDS and feeding >= FEEDING_ROUNDS
 
 
 def feeding_streak(rounds):

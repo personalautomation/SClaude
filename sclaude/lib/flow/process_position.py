@@ -231,6 +231,7 @@ BADGE_WHY = {
     ("code", "F"): "F — what the safety rules refused step 2's session is reviewed once it ends.",
     ("pr", "F"): "F — what the safety rules refused step 3's session is reviewed once it ends.",
     ("friction_left", "F"): "F — the friction reviews still owed run here, one after another, before the retrospective.",
+    ("retro_fix", "F"): "F — when sclaude's live checkout moved during a retrospective that ran to its end, the fresh run that follows runs the friction check again before this question.",
     ("review", "F"): "F — what the safety rules refused a review round is reviewed when the round goes to a fresh session.",
     ("retro", "W"): "W — the retrospective may fix what it found in sclaude, in the workshop; its approved plan is the yes.",
     ("f_review", "W"): "W — a bug in sclaude the review finds it fixes in the workshop; its approved plan is the yes.",

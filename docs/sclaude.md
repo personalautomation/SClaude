@@ -2323,7 +2323,8 @@ and the clean-up wait for it, the topic told (`friction_owed` puts the feature
 there on the map). It runs one review at a time until nothing is owed — a
 review resumed reads only its own batch, so the log can still be owed after it
 — in the fresh run after a retrospective (`done_fresh`) too, whose log is the
-retrospective's own and would go with the tree. It holds nothing it runs,
+retrospective's own and would go with the tree; the map draws that pass as the
+F on "Code changed by the retro?", the question it comes before. It holds nothing it runs,
 whatever `g` says (`FRICTION_NO_HOLD`), and leaves the box alone. Any friction
 review that reads the log reads what was held, and clears the held key. Not
 approved for the person: that plan is their yes to loosening a rule.

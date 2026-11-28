@@ -769,7 +769,10 @@ workshop_publish() {
     workshop_py get "$rec" asked >/dev/null 2>&1 && at=w_decide
   fi
   echo ""
-  info "${BOLD}sclaude's change from this tree's workshop${OFF}"
+  # For this terminal, above the commits it lists: the topic keeps no indented
+  # line, so the heading reached it alone, minutes before the publishing's own
+  # line said what went out.
+  say_here "${BOLD}sclaude's change from this tree's workshop${OFF}"
   # --no-pager: printed straight to the terminal, a list longer than the screen
   # would stop publishing in less until somebody pressed q.
   local mine left

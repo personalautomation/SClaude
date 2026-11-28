@@ -99,8 +99,13 @@ NODES = {
                       "always: every friction review still owed runs here", "F"),
     "retro": ("session", 32, "session", "7 · retro",
               "what was missed, what could work better, what sclaude could do better", "W"),
+    # Its F places the friction check a fresh run makes after the
+    # retrospective, for a replayed history. While such a review waits for the
+    # terminal, position still shows it on friction_left, "before the
+    # retrospective": kept so, the person's decision (2026-11-28) — rare, and
+    # only the word is off.
     "retro_fix": ("sclaude", 33, "gate", "Code changed by the retro?",
-                  "yes — its commits go out from step 3", ""),
+                  "yes — its commits go out from step 3", "F"),
     "cleanup": ("person", 34, "gate", "Clean up?",
                 "remove the worktree, branches, database; the record stays", ""),
     "end": ("sclaude", 35, "end", "Done", "", ""),
@@ -177,9 +182,9 @@ DETAILS = {
     "fix_prod": "Opens in step 4 with the failing run's log, told that production runs the previous release and that the local suite is the check that matters. The fix goes round again: local, merge, preview, production.",
     "epilogue": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended.",
     "done_cmd": "Called by the run itself once production is settled, with no question of its own; by hand from the menu or the terminal later, after a no to the clean-up. It checks the merge with GitHub, runs the retrospective, then asks once before removing anything.",
-    "friction_left": "Before the retrospective, always, as a safety net — with nothing owed it is a check that passes at once: every friction review still owed — one held while [g] ran step 4's rounds, one cut off and never finished, a log with entries no review read. The retrospective reads the logs and the clean-up removes them, so this is their last reader; with nobody at the terminal the retrospective and the clean-up wait for it.",
+    "friction_left": "Before the retrospective, always, as a safety net — with nothing owed it is a check that passes at once: every friction review still owed — one held while [g] ran step 4's rounds, one cut off and never finished, a log with entries no review read. The retrospective reads the logs and the clean-up removes them, so this is their last reader; with nobody at the terminal the retrospective and the clean-up wait for it. When sclaude's live checkout moved during a retrospective that ran to its end, the clean-up goes on in a fresh run of sclaude done, and this check runs again there — the retrospective's own entries among what it reads — before the question whether it changed the code.",
     "retro": "Reads the plan, the friction logs and the terminal's record of the cycle: what you may have missed, how the work could go better, what sclaude could do better. It may fix sclaude in its workshop.",
-    "retro_fix": "Commits the retrospective made on the feature's branch go out the way the feature's own did: back to step 3 for their pull request and the review. The issue opens again and goes from Done back to In progress on the board; after a squash merge the branch is moved onto main with only those commits.",
+    "retro_fix": "First, when sclaude's live checkout moved during a retrospective that ran to its end, the fresh run of sclaude done that follows runs the friction check again (F), the retrospective's own entries among what it reads. Commits the retrospective made on the feature's branch go out the way the feature's own did: back to step 3 for their pull request and the review. The issue opens again and goes from Done back to In progress on the board; after a squash merge the branch is moved onto main with only those commits.",
     "cleanup": "Shows what would go and asks once: Remove all of it? Yes appends the cycle's record to ~/.claude/sclaude/cycles.jsonl and removes the worktree, the branches and the feature's database; no keeps all of it.",
     "kept": "A no to the clean-up keeps everything: the worktree, the branches, the database. sclaude done <name> asks again.",
     "end": "The feature is done: merged, shipped or postponed, its outcome written into the issues. sclaude drop ends it here too, from any step: the worktree, the branches, the pull request and the issue (closed as not planned), each asked about.",

@@ -76,10 +76,14 @@ demo_refresh() {
   demo_findings "$wt" "$findings" "$before"
   if [[ "$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" == fresh:* ]]; then
     kept="$(demo_kept "$wt" "$before")"
+    # The topic heard "recording it again" above and keeps no indented line
+    # (the detail under a headline): its outcome goes there as a line of its own.
     if [[ -n "$kept" ]]; then
       info "  Not recorded again: $kept"
+      ask_feed say "🎬 The demo was not recorded again: $kept"
     else
       info "  Recorded again; the feature's demo page and the issue's demo comment show it."
+      ask_feed say "🎬 The demo was recorded again; the feature's demo page and the issue's demo comment show it."
     fi
   else
     warn "  the demo was not recorded again ($log); the issue keeps the earlier one"

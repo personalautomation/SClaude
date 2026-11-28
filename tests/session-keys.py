@@ -55,13 +55,19 @@ try:
     os.makedirs(tdir)
     session = "11111111-2222-3333-4444-555555555555"
 
-    def presented(text):
-        return {"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": text}}]}}
+    # A call and its answer share an id, as in a real transcript: the plan's
+    # call is named by its text.
+    def presented(text, beside=None):
+        calls = [{"type": "tool_use", "name": "ExitPlanMode", "id": "plan-" + text,
+                  "input": {"plan": text}}]
+        if beside:
+            calls.insert(0, {"type": "tool_use", "name": "Edit", "id": beside, "input": {}})
+        return {"type": "assistant", "message": {"content": calls}}
 
-    def answered(text):
+    def answered(text, to):
         return {"type": "user", "message": {"content": [
-            {"type": "tool_result", "content": text}]}}
+            {"type": "tool_result", "tool_use_id": to if to.startswith("edit") else "plan-" + to,
+             "content": text}]}}
 
     def capture(entries, gate, taken_at=None):
         with open(os.path.join(tdir, session + ".jsonl"), "w") as fh:
@@ -92,11 +98,11 @@ try:
     check("open-plan-taken-by-the-key", capture([presented("A")], True), (0, "A\n"))
     # The latest presented one is what is on screen.
     check("open-plan-latest", capture(
-        [presented("A"), answered("User has approved your plan."), presented("B")], True),
+        [presented("A"), answered("User has approved your plan.", "A"), presented("B")], True),
         (0, "B\n"))
     # Refused by the hook: answered, so nothing is on screen to take.
     check("refused-plan-not-taken", capture(
-        [presented("A"), answered("Error: the plan has no acceptance criteria")], True),
+        [presented("A"), answered("Error: the plan has no acceptance criteria", "A")], True),
         (1, None))
     # Interrupted as the key closed it: an answer written after the press, in
     # the same second as the call, does not count.
@@ -105,17 +111,48 @@ try:
 
     check("interrupted-after-the-press", capture(
         [at(presented("A"), "2026-11-02T12:00:07.100Z"),
-         at(answered("The user doesn't want to proceed with this tool use."),
+         at(answered("The user doesn't want to proceed with this tool use.", "A"),
             "2026-11-02T12:00:07.900Z")],
         True, taken_at=1793620807.8), (0, "A\n"))
     check("refused-before-the-press", capture(
         [at(presented("A"), "2026-11-02T12:00:07.100Z"),
-         at(answered("Error: no criteria"), "2026-11-02T12:00:07.200Z")],
+         at(answered("Error: no criteria", "A"), "2026-11-02T12:00:07.200Z")],
         True, taken_at=1793620807.8), (1, None))
 
     # Approved in the dialog: as before, with or without the gate.
     check("approved-plan", capture(
-        [presented("A"), answered("User has approved your plan.")], False), (0, "A\n"))
+        [presented("A"), answered("User has approved your plan.", "A")], False), (0, "A\n"))
+    # Put up in the same turn as another call, whose result comes first: the
+    # answer is the one to the plan's own call, however late it comes. Taken
+    # for the plan's, the other result left a later approval unseen.
+    check("approved-beside-another-call", capture(
+        [presented("A"), answered("User has approved your plan.", "A"),
+         presented("B", beside="edit-1"), answered("The file has been updated.", "edit-1"),
+         answered("User has approved your plan.", "B")], False), (0, "B\n"))
+    # An older call left without an answer (a session killed with the dialog
+    # open, resumed) is not what is on screen once a later plan went up.
+    check("old-open-plan-not-taken-over-refused", capture(
+        [presented("A"), presented("B"), answered("Error: no criteria", "B")], True),
+        (1, None))
+    check("old-open-plan-not-taken-over-approved", capture(
+        [presented("A"), presented("B"), answered("User has approved your plan.", "B")], True),
+        (0, "B\n"))
+    # Copies of what was sent to the model repeat answered calls, ids and
+    # all: not a plan put up again.
+    blob = dict(presented("A"), type="api-request-blob")
+    check("request-copy-not-a-new-call", capture(
+        [presented("A"), answered("User has approved your plan.", "A"), presented("B"),
+         answered("Error: no criteria", "B"), blob, presented("A")], True), (0, "A\n"))
+    check("request-copy-of-an-open-call", capture(
+        [presented("A"), presented("B"), dict(presented("A"), type="api-request-blob")], True),
+        (0, "B\n"))
+    check("subagent-call-not-taken", capture(
+        [presented("A"), dict(presented("B"), isSidechain=True)], True), (0, "A\n"))
+    check("request-copy-not-open", capture(
+        [presented("A"), answered("Error: no criteria", "A"), blob], True), (1, None))
+    check("open-beside-another-call", capture(
+        [presented("B", beside="edit-1"), answered("The file has been updated.", "edit-1")], True),
+        (0, "B\n"))
 
     # --- session_ctl_take ----------------------------------------------------
     def take(word):

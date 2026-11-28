@@ -332,9 +332,9 @@ rm -f "$(stop_file)"
     def plan_approved():
         return [{"type": "assistant", "timestamp": stamp(0),
                  "message": {"stop_reason": "tool_use",
-                             "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
+                             "content": [{"type": "tool_use", "name": "ExitPlanMode", "id": "p1", "input": {}}]}},
                 {"type": "user", "timestamp": stamp(0),
-                 "message": {"content": [{"type": "tool_result",
+                 "message": {"content": [{"type": "tool_result", "tool_use_id": "p1",
                                           "content": "User has approved your plan."}]}},
                 dict(turn_end("The plan is approved."), timestamp=stamp(0))]
 
@@ -493,9 +493,9 @@ echo "watcher=[$SESSION_WATCHER]"
         target = fake("--session-id %s" % session)
         watched(None, lambda: [{"type": "assistant", "timestamp": stamp(),
                         "message": {"stop_reason": "tool_use",
-                                    "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
+                                    "content": [{"type": "tool_use", "name": "ExitPlanMode", "id": "p1", "input": {}}]}},
                        {"type": "user", "timestamp": stamp(),
-                        "message": {"content": [{"type": "tool_result", "content": approval}]}},
+                        "message": {"content": [{"type": "tool_result", "tool_use_id": "p1", "content": approval}]}},
                        turn_end("The plan is approved.")],
                 until=(lambda: gone(target)) if closes else None,
                 args='"%s" "%s" "" "" plan' % (wt, session))
@@ -516,9 +516,9 @@ echo "watcher=[$SESSION_WATCHER]"
     watched(None, lambda: [
         {"type": "assistant", "timestamp": stamp(-60),
          "message": {"stop_reason": "tool_use",
-                     "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
+                     "content": [{"type": "tool_use", "name": "ExitPlanMode", "id": "p1", "input": {}}]}},
         {"type": "user", "timestamp": stamp(-59),
-         "message": {"content": [{"type": "tool_result", "content": "User has approved your plan."}]}},
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "p1", "content": "User has approved your plan."}]}},
         dict(turn_end("Approved earlier."), timestamp=stamp(-58))],
         args='"%s" "%s" "" "" plan' % (wt, session))
     check("stale-approval-ignored", target.poll(), None)
@@ -876,6 +876,33 @@ echo "watcher=[$SESSION_WATCHER]"
     check("context-none-when-empty",
           subprocess.run([sys.executable, END, "context", transcript],
                          capture_output=True, text=True).stdout, "")
+
+    # --- a plan put up beside another call -----------------------------------
+    # Approved, the person typed, and the plan went up again in the same turn
+    # as an edit, whose result is written first; the approval comes later. The
+    # answer is the one to the plan's own call: taken by order, the edit's
+    # result stood for it, and the second approval never closed the session.
+    def tool(*calls):
+        return {"type": "assistant", "timestamp": stamp(0),
+                "message": {"stop_reason": "tool_use", "content": [
+                    {"type": "tool_use", "name": name, "id": cid, "input": {}}
+                    for name, cid in calls]}}
+
+    def result(cid, text):
+        return {"type": "user", "timestamp": stamp(0),
+                "message": {"content": [{"type": "tool_result", "tool_use_id": cid,
+                                         "content": text}]}}
+
+    open(transcript, "w").close()
+    say(tool(("ExitPlanMode", "p1")), result("p1", "User has approved your plan."),
+        {"type": "user", "timestamp": stamp(0), "origin": {"kind": "human"},
+         "message": {"content": "one more thing"}},
+        tool(("Edit", "e1"), ("ExitPlanMode", "p2")), result("e1", "The file has been updated."),
+        result("p2", "User has approved your plan."),
+        dict(turn_end("The plan is approved."), timestamp=stamp(0)))
+    check("plan-beside-a-call-closes",
+          subprocess.run([sys.executable, END, "watch-plan", transcript, str(int(time.time()) - 60)],
+                         capture_output=True, text=True).stdout, "ended\n")
 
     # --- the status line leaves the share where sclaude reads it --------------
     sid = "statusline-test-%d" % os.getpid()

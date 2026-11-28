@@ -53,7 +53,7 @@ import sys
 wt, session = sys.argv[1], sys.argv[2]
 sys.path.insert(0, sys.argv[3])
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
-from presented_plan import plan_text
+from presented_plan import PlanCalls, plan_text
 from session_end import chain
 
 # The project's directory in ~/.claude/projects — the path with everything but
@@ -72,13 +72,10 @@ try:
 except OSError:
     sys.exit(1)
 
-# The approval is visible not in the call itself but in its result — in the next
-# tool_result block. So we go through the file in order: we remember a presented
-# call and accept it only when an approval arrives right after.
-#
-# There are two wordings of approval, and the second occurs exactly when the plan
-# is empty: "approved your plan" against "approved exiting plan mode". We catch
-# both by their common part, otherwise an approved step looks unclosed.
+# The approval is visible not in the call itself but in its result: the
+# tool_result answering that call's id (PlanCalls in presented_plan.py, which
+# also says why not simply the next result). We go through the file in order
+# and keep the last call approved.
 #
 # The plan may not be in the call at all. ExitPlanMode has stopped accepting it
 # as a parameter — it reads a file whose path it puts into planFilePath — so an
@@ -99,30 +96,23 @@ def written(entry):
 # Taken from sclaude's terminal: the seconds the session was closed at.
 taken_at = float(sys.argv[4]) if sys.argv[4] else None
 approved = None
-pending = None
+calls = PlanCalls()
 for line in lines:
     try:
         entry = json.loads(line)
     except ValueError:
         continue
+    if not isinstance(entry, dict):
+        continue
     if taken_at and written(entry) >= taken_at:
         break
-    content = (entry.get("message") or {}).get("content")
-    if not isinstance(content, list):
-        continue
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("name") == "ExitPlanMode" and block.get("type") == "tool_use":
-            pending = block.get("input") or {}
-        elif block.get("type") == "tool_result" and pending is not None:
-            if "has approved" in str(block.get("content")):
-                approved = pending
-            pending = None
+    for given, yes in calls.answers(entry):
+        if yes:
+            approved = given
 
 # Approved from sclaude's terminal: the call left open when it was closed.
-if taken_at is not None and pending is not None:
-    approved = pending
+if taken_at is not None and calls.last_open() is not None:
+    approved = calls.last_open()
 
 if approved is None:
     sys.exit(1)

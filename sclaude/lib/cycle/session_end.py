@@ -45,7 +45,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
-from presented_plan import plan_text  # noqa: E402
+from presented_plan import PlanCalls, plan_text  # noqa: E402
 
 COMMAND = re.compile(r"<command-name>\s*(/[^<\s]+)")
 SESSION_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
@@ -201,19 +201,12 @@ def watch_plan(path, after):
     what has happened since — where two processes read it twice. "none" while
     no approval has been given since `after`.
     """
-    pending, since, state = False, None, "none"
+    calls, since, state = PlanCalls(), None, "none"
     for entry in entries(path):
         moment = when(entry)
-        for block in (entry.get("message") or {}).get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use" and block.get("name") == "ExitPlanMode":
-                pending = True
-            elif block.get("type") == "tool_result" and pending:
-                if "has approved" in str(block.get("content")) \
-                        and moment is not None and moment >= after:
-                    since, state = moment, "working"
-                pending = False
+        for _, yes in calls.answers(entry):
+            if yes and moment is not None and moment >= after:
+                since, state = moment, "working"
         if since is None or moment is None or moment < since:
             continue
         if typed_by_a_person(entry):
@@ -301,20 +294,13 @@ def approved(path):
     Step 1 cannot write a marker — it runs in plan mode, and its hook refuses
     every write, through the shell too. The approval is its marker: the person
     has decided, and what is left is the report. Read the way capture_plan
-    reads it (plan.sh): an ExitPlanMode call, and a result after it that says
+    reads it (plan.sh): an ExitPlanMode call, and the result to that call that says
     the plan was approved.
     """
-    pending, moment = False, None
+    calls, moment = PlanCalls(), None
     for entry in entries(path):
-        for block in (entry.get("message") or {}).get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use" and block.get("name") == "ExitPlanMode":
-                pending = True
-            elif block.get("type") == "tool_result" and pending:
-                if "has approved" in str(block.get("content")):
-                    moment = when(entry)
-                pending = False
+        if any(yes for _, yes in calls.answers(entry)):
+            moment = when(entry)
     return moment
 
 

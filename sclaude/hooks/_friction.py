@@ -26,6 +26,19 @@
 import datetime
 import os
 
+# Whether this process is a call from Claude Code: None until the hook has
+# read its payload (heard()). Claude Code always names the event it runs a hook
+# for; a payload typed by hand — a review probing its fix — does not, and its
+# refusal is no step's friction, whatever tree or step it names.
+LIVE = None
+
+
+def heard(payload):
+    """Note whether the hook's payload came from Claude Code; a payload that
+    is not an object leaves it unknown, so a hook it breaks still logs."""
+    global LIVE
+    LIVE = bool(payload.get("hook_event_name")) if isinstance(payload, dict) else None
+
 
 def log_path(start=None):
     """The path to the log, or None when there is nowhere to write.
@@ -71,6 +84,11 @@ def note(step, source, subject, reason):
     # under --step friction) are not a step's friction: written here, they sat
     # in the log until the next step's review read them as that step's.
     if step == "friction":
+        return
+    # A payload typed by hand is a probe, not a step's call. Unknown (a hook
+    # that broke before reading its payload) still writes: a broken hook
+    # reaches the log.
+    if LIVE is False:
         return
     try:
         path = log_path()

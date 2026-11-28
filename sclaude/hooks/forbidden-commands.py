@@ -66,7 +66,7 @@ except Exception as _exc:  # noqa: BLE001
           'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
     sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
-from _friction import note  # noqa: E402
+from _friction import heard, note  # noqa: E402
 from _shell import (GIT_VALUED, REDIRECTION, SEPARATORS, call_form, closing_at, inner_command,  # noqa: E402
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
                     readable, scan, strip_wrappers,
@@ -1540,6 +1540,7 @@ except ValueError:
     # Parsing the input did not work out: we pass rather than ban at random.
     # The same choice as in no-code-in-planning.py, and for the same reason.
     sys.exit(0)
+heard(payload)
 
 if payload.get("tool_name") == "Bash":
     command = str((payload.get("tool_input") or {}).get("command", ""))

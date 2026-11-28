@@ -1187,6 +1187,10 @@ branch in the checkout, and named.
 The reviews' own refusals no longer reach the step's friction log
 (`_friction.py` skips `--step friction`): a retrospective's refused push sat
 there until the next step's review read it as that step's friction.
+Nor do hooks run by hand: a payload without the `hook_event_name` Claude
+Code always sends (`heard` in `_friction.py`) is a probe — a review checking
+its fix — and is refused as before but not logged; it had reached the log as
+a step's friction, with a step name of the probe's own.
 
 **The workshop opened by hand.** `sclaude workshop` (`improve/workbench.sh`),
 which the bot's 🛠 button runs in a tab on the laptop, belongs to no tree and

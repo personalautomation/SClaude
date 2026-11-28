@@ -58,8 +58,9 @@ with open(os.path.join(PRODUCT, ".sclaude", "config.json"), "w") as _fh:
 
 
 def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
-        cwd=None, root=None, extra=()):
-    """The hook's verdict in one word."""
+        cwd=None, root=None, extra=(), live=True):
+    """The hook's verdict in one word. `live` sends the event name Claude Code
+    always sends; without it the call reads as a probe typed by hand."""
     argv = [sys.executable, os.path.join(HOOKS, hook)]
     if step:
         argv += ["--step", step]
@@ -68,6 +69,8 @@ def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
         argv += ["--root", root or PRODUCT]
     payload = {"tool_name": tool,
                "tool_input": tool_input or {"command": command}}
+    if live:
+        payload["hook_event_name"] = "PreToolUse"
     if cwd:
         payload["cwd"] = cwd
     full = dict(os.environ)
@@ -1445,7 +1448,8 @@ def main():
                 os.makedirs(os.path.join(broken, "tree", ".sclaude", "local", "feature"))
                 out = subprocess.run([sys.executable, os.path.join(broken, "sclaude", "hooks", hook),
                                       "--step", "code"],
-                                     input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+                                     input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                                       "tool_input": {"command": "ls"}}),
                                      capture_output=True, text=True, timeout=20,
                                      env=dict(os.environ, CLAUDE_PROJECT_DIR=os.path.join(broken, "tree"))).stdout
                 # The breakage reaches the friction log, where a review sees it.
@@ -1490,6 +1494,20 @@ def main():
                 failures.append(("friction", "refusal from %s" % os.path.relpath(where, tree),
                                  "logged" if want else "not logged",
                                  "logged" if got else "not logged"))
+        # A payload without the event name Claude Code sends is a probe run
+        # by hand: refused all the same, and kept out of the log.
+        sub = os.path.join(tree, "sub")
+        for hook, step, probe in (("forbidden-commands.py", "review", "gh pr merge 1"),
+                                  ("no-code-in-planning.py", None, "rm -rf x")):
+            for live in (True, False):
+                if os.path.exists(log):
+                    os.remove(log)
+                got = run(hook, probe, step=step, cwd=sub, env={"CLAUDE_PROJECT_DIR": sub}, live=live)
+                logged = os.path.exists(log) and probe in open(log).read()
+                if got != DENY or logged != live:
+                    failures.append(("friction", "%s %s" % (hook, "live" if live else "probe by hand"),
+                                     "denied, %s" % ("logged" if live else "not logged"),
+                                     "%s, %s" % (got, "logged" if logged else "not logged")))
     finally:
         shutil.rmtree(nested, ignore_errors=True)
 

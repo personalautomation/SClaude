@@ -40,7 +40,7 @@ except Exception as _exc:  # noqa: BLE001
           'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
     sys.exit(0)
 _failsafe.install("planning guard (no-code-in-planning.py)")
-from _friction import note
+from _friction import heard, note
 from _shell import HEREDOC, readable, strip_heredocs, strip_wrappers, substitutions, tokenize
 
 REASON = (
@@ -918,6 +918,7 @@ try:
 except ValueError:
     # Parsing the input did not work out: we pass rather than ban at random.
     sys.exit(0)
+heard(payload)
 
 tool = payload.get("tool_name", "")
 tool_input = payload.get("tool_input") or {}

@@ -545,6 +545,9 @@ stub(issue(human, (6, reworded2)))
 word, details = extend("71", GROWN)
 check("extend-reworded-word", word, "extended")
 check("extend-reworded-details", details, ["AC3 added", "AC2 reads differently"])
+# New criteria in one line, a run of three or more as a range.
+check("id-list-range", acceptance.id_list(["AC20", "AC21", "AC22", "AC23"]), "AC20–AC23")
+check("id-list-mixed", acceptance.id_list(["AC3", "AC5", "AC6", "AC7", "AC9", "AC10"]), "AC3, AC5–AC7, AC9, AC10")
 check_true("extend-reworded-kept", "everyone but admins" in edited[-1][1])
 
 # An empty issue list is filled the way sync() fills it.

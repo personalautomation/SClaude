@@ -177,8 +177,8 @@ filed as an issue of its own. Once nothing is left open, one **polish round**
 runs before the step closes: `/simplify` over what changed since step 2's own
 `/simplify` — the review's fixes and anything else changed since — or over
 the whole pull request when that point is not known (with `simplify: on`);
-with nothing changed since, there is no polish round. Its push is reviewed like any; in the report its row's
-session reads `simplify`, and each place it changed counts as a finding found and fixed, in the row and the totals. The step closes when the review has
+with nothing changed since, there is no polish round. Its push is reviewed like any; in the report its
+session reads `simplify` — on a row of its own under the round when that round's findings were fixed first — and each place it changed counts as a finding found and fixed, in that row and the totals. The step closes when the review has
 nothing left open, the preview is deployed and its tests pass.
 A pull request too big for one review to read well — past 5,000 changed lines,
 generated files left out — is read in **review blocks**. As step 4 starts, a
@@ -249,7 +249,7 @@ the review's map names it; `seams.2` is the second round of the last pass,
 over the seams between the blocks. A `w` is a value not known yet: a run
 still going, findings no session has started on, a launch whose cost comes
 when it ends. When the
-report says the fixes are feeding the review two rounds running, its verdict is red, and the
+report says the fixes are feeding the review two rounds running — said only while something is open — its verdict is red, and the
 feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
 to a review session without a question: `s` (⏭ on the topic) is how the rounds
 end, `n` and `r` in sclaude's tab act at once. Leaving the session yourself

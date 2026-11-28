@@ -139,17 +139,22 @@ reword_acceptance() {
   # with it, and the phone's copy, cut in the middle, lost the wording itself.
   ask_forget
   echo ""
-  warn "  The plan words these acceptance criteria otherwise than issue #$ac_issue:"
+  # The phone gets the criteria by number, the terminal their wording too:
+  # the wording of a few criteria ran past what a message holds, and the
+  # phone's copy, cut in the middle, lost the question at its end.
+  local ids="" id
+  while IFS=$'\t' read -r id _; do ids+="${ids:+, }$id"; done <<<"$details"
+  warn "  The plan words ${ids} otherwise than issue #$ac_issue:"
   local cut
   while IFS=$'\t' read -r cid have want; do
     cut="$(reword_shared "$have" "$want")"
     if [[ "$cut" -gt 0 ]]; then
-      info "    $cid, in both: ${have:0:cut-1}…"
-      info "    $cid in the issue: …${have:cut}"
-      info "    $cid in the plan:  …${want:cut}"
+      reword_here "    $cid, in both: ${have:0:cut-1}…"
+      reword_here "    $cid in the issue: …${have:cut}"
+      reword_here "    $cid in the plan:  …${want:cut}"
     else
-      info "    $cid in the issue: $have"
-      info "    $cid in the plan:  $want"
+      reword_here "    $cid in the issue: $have"
+      reword_here "    $cid in the plan:  $want"
     fi
   done <<<"$details"
   info "  QA ticks the issue's wording — a criterion changed in the review and left there is ticked as it was."
@@ -174,4 +179,13 @@ reword_acceptance() {
     reworded) info "  Issue #$ac_issue now reads as the plan, those boxes empty again." ;;
     *)        warn "  Could not write issue #$ac_issue — edit those criteria in GitHub before QA." ;;
   esac
+}
+
+# A line of a criterion's wording, for this terminal alone: not kept for the
+# question nor said to the topic (info would do both), where the header's
+# numbers say which criteria the question is about.
+#
+#   reword_here <line>
+reword_here() {
+  echo "${DIM:-}$1${OFF:-}"
 }

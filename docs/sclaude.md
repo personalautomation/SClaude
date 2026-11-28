@@ -1318,7 +1318,10 @@ governs `supabase db push` allows it only on an environment the project does
 not protect, and only when `.env.local` and the CLI's link agree — silence is
 not permission. A push that names its own target is judged by it instead:
 a database URL (`--db-url`, or CLI 3's `--remote <url>`, with or without `=`)
-passes only when it is local, a project named by ref or branch (`--remote
+passes only when it is local — written out, since a variable or a
+substitution cannot be read: that refusal says to write a local address out
+and carry on rather than stop, and that a remote one is refused either way,
+so a variable holding one is not to be expanded — a project named by ref or branch (`--remote
 <ref>`) is refused, and
 `--local` passes; `migration up`, `migration down` and `db reset` that name a target are held
 to the same rules, and without one they work on the local stack. A push that names nothing is read as CLI 2 reads it, aimed
@@ -2468,9 +2471,11 @@ with the new findings and nothing else.
 ends on a verdict — the share acted on below its floor, the fixes feeding the
 review, nothing open — and on no trend of the findings per round: the person
 reads that off the table's column, and a rule for it (a moving average) said
-"climbing" over 1, 2, 1. When the fixes feed the review two rounds running,
-over four rounds or more (`stuck` and `feeding_streak` in
-`review_report.py`), the next fresh session is preceded by a warning in the feature's topic that names the keys
+"climbing" over 1, 2, 1. The fixes feeding the review are said only while
+something is open — a thread, or a pass still running: with neither there is
+no round left to stop, and no stuck verdict is written. When the fixes feed
+the review two rounds running, over four rounds or more (`stuck` and
+`feeding_streak` in `review_report.py`), the next fresh session is preceded by a warning in the feature's topic that names the keys
 ending the search — `s` while a review pass runs, ⏭ on the topic
 (`review_stuck_say`); the terminal has the verdict in red under the report and
 `[s]` on every status line of the review, and is not told again. Said,
@@ -2524,8 +2529,16 @@ the head the clean pass read (`polish_head`, `review_polish_owe`); the
 round that read it — the last one, if several did — is the polish round's
 (`polish_round`, in review_report.py and review_map.py alike, read by
 `polish_of` only once the polish was taken or while it is under way; none
-for a feature from before the record, nor for a polish owed and dropped). Its row names its session `simplify`, and
-its `fixed` counts the places its commits changed up to the next run's head
+for a feature from before the record, nor for a polish owed and dropped). Its row names its session `simplify`;
+when sessions before /simplify's fixed that round's own findings, /simplify's
+session gets a row of its own under the
+round's, which keeps its own sessions, time and cost (`polish_apart`) — known
+as /simplify's by being the first of the round's sessions begun after the
+moment the polish was owed (`polish_owed_at`, written beside `polish_head`);
+until it has begun, the round is an ordinary one, with no `simplify` label and
+no places; the brief
+sent to the topic still takes the round whole, its places in. The `simplify` row's
+`fixed` counts the places its commits changed up to the next run's head
 — each hunk, a deletion or a binary file too, the person's asks
 (`asked_commit`: a `feat` commit or a `Requirement:` trailer) left out
 (`own_places`). Each place counts as a finding found and fixed, like the

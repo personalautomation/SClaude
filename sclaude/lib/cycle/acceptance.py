@@ -583,7 +583,25 @@ def extend(number, plan_text, cwd=None):
     cid = issue_comments.comment_id(own)
     if cid is None or not issue_comments.edit(cid, new, cwd):
         return "refused", []
-    return "extended", ["%s added" % c for c, _ in added] + differ
+    return "extended", ["%s added" % id_list([c for c, _ in added])] + differ
+
+
+def id_list(cids):
+    """Criterion ids for one line: "AC20–AC28" for a run of three or more in
+    a row, the rest by comma — "AC3, AC5–AC8". One line, not one for each:
+    nine new criteria printed as nine lines said one thing nine times."""
+    nums = [int(c[2:]) if re.fullmatch(r"AC\d+", c) else None for c in cids]
+    out, i = [], 0
+    while i < len(cids):
+        j = i
+        while nums[i] is not None and j + 1 < len(cids) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        if j - i >= 2:
+            out.append("%s–%s" % (cids[i], cids[j]))
+        else:
+            out.extend(cids[i:j + 1])
+        i = j + 1
+    return ", ".join(out)
 
 
 def reword(number, plan_text, cwd=None, write=False):

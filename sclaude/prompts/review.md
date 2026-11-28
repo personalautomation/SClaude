@@ -147,6 +147,6 @@ Leave the marker out when something is left for me to decide — a red check you
 Once the comments are handled and the PR checks are green, tell me in that one message — in your own words, but cover all of it:
 
 - the work in this session is done — the pull request is ready to merge, and what's left open. If something didn't come together — a red check, a comment you disagree with — say exactly what's left rather than passing it off as ready;
-- without the marker, that I should now close Claude with `/exit`. With it, say nothing about the closing or what comes after: `sclaude` says both itself, every round.
+- without the marker, that I should now close Claude with `/exit`. With it, say nothing about the marker, the closing or what comes after: `sclaude` says all of it itself, every round.
 
 Then stop. Don't offer merge or deploy — I can't say yes anyway.

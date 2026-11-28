@@ -821,6 +821,9 @@ review_polish_owe() {
   # the review's report and map name it (polish_round in review_report.py
   # and review_map.py).
   state_set "$state" polish_head "$(git -C "$1" rev-parse HEAD 2>/dev/null)"
+  # And when: /simplify's session is the first of the round's begun after it,
+  # which the report tells apart from the round's own fixers (polish_apart).
+  state_set "$state" polish_owed_at "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
   state_set "$state" steps.review.session null
 }
 

@@ -169,8 +169,11 @@ try:
     # The polish round's changes are findings found and fixed like any: in its
     # row, in the totals and in the shares under the table — once its session
     # has ended; while none has, they are not counted yet.
-    saved = (review_report.polish_round, review_report.polish_places, review_report.fixers)
+    saved = (review_report.polish_round, review_report.polish_places, review_report.fixers,
+             review_report.feature_state)
     review_report.polish_round = lambda cwd, groups: 1
+    # Taken, with no time of the owe recorded: the round's one session is /simplify's.
+    review_report.feature_state = lambda cwd, _read=saved[3]: dict(_read(cwd), polished=True)
     review_report.polish_places = lambda cwd, groups, i: 5
 
     def polish_report():
@@ -190,7 +193,8 @@ try:
         check("polish-in-totals", (rows["total"][3], rows["total"][-2]), ("9", "7"))
         check_true("polish-in-shares", "Fixed 7 of 9 (78%)" in text)
     finally:
-        review_report.polish_round, review_report.polish_places, review_report.fixers = saved
+        (review_report.polish_round, review_report.polish_places, review_report.fixers,
+         review_report.feature_state) = saved
     # Findings no session has begun to fix: the fix waits, it is not zero.
     check("fix-waits-for-a-session", [l.split()[8:11] for l in out.splitlines() if l.startswith("  3 ")],
           [["w", "w", "w"]])

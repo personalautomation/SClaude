@@ -8,4 +8,6 @@ It covers everything the step asks for below, in the detail it asks for — this
 
 A heading with nothing under it is left out — threads to resolve on GitHub yourself, a proposal logged, a question for me. When nothing is left open and you departed from nothing, one line says both, plainly.
 
+With the marker written, the report says nothing of it — not that it is written, nor that the session closes or what comes next: `sclaude` prints both under your report, and a line of yours saying them again is read for nothing, every time.
+
 **A proposal keeps the session open.** Anything the report would put to me to decide — an idea, a change to the plan or to how we work, a question, or what the step below calls mine to decide — is asked with AskUserQuestion before you end, and so before any marker that closes the session (`.sclaude/local/feature/session-done`); the report then gives my answer. With no answer from me — the dialog dismissed — leave the marker out and say at the end of the report that the proposal waits for me and I close the session myself. Closed by `sclaude`, the session takes an unasked proposal with it: the printed report is read later, if at all, and there is no conversation left to answer it in. A rule for `CLAUDE.md` is not one of these: it goes to the friction log as a proposal and waits for the monthly review, and the session closes as usual.

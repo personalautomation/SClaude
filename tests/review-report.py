@@ -237,6 +237,28 @@ with tempfile.TemporaryDirectory() as wt:
         check("polish-round-none-due-left-past-step-4", review_report.polish_round(p, groups), None)
     finally:
         shutil.rmtree(p, ignore_errors=True)
+    # /simplify's session, the first begun on the polish round after the owe,
+    # gets a row of its own only when other sessions fixed the round too.
+    owed = review_report.parse("2026-10-14T12:00:00+00:00")
+    before = {"start": review_report.parse("2026-10-14T11:00:00+00:00")}
+    after_owe = {"start": review_report.parse("2026-10-14T12:05:00+00:00")}
+    later = {"start": review_report.parse("2026-10-14T15:00:00+00:00")}
+    apart = review_report.polish_apart
+    check("polish-apart-begun-after-the-owe", apart([[0], [0, 1], [1]], 1, [before, after_owe], owed),
+          ([[0], [0], [1]], 1, 1))
+    # Owed, /simplify not begun yet: an ordinary round, nothing of it /simplify's.
+    check("polish-none-before-its-session", apart([[0], [0, 1], [1]], 1, [before, before], owed),
+          ([[0], [0, 1], [1]], None, None))
+    # A session begun after /simplify's (step 4 reopened) is not taken for it.
+    check("polish-first-after-the-owe", apart([[0], [0, 1, 2]], 1, [before, after_owe, later], owed, True),
+          ([[0], [0, 2]], 1, 1))
+    check("polish-alone-is-the-rounds-whole", apart([[0], [1]], 1, [before, after_owe], owed), ([[0], [1]], 1, None))
+    # No time recorded: the last fixer, once the polish is taken; nothing before.
+    check("polish-unrecorded-taken", apart([[0], [0, 1]], 1, taken=True), ([[0], [0]], 1, 1))
+    check("polish-unrecorded-untaken", apart([[0], [0, 1]], 1), ([[0], [0, 1]], None, None))
+    check("polish-apart-none-without-polish", apart([[0, 1]], None, taken=True), ([[0, 1]], None, None))
+    # No session on the round yet: nothing of it is /simplify's.
+    check("polish-none-without-a-session", apart([[0], []], 1, [before], owed, True), ([[0], []], None, None))
     check("stuck-when-fixes-feed-it-two-rounds", review_report.stuck(5, 2), True)
     check("not-stuck-feeding-one-round", review_report.stuck(4, 1), False)
     check("not-stuck-feeding-too-few-rounds", review_report.stuck(3, 3), False)
@@ -579,6 +601,8 @@ v = review_report.verdict
 check("nothing-to-say", v(0.9, 0, 6, 6), "")
 check("nothing-open", v(0.9, 0, 1, 0), "Nothing is open.")
 check("feeding", v(0.9, 2, 3, 3), review_report.FEEDING)
+# A last round on earlier fixes, all fixed: nothing left to stop, so no warning to stop it.
+check("feeding-nothing-open", v(0.9, 1, 1, 0), "Nothing is open.")
 check("noise", "mostly asking for what nobody fixes" in v(0.3, 0, 1, 1), True)
 check("noise-colour", review_report.verdict_colour(v(0.3, 0, 1, 1)), review_report.YELLOW)
 check("feeding-colour", review_report.verdict_colour(v(0.9, 2, 3, 3)), review_report.RED)

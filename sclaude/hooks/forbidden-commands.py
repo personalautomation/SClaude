@@ -363,6 +363,16 @@ DB_URL_REASON = ("a database URL (--db-url or --remote <url>) points this at a d
                  "line rather than the one this tree is on, so the tree's environment "
                  "says nothing about where it lands; only a local database may be "
                  "named that way")
+# The same address as a variable or a substitution: the check cannot read it,
+# yet a local database named outright passes. Said so, with that way round —
+# a session that held the feature's own database in a variable, from the very
+# file sclaude wrote, stopped and handed the person a command it could have
+# run itself with the address written out.
+DB_URL_UNREAD_REASON = ("the database URL (--db-url or --remote <url>) is a variable or a "
+                        "substitution, which this check cannot read; a local database passes "
+                        "when its address is written out on the command line "
+                        "(postgresql://…@127.0.0.1:<port>/…); a remote one is refused "
+                        "either way, so do not expand a variable that holds one")
 REMOTE_REF_REASON = ("--remote <ref|branch> names a project on the command line "
                      "rather than the one this tree is on, so the tree's environment "
                      "says nothing about where it lands; use --remote with no value "
@@ -370,6 +380,12 @@ REMOTE_REF_REASON = ("--remote <ref|branch> names a project on the command line 
                      "named by its URL")
 LOCAL_DB = re.compile(r"^[a-z]+://[^@/]*@?(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(/|$)")
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def unread_value(value):
+    """Whether a value on the command line is a variable or a substitution
+    the shell fills in, rather than what it says."""
+    return "$" in value or "`" in value
 
 
 def local_db_url(url):
@@ -411,7 +427,7 @@ def remote_target(words):
     (--local), None (nothing named).
     """
     def target(value):
-        return ("url", value) if "://" in value or "$" in value or "`" in value \
+        return ("url", value) if "://" in value or unread_value(value) \
             else ("ref", value)
 
     found = None
@@ -484,7 +500,9 @@ def db_push_refuses(words, raw=None):
     if kind == "url":
         # A local database named outright is the one place the push goes,
         # whatever the tree is on.
-        return None if local_db_url(value) else DB_URL_REASON
+        if local_db_url(value):
+            return None
+        return DB_URL_UNREAD_REASON if unread_value(value) else DB_URL_REASON
     if kind == "ref":
         return REMOTE_REF_REASON
     if kind == "local":
@@ -755,7 +773,7 @@ UNPARSED_TAIL = "  Write it more plainly, as separate calls, and carry on."
 # command it had been handed. collect-denials.py knows it as the hook's own
 # (OWN_MARKERS).
 REDIRECT_TAIL = "  Do that instead, and carry on with the step's work."
-REDIRECTS = (WORKDIR_REASON, OWN_RESET_REASON)
+REDIRECTS = (WORKDIR_REASON, OWN_RESET_REASON, DB_URL_UNREAD_REASON)
 
 
 def tail_for(reason):

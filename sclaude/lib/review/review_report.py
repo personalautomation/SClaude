@@ -803,6 +803,34 @@ def fixers(groups, people):
     return out
 
 
+def polish_apart(who, polish, people=None, owed=None, taken=False):
+    """/simplify's place among the fixers of the polish round <polish>:
+    (who, polish, k). Its session is the first of the round's fixers begun at
+    or after <owed>, when the polish was owed (review_polish_owe opens a fresh
+    one); with no such time recorded, the last of them once the polish is
+    <taken>. Not begun yet, the round is an ordinary one: polish comes back
+    None, and nothing of it is /simplify's — no label, no places. Alone on the
+    round, its fix is /simplify's whole: k is None. With sessions besides it,
+    those keep the round's row and k is /simplify's, taken out of <who> for a
+    row of its own."""
+    if polish is None or not who[polish]:
+        return who, None, None
+    mine = who[polish]
+    if owed:
+        k = next((k for k in mine if people and people[k]["start"] and people[k]["start"] >= owed), None)
+        if k is None:
+            return who, None, None
+    elif taken:
+        k = mine[-1]
+    else:
+        return who, None, None
+    if mine == [k]:
+        return who, polish, None
+    who = [list(m) for m in who]
+    who[polish] = [x for x in mine if x != k]
+    return who, polish, k
+
+
 def fix_window(i, groups, people, mine):
     """How long the fix of run <i> took, in seconds: from the first launch of
     its sessions <mine> in its window to the next run, or to the last of them
@@ -844,7 +872,10 @@ def verdict(acted, near_last, last_found, open_now):
     if acted is not None and acted < ACTED_ON_FLOOR:
         words.append("Under %d%% of the latest findings were fixed: the review is mostly "
                      "asking for what nobody fixes." % (ACTED_ON_FLOOR * 100))
-    if last_found and near_last * 2 >= last_found:
+    # Not once nothing is open — no thread, no pass still running: the warning
+    # is there to stop the rounds ([s], the topic's button), and then there
+    # are none left to stop.
+    if last_found and near_last * 2 >= last_found and open_now != 0:
         words.append(FEEDING)
     if open_now == 0:
         words.append("Nothing is open.")
@@ -973,6 +1004,9 @@ def main():
     total = len(found)
     unthreaded = sum(g.get("unthreaded", 0) for g in groups)
     fixed, nofix, opened = count(found, "fixed"), count(found, "no fix"), count(found, "open")
+    # A review pass still going: open as a thread is, for the verdict and the
+    # row that says where the review stands.
+    running = any(g["running"] for g in groups)
     near_all = sum(1 for t in found if t["near_fix"])
     repeats = [t for t in found if t["repeat"]]
     # A round still running has not said all it will, and one with no
@@ -997,6 +1031,16 @@ def main():
         # column, and each place it changed counted as a finding found and
         # fixed, in its row and in the totals.
         polish = polish_round(cwd, groups)
+        fstate = feature_state(cwd)
+        # /simplify's session is the first begun on the polish round after the
+        # polish was owed (review_polish_owe). When the round had findings of its own, fixed
+        # by sessions before it, those keep the round's row, and /simplify's
+        # gets a row of its own under it: put together, the round's fix read
+        # as /simplify's, its findings counted with the places changed.
+        who, polish, polish_k = polish_apart(who, polish, people, parse(fstate.get("polish_owed_at")),
+                                             bool(fstate.get("polished")))
+        polish_cost = None
+        polish_pending = False
         # The fixing cost of each run, summed over the sessions that answered
         # it (fixes_per_round); a session still going has not given the cost
         # of the launch running now, which goes on the run its start falls
@@ -1005,18 +1049,33 @@ def main():
         pending = set()
         for k, s in enumerate(people):
             mine = [i for i, m in enumerate(who) if k in m]
+            if k == polish_k:
+                mine = sorted(mine + [polish])
             for i, c in enumerate(fixes_per_round(s, groups, mine)):
-                if c is not None:
+                if c is None:
+                    continue
+                if k == polish_k and i == polish:
+                    polish_cost = c
+                else:
                     fix_cost[i] = round((fix_cost[i] or 0) + c, 4)
             # What the launch going now spends waits for its end: the run it
             # answers is priced then.
             now_on = s.get("resumed") or s["start"]
             if s["going"] and now_on:
-                pending.update(i for i in range(len(groups)) if window(i, groups, now_on))
+                on = {i for i in range(len(groups)) if window(i, groups, now_on)}
+                if k == polish_k and polish in on:
+                    polish_pending = True
+                    on.discard(polish)
+                pending.update(on)
         busy = pending | {i for i, m in enumerate(who) if not m and groups[i]["threads"]}
+        # The polish round in its two shapes: /simplify's the whole round's
+        # fix, or a row of its own under the round (apart).
+        whole = polish if polish_k is None else None
+        apart = polish if polish_k is not None else None
         # Counted once /simplify's session has ended: while it goes on, the
         # places it has changed so far are a figure that moves under the reader.
-        if polish is not None and who[polish] and polish not in pending:
+        polish_busy = polish_pending if apart is not None else polish in pending
+        if polish is not None and not polish_busy:
             polished = polish_places(cwd, groups, polish) or 0
         # Found and fixed like the review's own, in the totals and the shares.
         total += polished
@@ -1033,14 +1092,20 @@ def main():
             ts = g["threads"]
             # Found is every finding, a thread or not: one posted as a comment
             # (unthreaded) was found as much as one on a line.
-            extra = polished if i == polish else 0
+            # /simplify's places, on the polish round: in the brief always, in
+            # the round's own row only when /simplify has no row of its own.
+            add = polished if i == polish else 0
+            extra = add if i == whole else 0
             counts = (len(ts) + g.get("unthreaded", 0) + extra, sum(1 for t in ts if t["near_fix"]),
                       sum(1 for t in ts if t["repeat"]))
             # Declined is the fix's decision, as it reads the findings.
             result = (count(ts, "no fix"), count(ts, "fixed") + extra, count(ts, "open"))
             # A stopped round is no finished one for the phone's brief either:
             # its zeros would say "found nothing" there too (newest).
-            columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, counts + result)),
+            # The phone's brief takes the round whole, /simplify's places with
+            # it, as the totals do: its row of its own is the terminal's.
+            told = (len(ts) + g.get("unthreaded", 0) + add,) + counts[1:] + (result[0], count(ts, "fixed") + add, result[2])
+            columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, told)),
                             g["running"] or g.get("stopped")))
             if g["running"]:
                 ftook = fcost = WAIT
@@ -1072,21 +1137,35 @@ def main():
             # thread stands now.
             if session == WAIT or i in pending:
                 result = (WAIT,) * 3
-            elif i == polish:
+            elif i == whole:
                 session = "simplify"
             # A run still going has not said what it found: what it posted so
             # far, or nothing yet, read as its count — zeros as "found
             # nothing". The total counts every thread there is.
             shown = (WAIT,) * 3 if g["running"] else counts
-            table.append((g["at"].astimezone().strftime("%m-%d %H:%M") if g["at"] else "",
-                          ftook, fcost) + shown + (session, xtook, xcost) + result)
+            table.append((str(i + 1), i, (g["at"].astimezone().strftime("%m-%d %H:%M") if g["at"] else "",
+                          ftook, fcost) + shown + (session, xtook, xcost) + result))
+            if i == apart:
+                # /simplify's own row: no review ran for it, the places it
+                # changed found and fixed alike, its own time and cost.
+                took = fix_window(i, groups, people, [polish_k])
+                ptook = hours(took) if took else ""
+                pcost = WAIT if polish_pending else dollars(polish_cost) if polish_cost is not None else ""
+                totals["xtook"].append((ptook, took))
+                totals["xcost"].append((pcost, polish_cost))
+                table.append(("", i, ("", "", "") + (WAIT if polish_pending else polished, 0, 0)
+                              + ("simplify", ptook, pcost)
+                              + ((WAIT,) * 3 if polish_pending else (0, polished, 0))))
         # The last round is yellow while anything is open: it is where the
         # review stands, and review_close_gate says no more of it.
-        last = len(table) - 1 if opened else None
-        for i, cells in enumerate(table):
-            blk = blocks[i] if blocks else None
-            print(row(cells, base=YELLOW + ";" + BOLD, rnd=str(i + 1), blk=blk) if i == last
-                  else row(cells, rnd=str(i + 1), blk=blk))
+        # The last round's row, not /simplify's under it; a pass still running
+        # is something open too, as the verdict reads it.
+        last = max(n for n, (rnd, _, _) in enumerate(table) if rnd) if opened or running else None
+        for n, (rnd, i, cells) in enumerate(table):
+            # The block column marks a round, not /simplify's row under it.
+            blk = (blocks[i] if rnd else "") if blocks else None
+            print(row(cells, base=YELLOW + ";" + BOLD, rnd=rnd, blk=blk) if n == last
+                  else row(cells, rnd=rnd, blk=blk))
         stopped = [str(i + 1) for i, g in enumerate(groups) if g.get("stopped") and not g["threads"]]
         if stopped:
             print("  Round%s %s left no recorded answer (stopped, or its answer not recorded): "
@@ -1148,12 +1227,13 @@ def main():
             line += " · %d more posted as a comment, outside these shares" % unthreaded
         if acted is not None:
             line += " · acted on %d%% of the last %d" % (round(acted * 100), len(settled))
-        if any(g["running"] for g in groups):
+        if running:
             line += " · one review run still running"
         print(line)
 
     last = done[-1]["threads"] if done else []
-    said = verdict(acted, sum(1 for t in last if t["near_fix"]), len(last), opened)
+    # A pass still running is something open: the warning is there to stop it.
+    said = verdict(acted, sum(1 for t in last if t["near_fix"]), len(last), opened or int(running))
     if said:
         print("")
         print("  " + paint(said, verdict_colour(said) + ";" + BOLD))
@@ -1162,7 +1242,7 @@ def main():
     if path and not threads_failed:
         try:
             with open(path, "w") as fh:
-                fh.write(brief(pr, newest(columns), said, any(g["running"] for g in groups),
+                fh.write(brief(pr, newest(columns), said, running,
                                  any(g.get("stopped") for g in groups)))
         except OSError:
             pass
@@ -1175,7 +1255,8 @@ def main():
                 # "-" for "not stuck", so that a file left empty — threads
                 # nobody could read, a report that stopped early — tells
                 # sclaude to keep the verdict it had, not to clear it.
-                fh.write(said if stuck(len(done), feeding_streak(done)) else "-")
+                # Nor with nothing open and no pass running: no round left to stop.
+                fh.write(said if (opened or running) and stuck(len(done), feeding_streak(done)) else "-")
         except OSError:
             pass
     return 0

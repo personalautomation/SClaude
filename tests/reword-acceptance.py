@@ -34,7 +34,7 @@ def function(source, name):
 
 with open(os.path.join(LIB, "cycle", "acceptance.sh")) as fh:
     SOURCE = fh.read()
-BODY = function(SOURCE, "reword_shared") + function(SOURCE, "reword_acceptance")
+BODY = function(SOURCE, "reword_shared") + function(SOURCE, "reword_here") + function(SOURCE, "reword_acceptance")
 EXTEND = function(SOURCE, "extend_acceptance")
 with open(os.path.join(LIB, "core", "ui.sh")) as fh:
     UI = fh.read()
@@ -75,7 +75,7 @@ try:
         with open(os.path.join(lib, "differs"), "w") as fh:
             fh.write(differs)
         script = ('source "%s/core/state.sh"\nLIB="%s"\nBOLD=""; OFF=""\n'
-                  'info() { printf "%%s\\n" "$*"; }\nwarn() { printf "%%s\\n" "$*"; }\n'
+                  'info() { printf "INFO %%s\\n" "$*"; }\nwarn() { printf "WARN %%s\\n" "$*"; }\n'
                   'ask_forget() { echo FORGOT; }\n'
                   'ask() { echo ASKED; printf -v "$2" "%%s" "%s"; }\n%s\n%s\n'
                   'reword_acceptance "%s"\n') % (os.path.abspath(LIB), lib, answer,
@@ -118,6 +118,12 @@ try:
           [l.strip() for l in lines if "AC5 in the" in l],
           ["AC5 in the issue: …and the link stays last.",
            "AC5 in the plan:  …line by line, and the link stays last."])
+    # The phone hears the header, which names the criteria; their wording is
+    # for the terminal alone (reword_here), not through info or warn.
+    check("the header names the criteria by number",
+          [l for l in lines if "otherwise than issue" in l], ["WARN   The plan words AC5 otherwise than issue #7:"])
+    check("the wording is not said to the topic",
+          [l for l in lines if l.startswith(("INFO", "WARN")) and "AC5" in l and " in the " in l], [])
     check("a short shared start is not split",
           "in both" in run("differs\nAC6\tFrom two.\tFrom three.\n", "n"), False)
 

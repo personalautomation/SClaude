@@ -896,9 +896,11 @@ def settled(t):
 def polish_round(state, rounds):
     """Mark the round whose fixing was step 4's polish round (/simplify): the
     last one that read the head sclaude recorded when it owed the polish
-    (`polish_head`, review_polish_owe) — as the review's report names it
-    (review_report.py's polish_round, polish_of: only once taken, or under
-    way at step 4); none with no record. Written as `polish` on that round."""
+    (`polish_head`, review_polish_owe) — the round review_report.py's
+    polish_round names (polish_of: only once taken, or under way at step 4);
+    none with no record. Written as `polish` on that round. The report also
+    waits for /simplify's session to begin before it labels the round
+    (polish_apart); the map marks it from the owe."""
     i = review_report.polish_index(review_report.polish_of(state), rounds)
     if i is not None:
         rounds[i]["polish"] = True

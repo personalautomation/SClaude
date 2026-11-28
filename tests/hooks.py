@@ -1376,7 +1376,9 @@ def main():
     # to the person: ended with "stop, the next move is theirs" it would have
     # a session wait on a person for a command it had just been handed.
     own_stack = "/tmp/feature-x/.sclaude/local/feature/supabase"
-    for command in ("supabase db reset", "supabase db reset --workdir /elsewhere"):
+    # A database URL in a variable: the address written out is the way round.
+    for command in ("supabase db reset", "supabase db reset --workdir /elsewhere",
+                    'npx --yes supabase migration up --db-url "$POSTGRES_URL_NON_POOLING"'):
         said = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
                                "--step", "review", "--root", PRODUCT],
                               input=json.dumps({"tool_name": "Bash",
